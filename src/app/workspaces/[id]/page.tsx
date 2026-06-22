@@ -130,44 +130,69 @@ function relativeWord(today: string, target: string): string {
   return `in ${d} days`;
 }
 
+/** Seconds-of-day -> "9:02 AM". */
+function formatClock(totalSeconds: number): string {
+  const h24 = Math.floor(totalSeconds / 3600) % 24;
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const period = h24 >= 12 ? "PM" : "AM";
+  const hr = h24 % 12 === 0 ? 12 : h24 % 12;
+  return `${hr}:${String(m).padStart(2, "0")} ${period}`;
+}
+
 type Schedule = { label: string; tone: BadgeTone; note?: string };
 
 /**
- * Describe when a contact's next call will happen, mirroring the engine's
- * rules: terminal/attempt-capped → done; otherwise the call lands on its next
- * eligible date at the agent's daily run time (Eastern), which is when dialing
- * begins for that day. Eligible-now contacts map to today's run if it hasn't
- * happened yet, else tomorrow's.
+ * Project each contact's next-call slot. Mirrors the engine: terminal /
+ * attempt-capped contacts are done; everyone else lands on their next eligible
+ * date at the agent's run time, dialed in sequence `dripSeconds` apart. So a
+ * contact's projected time ≈ run time + (its position that day × drip).
+ * Positions are a best-effort projection — the true order is fixed at poll
+ * time — but the first contact each day is accurate to the run time.
  */
-function describeNextCall(
-  c: ContactRow,
+function buildSchedules(
+  contacts: ContactRow[],
   today: string,
   nowHHMM: string,
   runAt: string,
+  dripSeconds: number,
   maxAttempts: number | null
-): Schedule {
-  if (c.is_terminal) {
-    return {
-      label: "Completed",
-      tone: "slate",
-      note: c.terminal_outcome ? c.terminal_outcome.replace(/_/g, " ") : undefined,
-    };
+): Map<string, Schedule> {
+  const [rh, rm] = runAt.split(":").map(Number);
+  const runStartSec = (rh || 0) * 3600 + (rm || 0) * 60;
+  const perDay: Record<string, number> = {};
+  const map = new Map<string, Schedule>();
+
+  for (const c of contacts) {
+    if (c.is_terminal) {
+      map.set(c.id, {
+        label: "Completed",
+        tone: "slate",
+        note: c.terminal_outcome ? c.terminal_outcome.replace(/_/g, " ") : undefined,
+      });
+      continue;
+    }
+    if (maxAttempts != null && c.attempt_count >= maxAttempts) {
+      map.set(c.id, { label: "Finished", tone: "slate", note: "max attempts reached" });
+      continue;
+    }
+    const next = c.next_eligible_on;
+    const runDate =
+      !next || next <= today
+        ? nowHHMM < runAt
+          ? today
+          : addDaysIso(today, 1)
+        : next;
+    const pos = perDay[runDate] ?? 0;
+    perDay[runDate] = pos + 1;
+    const projectedSec = runStartSec + pos * dripSeconds;
+    const rel = relativeWord(today, runDate);
+    map.set(c.id, {
+      label: `${formatDate(runDate)} · ${formatClock(projectedSec)} ET`,
+      tone: runDate === today ? "green" : "blue",
+      note: pos === 0 ? `${rel} · first in line` : `${rel} · ~#${pos + 1} in line`,
+    });
   }
-  if (maxAttempts != null && c.attempt_count >= maxAttempts) {
-    return { label: "Finished", tone: "slate", note: "max attempts reached" };
-  }
-  const next = c.next_eligible_on;
-  const runDate =
-    !next || next <= today
-      ? nowHHMM < runAt
-        ? today
-        : addDaysIso(today, 1)
-      : next;
-  return {
-    label: `${formatDate(runDate)} · ${formatRunTime(runAt)} ET`,
-    tone: runDate === today ? "green" : "blue",
-    note: relativeWord(today, runDate),
-  };
+  return map;
 }
 
 export default function WorkspaceDetailPage({
@@ -215,6 +240,17 @@ export default function WorkspaceDetailPage({
       if (!r) return min;
       return min === null || r < min ? r : min;
     }, null) ?? "09:00";
+  const dripSeconds = agents[0]?.agent_call_configs[0]?.drip_seconds ?? 60;
+  // Projected schedule for every contact (positions based on the full list,
+  // not the search filter), keyed by contact id.
+  const schedules = buildSchedules(
+    contacts,
+    today,
+    nowEt,
+    runAt,
+    dripSeconds,
+    maxAttempts
+  );
   const q = query.trim().toLowerCase();
   const filteredContacts = q
     ? contacts.filter(
@@ -317,7 +353,7 @@ export default function WorkspaceDetailPage({
       <div className="mb-10">
         <SectionHeader
           title="Call schedule"
-          description={`When each enrolled contact is next set to dial. Calls begin at the ${formatRunTime(runAt)} ET daily run and are placed in sequence (~${agents[0]?.agent_call_configs[0]?.drip_seconds ?? 60}s apart), only between 9am–7pm ET.`}
+          description={`When each enrolled contact is next set to dial. Calls begin at the ${formatRunTime(runAt)} ET daily run and are placed in sequence (~${dripSeconds}s apart), only between 9am–7pm ET. Times are projected from queue position.`}
           action={
             <div className="relative">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-400" />
@@ -367,7 +403,10 @@ export default function WorkspaceDetailPage({
                 </thead>
                 <tbody className="divide-y divide-ink-100">
                   {filteredContacts.map((c) => {
-                    const s = describeNextCall(c, today, nowEt, runAt, maxAttempts);
+                    const s = schedules.get(c.id) ?? {
+                      label: "—",
+                      tone: "slate" as BadgeTone,
+                    };
                     return (
                       <tr
                         key={c.id}
