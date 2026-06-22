@@ -43,6 +43,8 @@ type Detail = {
     agent_call_configs: {
       max_calls_per_day: number;
       max_attempts_per_contact: number;
+      daily_run_at: string;
+      drip_seconds: number;
     }[];
     agent_task_configs: { enabled: boolean }[];
   }[];
@@ -96,16 +98,52 @@ function daysBetween(fromIso: string, toIso: string): number {
   return Math.round((b - a) / 86_400_000);
 }
 
+/** Current HH:MM (24h) in a timezone, for comparing against the run time. */
+function nowHHMMInTz(timezone: string): string {
+  return new Intl.DateTimeFormat("en-GB", {
+    timeZone: timezone,
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(new Date());
+}
+
+/** "09:00" -> "9:00 AM". */
+function formatRunTime(hhmm: string): string {
+  const [h, m] = hhmm.split(":").map(Number);
+  const period = h >= 12 ? "PM" : "AM";
+  const hr = h % 12 === 0 ? 12 : h % 12;
+  return `${hr}:${String(m ?? 0).padStart(2, "0")} ${period}`;
+}
+
+/** Add whole days to a YYYY-MM-DD string. */
+function addDaysIso(iso: string, n: number): string {
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+
+function relativeWord(today: string, target: string): string {
+  const d = daysBetween(today, target);
+  if (d <= 0) return "today";
+  if (d === 1) return "tomorrow";
+  return `in ${d} days`;
+}
+
 type Schedule = { label: string; tone: BadgeTone; note?: string };
 
 /**
  * Describe when a contact's next call will happen, mirroring the engine's
- * eligibility rules (terminal → done, attempt cap → done, next_eligible_on in
- * the future → that date, otherwise eligible at the next 9am ET poll).
+ * rules: terminal/attempt-capped → done; otherwise the call lands on its next
+ * eligible date at the agent's daily run time (Eastern), which is when dialing
+ * begins for that day. Eligible-now contacts map to today's run if it hasn't
+ * happened yet, else tomorrow's.
  */
 function describeNextCall(
   c: ContactRow,
   today: string,
+  nowHHMM: string,
+  runAt: string,
   maxAttempts: number | null
 ): Schedule {
   if (c.is_terminal) {
@@ -119,12 +157,17 @@ function describeNextCall(
     return { label: "Finished", tone: "slate", note: "max attempts reached" };
   }
   const next = c.next_eligible_on;
-  if (!next || next <= today) {
-    return { label: "Eligible now", tone: "green", note: "dials at next 9am ET run" };
-  }
-  const d = daysBetween(today, next);
-  const note = d === 1 ? "tomorrow" : `in ${d} days`;
-  return { label: formatDate(next), tone: "blue", note };
+  const runDate =
+    !next || next <= today
+      ? nowHHMM < runAt
+        ? today
+        : addDaysIso(today, 1)
+      : next;
+  return {
+    label: `${formatDate(runDate)} · ${formatRunTime(runAt)} ET`,
+    tone: runDate === today ? "green" : "blue",
+    note: relativeWord(today, runDate),
+  };
 }
 
 export default function WorkspaceDetailPage({
@@ -159,11 +202,19 @@ export default function WorkspaceDetailPage({
   const { workspace, agents, contactCount, contacts, outcomeTags } = data;
 
   const today = todayInTz(workspace.timezone);
+  const nowEt = nowHHMMInTz(workspace.timezone);
   const maxAttempts =
     agents.reduce(
       (m, a) => Math.max(m, a.agent_call_configs[0]?.max_attempts_per_contact ?? 0),
       0
     ) || null;
+  // Earliest daily run time across the workspace's agents (when dialing starts).
+  const runAt =
+    agents.reduce<string | null>((min, a) => {
+      const r = a.agent_call_configs[0]?.daily_run_at;
+      if (!r) return min;
+      return min === null || r < min ? r : min;
+    }, null) ?? "09:00";
   const q = query.trim().toLowerCase();
   const filteredContacts = q
     ? contacts.filter(
@@ -266,7 +317,7 @@ export default function WorkspaceDetailPage({
       <div className="mb-10">
         <SectionHeader
           title="Call schedule"
-          description="When each enrolled contact is next set to dial. Calls only place between 9am–7pm ET, starting at the daily 9am run and spaced out from there."
+          description={`When each enrolled contact is next set to dial. Calls begin at the ${formatRunTime(runAt)} ET daily run and are placed in sequence (~${agents[0]?.agent_call_configs[0]?.drip_seconds ?? 60}s apart), only between 9am–7pm ET.`}
           action={
             <div className="relative">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-400" />
@@ -316,7 +367,7 @@ export default function WorkspaceDetailPage({
                 </thead>
                 <tbody className="divide-y divide-ink-100">
                   {filteredContacts.map((c) => {
-                    const s = describeNextCall(c, today, maxAttempts);
+                    const s = describeNextCall(c, today, nowEt, runAt, maxAttempts);
                     return (
                       <tr
                         key={c.id}
