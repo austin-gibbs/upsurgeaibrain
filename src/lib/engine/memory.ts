@@ -66,6 +66,17 @@ export async function updateMemoryAfterCall(
     outcome: params.outcome,
   });
 
+  // Durable structured facts. Unlike `summary` (a rolling, intentionally lossy
+  // re-compression), facts are MERGED forward: a value learned on call 1 is
+  // retained across every later call unless a newer call updates it. This is
+  // what lets the agent remember concrete details over a long nurture.
+  const newFacts = await extractFacts({
+    priorFacts: priorMemory?.facts ?? {},
+    transcript: params.transcript,
+    callSummary: params.summary,
+    outcome: params.outcome,
+  });
+
   const callCount = (priorMemory?.call_count ?? 0) + 1;
 
   await supabase
@@ -76,7 +87,7 @@ export async function updateMemoryAfterCall(
         agent_id: params.agentId,
         contact_id: params.contactId,
         summary: newSummary,
-        facts: priorMemory?.facts ?? {},
+        facts: newFacts,
         objective_state: priorMemory?.objective_state ?? {},
         call_count: callCount,
         last_call_id: params.callId,
@@ -145,4 +156,135 @@ async function llmSummarize(input: SummarizeInput): Promise<string> {
   if (!res.ok) throw new Error(`LLM summarize ${res.status}`);
   const data = (await res.json()) as any;
   return (data.content?.[0]?.text ?? "").trim();
+}
+
+// =====================================================================
+// Durable fact extraction.
+//
+// The summary is a rolling, lossy note. Facts are the opposite: a fixed
+// schema of concrete details that, once learned, persist across all later
+// calls. Each call we ask the LLM for an updated reading of these fields,
+// then MERGE it over the prior facts so a field is only ever overwritten
+// by a newer non-empty value — never wiped because a later call didn't
+// happen to mention it.
+// =====================================================================
+
+/** The structured fields the agent tries to keep current for each contact. */
+export const FACT_KEYS = [
+  "probate_status",
+  "executor_status",
+  "motivation",
+  "timeline",
+  "property_condition",
+  "repairs_needed",
+  "occupancy_status",
+  "realtor_involved",
+  "appointment_status",
+  "email",
+  "best_phone",
+  "best_call_window",
+  "emotional_tone",
+  "important_family_details",
+] as const;
+
+interface ExtractFactsInput {
+  priorFacts: Record<string, unknown>;
+  transcript: string | null;
+  callSummary: string | null;
+  outcome: string;
+}
+
+async function extractFacts(
+  input: ExtractFactsInput
+): Promise<Record<string, unknown>> {
+  const prior = input.priorFacts ?? {};
+  // Without an LLM we can't reliably parse free-text into structured facts,
+  // so we preserve what we already have rather than guessing (and never lose it).
+  if (!process.env.ANTHROPIC_API_KEY) return prior;
+  try {
+    const extracted = await llmExtractFacts(input);
+    return mergeFacts(prior, extracted);
+  } catch {
+    return prior;
+  }
+}
+
+/**
+ * Overlay newly extracted values onto prior facts. A value is only applied
+ * when it is present and meaningful — blank/"unknown"/"null"/"n/a" readings
+ * are ignored so an uninformative call never erases a known fact.
+ */
+function mergeFacts(
+  prior: Record<string, unknown>,
+  next: Record<string, unknown>
+): Record<string, unknown> {
+  const merged: Record<string, unknown> = { ...prior };
+  const empties = new Set(["", "unknown", "null", "n/a", "none", "not mentioned"]);
+  for (const key of FACT_KEYS) {
+    const raw = next?.[key];
+    if (raw == null) continue;
+    const val = String(raw).trim();
+    if (val === "" || empties.has(val.toLowerCase())) continue;
+    merged[key] = val;
+  }
+  return merged;
+}
+
+async function llmExtractFacts(
+  input: ExtractFactsInput
+): Promise<Record<string, unknown>> {
+  const prompt = [
+    "You maintain a structured fact sheet for an AI phone agent calling the same contact about a probate / inherited property over multiple calls.",
+    "Given the existing fact sheet and the most recent call, return the UPDATED fact sheet.",
+    "",
+    `Existing fact sheet (JSON): ${JSON.stringify(input.priorFacts ?? {})}`,
+    `Most recent call outcome: ${input.outcome}.`,
+    `Most recent call summary: ${input.callSummary ?? "(none)"}.`,
+    input.transcript ? `Transcript:\n${input.transcript.slice(0, 6000)}` : "",
+    "",
+    "Rules:",
+    "- Keep every existing value unless the latest call clearly updates it.",
+    "- Only fill a field if the call gives real information for it; otherwise omit the key entirely.",
+    "- Each value must be a short string (a few words).",
+    `- Allowed keys ONLY: ${FACT_KEYS.join(", ")}.`,
+    "- Respond with a single minified JSON object and nothing else. No prose, no code fences.",
+  ].join("\n");
+
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "x-api-key": process.env.ANTHROPIC_API_KEY!,
+      "anthropic-version": "2023-06-01",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 500,
+      messages: [{ role: "user", content: prompt }],
+    }),
+  });
+  if (!res.ok) throw new Error(`LLM extract-facts ${res.status}`);
+  const data = (await res.json()) as any;
+  const text: string = data.content?.[0]?.text ?? "";
+  return parseFactsJson(text);
+}
+
+/** Defensively pull the JSON object out of the model's reply. */
+function parseFactsJson(text: string): Record<string, unknown> {
+  if (!text) return {};
+  let candidate = text.trim();
+  // Strip ```json ... ``` fences if the model added them.
+  const fence = candidate.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fence) candidate = fence[1].trim();
+  // Fall back to the first {...} block.
+  if (!candidate.startsWith("{")) {
+    const brace = candidate.match(/\{[\s\S]*\}/);
+    if (brace) candidate = brace[0];
+  }
+  try {
+    const parsed = JSON.parse(candidate);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
 }

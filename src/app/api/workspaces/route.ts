@@ -34,7 +34,7 @@ export async function GET() {
   const { data: workspaces, error } = await userClient
     .from("workspaces")
     .select(
-      "id, name, timezone, crm_provider, enroll_tag, is_active, created_at, agents(id, name, status)"
+      "id, name, timezone, crm_provider, enroll_tag, is_active, created_at, agents(id, name, status, enroll_tag)"
     )
     .order("created_at", { ascending: false });
 
@@ -118,6 +118,7 @@ export async function POST(req: NextRequest) {
       .insert({
         workspace_id: workspace.id,
         name: a.name,
+        enroll_tag: a.enroll_tag,
         retell_agent_id: a.retell_agent_id,
         retell_from_number: a.retell_from_number,
         objective: a.objective,

@@ -1,13 +1,49 @@
 // =====================================================================
 // GET   /api/agents/:id        — agent detail (configs + recent calls)
-// PATCH /api/agents/:id         — update status (draft|active|paused)
-//                                 and/or Retell linkage fields.
+// PATCH /api/agents/:id         — update status, direction, linkage,
+//                                 and/or per-agent CRM + Retell creds.
 // =====================================================================
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient, createServiceClient } from "@/lib/supabase/server";
+import { encryptJson } from "@/lib/crypto";
+import {
+  crmCredentialsSchema,
+  retellCredentialsSchema,
+} from "@/lib/validation";
+import type { AgentDirection } from "@/types";
+import type { Database } from "@/types/database";
 import { z } from "zod";
 
 export const runtime = "nodejs";
+
+type AgentUpdate = Database["public"]["Tables"]["agents"]["Update"];
+
+type AgentRow = {
+  id: string;
+  workspace_id: string;
+  name: string;
+  status: "draft" | "active" | "paused";
+  direction: AgentDirection;
+  objective: string | null;
+  enroll_tag: string | null;
+  retell_agent_id: string | null;
+  retell_from_number: string | null;
+  crm_provider: "followupboss" | "highlevel" | null;
+  crm_credentials_encrypted: string | null;
+  retell_credentials_encrypted: string | null;
+  created_at: string;
+  agent_call_configs: unknown[];
+  agent_task_configs: unknown[];
+};
+
+function publicAgent(agent: AgentRow) {
+  const { crm_credentials_encrypted, retell_credentials_encrypted, ...rest } = agent;
+  return {
+    ...rest,
+    has_crm_credentials: Boolean(crm_credentials_encrypted),
+    has_retell_credentials: Boolean(retell_credentials_encrypted),
+  };
+}
 
 export async function GET(
   _req: NextRequest,
@@ -22,11 +58,13 @@ export async function GET(
   const { data: agent, error } = await db
     .from("agents")
     .select(
-      "id, workspace_id, name, status, objective, retell_agent_id, " +
-        "retell_from_number, created_at, agent_call_configs(*), agent_task_configs(*)"
+      "id, workspace_id, name, status, direction, objective, enroll_tag, " +
+        "retell_agent_id, retell_from_number, crm_provider, " +
+        "crm_credentials_encrypted, retell_credentials_encrypted, created_at, " +
+        "agent_call_configs(*), agent_task_configs(*)"
     )
     .eq("id", params.id)
-    .single();
+    .single<AgentRow>();
 
   if (error || !agent) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
@@ -42,14 +80,19 @@ export async function GET(
     .order("queued_at", { ascending: false })
     .limit(50);
 
-  return NextResponse.json({ agent, calls: calls ?? [] });
+  return NextResponse.json({ agent: publicAgent(agent), calls: calls ?? [] });
 }
 
 const patchSchema = z.object({
   status: z.enum(["draft", "active", "paused"]).optional(),
+  direction: z.enum(["inbound", "outbound"]).optional(),
+  enroll_tag: z.string().nullable().optional(),
   retell_agent_id: z.string().nullable().optional(),
   retell_from_number: z.string().nullable().optional(),
   objective: z.string().nullable().optional(),
+  crm_provider: z.enum(["followupboss", "highlevel"]).nullable().optional(),
+  crm_credentials: crmCredentialsSchema.nullable().optional(),
+  retell_credentials: retellCredentialsSchema.nullable().optional(),
 });
 
 export async function PATCH(
@@ -71,43 +114,113 @@ export async function PATCH(
     );
   }
 
+  const input = parsed.data;
+
   // Authorize: ensure the caller can see this agent under RLS before writing.
-  const { data: visible } = await userClient
+  const { data: existing } = await userClient
     .from("agents")
-    .select("id, retell_agent_id, retell_from_number")
+    .select(
+      "id, direction, enroll_tag, retell_agent_id, retell_from_number, " +
+        "crm_provider, crm_credentials_encrypted, retell_credentials_encrypted"
+    )
     .eq("id", params.id)
-    .single<{ id: string; retell_agent_id: string | null; retell_from_number: string | null }>();
-  if (!visible) {
+    .single<{
+      id: string;
+      direction: AgentDirection;
+      enroll_tag: string | null;
+      retell_agent_id: string | null;
+      retell_from_number: string | null;
+      crm_provider: "followupboss" | "highlevel" | null;
+      crm_credentials_encrypted: string | null;
+      retell_credentials_encrypted: string | null;
+    }>();
+  if (!existing) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
 
-  // Guard: activating requires Retell linkage so the engine can place calls.
-  if (parsed.data.status === "active") {
-    const willHaveAgentId =
-      parsed.data.retell_agent_id ?? visible.retell_agent_id;
-    const willHaveFrom =
-      parsed.data.retell_from_number ?? visible.retell_from_number;
-    if (!willHaveAgentId || !willHaveFrom) {
+  const nextDirection = input.direction ?? existing.direction;
+  const nextRetellAgentId = input.retell_agent_id ?? existing.retell_agent_id;
+  const nextFromNumber = input.retell_from_number ?? existing.retell_from_number;
+  const nextCrmProvider = input.crm_provider ?? existing.crm_provider;
+  const nextCrmEncrypted = input.crm_credentials
+    ? encryptJson(input.crm_credentials)
+    : existing.crm_credentials_encrypted;
+  const nextRetellEncrypted = input.retell_credentials
+    ? encryptJson(input.retell_credentials)
+    : existing.retell_credentials_encrypted;
+
+  // Guard: activating requires direction-specific Retell linkage.
+  if (input.status === "active") {
+    if (!nextRetellAgentId) {
+      return NextResponse.json(
+        { error: "Cannot activate: agent needs a Retell agent ID first." },
+        { status: 400 }
+      );
+    }
+    if (nextDirection === "outbound" && !nextFromNumber) {
       return NextResponse.json(
         {
           error:
-            "Cannot activate: agent needs a Retell agent ID and from-number first.",
+            "Cannot activate: outbound agents need a Retell from-number first.",
+        },
+        { status: 400 }
+      );
+    }
+    if (nextDirection === "inbound" && !nextRetellEncrypted) {
+      return NextResponse.json(
+        {
+          error:
+            "Cannot activate: inbound agents need Retell credentials first.",
         },
         { status: 400 }
       );
     }
   }
 
+  const update: AgentUpdate = {};
+  if (input.status !== undefined) update.status = input.status;
+  if (input.direction !== undefined) update.direction = input.direction;
+  if (input.objective !== undefined) update.objective = input.objective;
+  if (input.retell_agent_id !== undefined) update.retell_agent_id = input.retell_agent_id;
+  if (input.retell_from_number !== undefined) {
+    update.retell_from_number = input.retell_from_number;
+  }
+  if (input.enroll_tag !== undefined) update.enroll_tag = input.enroll_tag;
+  if (input.crm_provider !== undefined) update.crm_provider = input.crm_provider;
+  if (input.crm_credentials !== undefined) {
+    update.crm_credentials_encrypted = nextCrmEncrypted;
+  }
+  if (input.retell_credentials !== undefined) {
+    update.retell_credentials_encrypted = nextRetellEncrypted;
+  }
+
+  // Outbound agents need a CRM provider + stored creds when set on the agent.
+  if (
+    nextDirection === "outbound" &&
+    nextCrmProvider &&
+    !nextCrmEncrypted &&
+    (input.crm_provider !== undefined || input.crm_credentials !== undefined)
+  ) {
+    return NextResponse.json(
+      { error: "CRM credentials are required when setting a CRM provider." },
+      { status: 400 }
+    );
+  }
+
   const db = createServiceClient();
   const { data: updated, error } = await db
     .from("agents")
-    .update(parsed.data)
+    .update(update)
     .eq("id", params.id)
-    .select("id, status, retell_agent_id, retell_from_number, objective")
-    .single();
+    .select(
+      "id, status, direction, objective, enroll_tag, retell_agent_id, " +
+        "retell_from_number, crm_provider, crm_credentials_encrypted, " +
+        "retell_credentials_encrypted"
+    )
+    .single<AgentRow>();
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
-  return NextResponse.json({ ok: true, agent: updated });
+  return NextResponse.json({ ok: true, agent: publicAgent(updated) });
 }

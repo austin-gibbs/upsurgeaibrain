@@ -12,6 +12,7 @@ import type {
   CrmUser,
   CreateTaskInput,
   HighLevelCredentials,
+  LogCallInput,
 } from "./types";
 
 const BASE = "https://services.leadconnectorhq.com";
@@ -99,6 +100,13 @@ export class HighLevelAdapter implements CrmAdapter {
       method: "POST",
       body: JSON.stringify({ body: note }),
     });
+  }
+
+  // HighLevel has no FUB-style call activity with a recording play button.
+  async logCall(input: LogCallInput): Promise<void> {
+    const parts = [input.note ?? ""];
+    if (input.recordingUrl) parts.push(`Recording: ${input.recordingUrl}`);
+    await this.addNote(input.contactId, parts.filter(Boolean).join("\n\n"));
   }
 
   async createTask(input: CreateTaskInput): Promise<void> {

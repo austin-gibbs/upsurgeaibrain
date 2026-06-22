@@ -1,0 +1,6 @@
+# Minimal Supabase CLI config for UpSurge.
+# Link with: npx supabase login && npx supabase link --project-ref qqtaofvjfbuildkrosvg
+project_id = "qqtaofvjfbuildkrosvg"
+
+[db]
+major_version = 15

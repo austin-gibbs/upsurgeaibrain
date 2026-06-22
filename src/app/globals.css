@@ -4,6 +4,12 @@
 
 :root {
   color-scheme: light;
+  --bg-page: #f7f8fb;
+  --bg-card: #ffffff;
+  --text-primary: #0f172a;
+  --text-secondary: #64748b;
+  --border-subtle: rgba(15, 23, 42, 0.06);
+  --ring-focus: #2f6bff;
 }
 
 html,
@@ -13,20 +19,33 @@ body {
 }
 
 body {
-  @apply bg-slate-50 text-slate-900 antialiased;
+  background-color: var(--bg-page);
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+}
+
+::selection {
+  background-color: #d9e6ff;
+  color: #1842b4;
+}
+
+*:focus-visible {
+  outline: 2px solid var(--ring-focus);
+  outline-offset: 2px;
 }
 
 /* Thin scrollbars for the app chrome */
 * {
   scrollbar-width: thin;
-  scrollbar-color: #cbd5e1 transparent;
+  scrollbar-color: #cdd4e0 transparent;
 }
 *::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 *::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
+  background: #cdd4e0;
   border-radius: 9999px;
 }

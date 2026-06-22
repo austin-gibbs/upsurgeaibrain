@@ -23,6 +23,12 @@ export interface CreatePhoneCallResult {
   callId: string;
 }
 
+/** Shape stored in agents.retell_credentials_encrypted (encrypted at rest). */
+export interface RetellCredentials {
+  apiKey: string;
+  webhookSecret?: string;
+}
+
 export class RetellClient {
   private apiKey: string;
 
@@ -67,16 +73,71 @@ export class RetellClient {
 // Retell signs the raw body with HMAC-SHA256 using your webhook secret.
 // ---------------------------------------------------------------------
 import Retell from "retell-sdk";
+import { decryptJson } from "@/lib/crypto";
+import type { Agent } from "@/types";
 
-export function verifyRetellSignature(rawBody: string, signature: string | null): boolean {
-  // Retell signs webhooks with the account's webhook signing secret using the
-  // SDK scheme ("v=<ts>,d=<hmac(body+ts, secret)>", 5-min tolerance). This
-  // secret is distinct from the API key used for REST calls.
-  const secret = process.env.RETELL_WEBHOOK_SECRET;
-  if (!secret || !signature) return false;
+/** Decrypt and return the per-agent webhook secret, if configured. */
+export function getRetellWebhookSecretForAgent(
+  agent: Pick<Agent, "retell_credentials_encrypted">
+): string | null {
+  if (!agent.retell_credentials_encrypted) return null;
   try {
-    return Retell.verify(rawBody, secret, signature);
+    const creds = decryptJson<RetellCredentials>(agent.retell_credentials_encrypted);
+    return creds.webhookSecret?.trim() || null;
   } catch {
-    return false;
+    return null;
   }
+}
+
+/**
+ * Resolve a RetellClient for an agent. Uses the agent's encrypted Retell
+ * API key when present; otherwise falls back to RETELL_API_KEY.
+ */
+export function getRetellClientForAgent(
+  agent: Pick<Agent, "retell_credentials_encrypted">
+): RetellClient {
+  if (agent.retell_credentials_encrypted) {
+    try {
+      const creds = decryptJson<RetellCredentials>(agent.retell_credentials_encrypted);
+      if (creds.apiKey?.trim()) return new RetellClient(creds.apiKey.trim());
+    } catch {
+      /* fall through to env */
+    }
+  }
+  return new RetellClient();
+}
+
+/**
+ * Verify a Retell webhook signature against one or more candidate secrets.
+ * Evaluates every secret (per-agent first, then env) without short-circuiting
+ * so timing does not reveal which secret matched.
+ */
+export function verifyRetellSignature(
+  rawBody: string,
+  signature: string | null,
+  extraSecrets?: string[]
+): boolean {
+  if (!signature) return false;
+
+  const candidates: string[] = [];
+  if (extraSecrets) {
+    for (const s of extraSecrets) {
+      if (s?.trim()) candidates.push(s.trim());
+    }
+  }
+  const envSecret = process.env.RETELL_WEBHOOK_SECRET?.trim();
+  if (envSecret) candidates.push(envSecret);
+
+  const unique = [...new Set(candidates)];
+  if (unique.length === 0) return false;
+
+  let matched = false;
+  for (const secret of unique) {
+    try {
+      matched = Retell.verify(rawBody, secret, signature) || matched;
+    } catch {
+      /* try next */
+    }
+  }
+  return matched;
 }

@@ -2,6 +2,7 @@
 
 import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { AudioLines } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { Button, Card, Input, Label } from "@/components/ui";
 
@@ -55,18 +56,35 @@ function LoginForm() {
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center px-4">
-      <div className="w-full max-w-sm">
+    <main className="relative flex min-h-screen items-center justify-center overflow-hidden px-4">
+      <div className="pointer-events-none absolute inset-0 bg-page-gradient" />
+      <div className="pointer-events-none absolute -left-32 -top-32 h-96 w-96 rounded-full bg-brand-500/10 blur-3xl" />
+      <div className="pointer-events-none absolute -bottom-32 -right-32 h-96 w-96 rounded-full bg-accent-mint-icon/10 blur-3xl" />
+
+      <div className="relative w-full max-w-md">
         <div className="mb-8 text-center">
-          <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-brand-600 text-lg font-bold text-white">
-            U
+          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-brand-gradient text-white shadow-lifted">
+            <AudioLines className="h-7 w-7" strokeWidth={1.75} />
           </div>
-          <h1 className="text-xl font-semibold text-slate-900">UpSurge</h1>
-          <p className="text-sm text-slate-500">AI Voice Agent Platform</p>
+          <h1 className="text-2xl font-semibold tracking-tight text-ink-900">
+            UpSurge
+          </h1>
+          <p className="mt-1 text-sm text-ink-500">AI Voice Agent Platform</p>
         </div>
 
-        <Card className="p-6">
-          <form onSubmit={handleSubmit} className="space-y-4">
+        <Card className="p-8 shadow-lifted">
+          <div className="mb-6">
+            <h2 className="text-lg font-semibold text-ink-900">
+              {mode === "signin" ? "Welcome back" : "Create your account"}
+            </h2>
+            <p className="mt-1 text-sm text-ink-500">
+              {mode === "signin"
+                ? "Sign in to manage your voice agent workspaces."
+                : "Get started with multi-tenant AI voice orchestration."}
+            </p>
+          </div>
+
+          <form onSubmit={handleSubmit} className="space-y-5">
             <div className="space-y-1.5">
               <Label htmlFor="email">Email</Label>
               <Input
@@ -94,17 +112,17 @@ function LoginForm() {
             </div>
 
             {error && (
-              <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+              <p className="rounded-xl bg-accent-rose-bg px-4 py-3 text-sm text-accent-rose-fg">
                 {error}
               </p>
             )}
             {notice && (
-              <p className="rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">
+              <p className="rounded-xl bg-accent-mint-bg px-4 py-3 text-sm text-accent-mint-fg">
                 {notice}
               </p>
             )}
 
-            <Button type="submit" className="w-full" disabled={loading}>
+            <Button type="submit" className="w-full" size="lg" disabled={loading}>
               {loading
                 ? "Working…"
                 : mode === "signin"
@@ -113,7 +131,7 @@ function LoginForm() {
             </Button>
           </form>
 
-          <p className="mt-4 text-center text-sm text-slate-500">
+          <p className="mt-6 text-center text-sm text-ink-500">
             {mode === "signin" ? "No account yet?" : "Already have an account?"}{" "}
             <button
               type="button"

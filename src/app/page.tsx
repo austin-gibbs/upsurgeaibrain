@@ -2,8 +2,17 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { Building2, Bot, Tag, ArrowUpRight } from "lucide-react";
 import { PageShell } from "@/components/TopNav";
-import { Button, Card, StatusBadge } from "@/components/ui";
+import {
+  Button,
+  Card,
+  StatusBadge,
+  PageGreeting,
+  IconBadge,
+  EmptyState,
+  Skeleton,
+} from "@/components/ui";
 
 type WorkspaceRow = {
   id: string;
@@ -37,69 +46,97 @@ export default function DashboardPage() {
 
   return (
     <PageShell>
-      <div className="mb-6 flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold text-slate-900">Workspaces</h1>
-          <p className="text-sm text-slate-500">
-            Each workspace is one client, one CRM, and its AI voice agents.
-          </p>
-        </div>
+      <div className="mb-8 flex flex-wrap items-start justify-between gap-4">
+        <PageGreeting
+          title="Workspaces"
+          subtitle="Each workspace is one client, one CRM, and its AI voice agents."
+        />
         <Link href="/setup">
-          <Button>+ New workspace</Button>
+          <Button size="lg">+ New workspace</Button>
         </Link>
       </div>
 
       {error && (
-        <Card className="p-4 text-sm text-red-700">Failed to load: {error}</Card>
-      )}
-
-      {!workspaces && !error && (
-        <p className="text-sm text-slate-500">Loading…</p>
-      )}
-
-      {workspaces && workspaces.length === 0 && (
-        <Card className="flex flex-col items-center justify-center gap-3 p-12 text-center">
-          <p className="text-slate-600">No workspaces yet.</p>
-          <Link href="/setup">
-            <Button>Create your first workspace</Button>
-          </Link>
+        <Card className="mb-6 p-5 text-sm text-accent-rose-fg">
+          Failed to load: {error}
         </Card>
       )}
 
-      {workspaces && workspaces.length > 0 && (
+      {!workspaces && !error && (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {[1, 2, 3].map((i) => (
+            <Card key={i} className="p-6">
+              <Skeleton className="mb-4 h-5 w-2/3" />
+              <Skeleton className="mb-2 h-4 w-full" />
+              <Skeleton className="mb-2 h-4 w-4/5" />
+              <Skeleton className="h-4 w-3/5" />
+            </Card>
+          ))}
+        </div>
+      )}
+
+      {workspaces && workspaces.length === 0 && (
+        <EmptyState
+          icon={Building2}
+          title="No workspaces yet"
+          description="Create your first workspace to connect a CRM and deploy AI voice agents."
+          action={
+            <Link href="/setup">
+              <Button>Create your first workspace</Button>
+            </Link>
+          }
+        />
+      )}
+
+      {workspaces && workspaces.length > 0 && (
+        <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
           {workspaces.map((ws) => {
             const activeAgents = ws.agents.filter(
               (a) => a.status === "active"
             ).length;
             return (
               <Link key={ws.id} href={`/workspaces/${ws.id}`}>
-                <Card className="h-full p-5 transition-shadow hover:shadow-md">
-                  <div className="mb-3 flex items-start justify-between">
-                    <h2 className="font-semibold text-slate-900">{ws.name}</h2>
-                    <StatusBadge status={ws.is_active ? "active" : "paused"} />
-                  </div>
-                  <dl className="space-y-1 text-sm text-slate-500">
-                    <div className="flex justify-between">
-                      <dt>CRM</dt>
-                      <dd className="text-slate-700">
-                        {CRM_LABEL[ws.crm_provider]}
-                      </dd>
+                <Card hover className="group h-full p-6">
+                  <div className="mb-5 flex items-start justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      <IconBadge icon={Building2} tone="sky" />
+                      <div>
+                        <h2 className="font-semibold text-ink-900">
+                          {ws.name}
+                        </h2>
+                        <p className="text-xs text-ink-400">
+                          {CRM_LABEL[ws.crm_provider]}
+                        </p>
+                      </div>
                     </div>
-                    <div className="flex justify-between">
-                      <dt>Agents</dt>
-                      <dd className="text-slate-700">
-                        {ws.agents.length}{" "}
+                    <div className="flex items-center gap-2">
+                      <StatusBadge
+                        status={ws.is_active ? "active" : "paused"}
+                      />
+                      <ArrowUpRight className="h-4 w-4 text-ink-300 transition-colors group-hover:text-brand-500" />
+                    </div>
+                  </div>
+                  <dl className="space-y-2.5 text-sm">
+                    <div className="flex items-center justify-between">
+                      <dt className="flex items-center gap-2 text-ink-500">
+                        <Bot className="h-3.5 w-3.5" />
+                        Agents
+                      </dt>
+                      <dd className="font-medium text-ink-700">
+                        {ws.agents.length}
                         {activeAgents > 0 && (
-                          <span className="text-green-600">
+                          <span className="ml-1 text-accent-mint-fg">
                             ({activeAgents} active)
                           </span>
                         )}
                       </dd>
                     </div>
-                    <div className="flex justify-between">
-                      <dt>Enroll tag</dt>
-                      <dd className="font-mono text-xs text-slate-700">
+                    <div className="flex items-center justify-between">
+                      <dt className="flex items-center gap-2 text-ink-500">
+                        <Tag className="h-3.5 w-3.5" />
+                        Enroll tag
+                      </dt>
+                      <dd className="font-mono text-xs text-ink-600">
                         {ws.enroll_tag}
                       </dd>
                     </div>

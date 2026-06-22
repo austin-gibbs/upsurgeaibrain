@@ -10,6 +10,7 @@ import {
   ArrowUpRight,
   CalendarClock,
   Search,
+  Plus,
 } from "lucide-react";
 import { PageShell } from "@/components/TopNav";
 import {
@@ -21,6 +22,7 @@ import {
   IconBadge,
   Input,
   EmptyState,
+  Button,
 } from "@/components/ui";
 
 type Detail = {
@@ -38,6 +40,7 @@ type Detail = {
     name: string;
     status: string;
     objective: string | null;
+    enroll_tag: string | null;
     retell_agent_id: string | null;
     retell_from_number: string | null;
     agent_call_configs: {
@@ -303,7 +306,17 @@ export default function WorkspaceDetailPage({
         />
       </div>
 
-      <SectionHeader title="Agents" />
+      <SectionHeader
+        title="Agents"
+        action={
+          <Link href={`/workspaces/${params.id}/agents/new`}>
+            <Button variant="secondary" className="gap-1.5">
+              <Plus className="h-4 w-4" />
+              Add agent
+            </Button>
+          </Link>
+        }
+      />
       <div className="mb-10 grid gap-4">
         {agents.map((a) => {
           const cc = a.agent_call_configs[0];
@@ -328,6 +341,9 @@ export default function WorkspaceDetailPage({
                         {a.objective}
                       </p>
                     )}
+                    <p className="mt-0.5 font-mono text-xs text-ink-400">
+                      enroll: {a.enroll_tag ?? workspace.enroll_tag}
+                    </p>
                   </div>
                 </div>
                 <div className="flex items-center gap-4 text-right">

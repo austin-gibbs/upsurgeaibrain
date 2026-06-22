@@ -4,18 +4,45 @@
 // We verify the signature, then process call_analyzed events.
 // =====================================================================
 import { NextRequest, NextResponse } from "next/server";
-import { verifyRetellSignature } from "@/lib/retell/client";
+import {
+  getRetellWebhookSecretForAgent,
+  verifyRetellSignature,
+} from "@/lib/retell/client";
 import { processRetellWebhook } from "@/lib/engine/process-outcome";
+import { createServiceClient } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+/** Best-effort lookup of the per-agent webhook secret from the payload. */
+async function perAgentWebhookSecrets(rawBody: string): Promise<string[]> {
+  try {
+    const body = JSON.parse(rawBody) as { call?: { agent_id?: string } };
+    const retellAgentId = body?.call?.agent_id;
+    if (!retellAgentId) return [];
+
+    const supabase = createServiceClient();
+    const { data: agent } = await supabase
+      .from("agents")
+      .select("retell_credentials_encrypted")
+      .eq("retell_agent_id", String(retellAgentId))
+      .maybeSingle<{ retell_credentials_encrypted: string | null }>();
+
+    if (!agent) return [];
+    const secret = getRetellWebhookSecretForAgent(agent);
+    return secret ? [secret] : [];
+  } catch {
+    return [];
+  }
+}
 
 export async function POST(req: NextRequest) {
   const rawBody = await req.text();
   const signature =
     req.headers.get("x-retell-signature") ?? req.headers.get("X-Retell-Signature");
 
-  if (!verifyRetellSignature(rawBody, signature)) {
+  const extraSecrets = await perAgentWebhookSecrets(rawBody);
+  if (!verifyRetellSignature(rawBody, signature, extraSecrets)) {
     return NextResponse.json({ error: "invalid signature" }, { status: 401 });
   }
 
