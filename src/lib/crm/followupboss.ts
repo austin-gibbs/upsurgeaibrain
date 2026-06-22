@@ -11,8 +11,10 @@ import type {
   CrmAdapter,
   CrmContact,
   CrmUser,
+  CreateContactInput,
   CreateTaskInput,
   FubCredentials,
+  LogCallInput,
 } from "./types";
 
 const BASE = "https://api.followupboss.com/v1";
@@ -100,6 +102,51 @@ export class FollowUpBossAdapter implements CrmAdapter {
     }
   }
 
+  async findContactByPhone(phone: string): Promise<CrmContact | null> {
+    const e164 = toE164(phone) ?? phone;
+    try {
+      // FUB matches people by phone via the `phone` query param.
+      const data = await this.request<any>(
+        `/people?phone=${encodeURIComponent(e164)}&limit=1`
+      );
+      const people: any[] = data.people ?? [];
+      return people.length ? this.mapContact(people[0]) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  async createContact(input: CreateContactInput): Promise<CrmContact> {
+    const parts = (input.fullName ?? "").trim().split(/\s+/).filter(Boolean);
+    const firstName = parts[0] ?? "Inbound";
+    const lastName = parts.slice(1).join(" ") || "Caller";
+    const e164 = input.phone ? toE164(input.phone) ?? input.phone : null;
+
+    const body: Record<string, unknown> = {
+      firstName,
+      lastName,
+      // FUB requires a source; this is how the lead shows its origin.
+      source: input.source ?? "AI Inbound Call",
+    };
+    if (e164) body.phones = [{ value: e164, type: "Mobile" }];
+    if (input.email) body.emails = [{ value: input.email, type: "Work" }];
+    if (input.tags?.length) body.tags = input.tags;
+    if (input.assignedUserId) body.assignedUserId = Number(input.assignedUserId);
+
+    const created = await this.request<any>(`/people`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+    return this.mapContact(created);
+  }
+
+  async assignContact(contactId: string, userId: string): Promise<void> {
+    await this.request(`/people/${contactId}`, {
+      method: "PUT",
+      body: JSON.stringify({ assignedUserId: Number(userId) }),
+    });
+  }
+
   async setTags(contactId: string, tags: string[]): Promise<void> {
     await this.request(`/people/${contactId}`, {
       method: "PUT",
@@ -112,6 +159,21 @@ export class FollowUpBossAdapter implements CrmAdapter {
       method: "POST",
       body: JSON.stringify({ personId: Number(contactId), body: note }),
     });
+  }
+
+  async logCall(input: LogCallInput): Promise<void> {
+    const body: Record<string, unknown> = {
+      personId: Number(input.contactId),
+      phone: input.phone,
+      isIncoming: input.isIncoming ?? false,
+    };
+    if (input.note) body.note = input.note;
+    if (input.outcome) body.outcome = input.outcome;
+    if (typeof input.durationSeconds === "number") body.duration = input.durationSeconds;
+    if (input.fromNumber) body.fromNumber = input.fromNumber;
+    if (input.toNumber) body.toNumber = input.toNumber;
+    if (input.recordingUrl) body.recordingUrl = input.recordingUrl;
+    await this.request(`/calls`, { method: "POST", body: JSON.stringify(body) });
   }
 
   async createTask(input: CreateTaskInput): Promise<void> {

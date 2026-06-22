@@ -6,7 +6,7 @@
 // per eligible contact with a drip-throttle delay so dials are spaced out.
 // =====================================================================
 import { createServiceClient } from "@/lib/supabase/server";
-import { getCrmAdapter } from "@/lib/crm";
+import { getCrmAdapterForAgent } from "@/lib/crm";
 import { getCallQueue } from "@/lib/queue/queues";
 import { isEligible, todayInTz, withinCallWindow } from "./cadence";
 import type { Agent, AgentCallConfig, Contact, Workspace } from "@/types";
@@ -28,6 +28,9 @@ export async function pollAgent(agentId: string): Promise<PollResult> {
     .eq("id", agentId)
     .single<Agent>();
   if (!agent) return { agentId, scanned: 0, eligible: 0, enqueued: 0, skippedReason: "agent not found" };
+  if (agent.direction === "inbound") {
+    return { agentId, scanned: 0, eligible: 0, enqueued: 0, skippedReason: "inbound agent" };
+  }
   if (agent.status !== "active") {
     return { agentId, scanned: 0, eligible: 0, enqueued: 0, skippedReason: `agent ${agent.status}` };
   }
@@ -53,10 +56,11 @@ export async function pollAgent(agentId: string): Promise<PollResult> {
   }
 
   const today = todayInTz(workspace.timezone);
-  const crm = getCrmAdapter(workspace);
+  const crm = getCrmAdapterForAgent(agent, workspace);
 
-  // 1. Pull everyone carrying the enroll tag.
-  const crmContacts = await crm.getContactsByTag(workspace.enroll_tag);
+  // 1. Pull everyone carrying this agent's enroll tag (falls back to workspace tag).
+  const enrollTag = agent.enroll_tag ?? workspace.enroll_tag;
+  const crmContacts = await crm.getContactsByTag(enrollTag);
 
   // 2. Upsert into our cache, preserving cadence state we already track.
   const contacts: Contact[] = [];

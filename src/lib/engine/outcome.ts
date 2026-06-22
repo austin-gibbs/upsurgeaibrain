@@ -65,6 +65,9 @@ export function extractFromRetellPayload(body: any): {
   inVoicemail: boolean;
   summary: string | null;
   transcript: string | null;
+  recordingUrl: string | null;
+  durationSeconds: number;
+  fromNumber: string | null;
   metadata: Record<string, string>;
 } {
   const call = body?.call ?? body ?? {};
@@ -76,6 +79,9 @@ export function extractFromRetellPayload(body: any): {
     inVoicemail: analysis.in_voicemail === true || custom.in_voicemail === true,
     summary: analysis.call_summary ?? null,
     transcript: call.transcript ?? null,
+    recordingUrl: call.recording_url ?? null,
+    durationSeconds: Math.round((call.duration_ms ?? 0) / 1000),
+    fromNumber: call.from_number ?? null,
     metadata: call.metadata ?? {},
   };
 }

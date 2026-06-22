@@ -6,6 +6,12 @@ export const crmCredentialsSchema = z.union([
   z.object({ accessToken: z.string().min(10), locationId: z.string().min(1) }), // HighLevel
 ]);
 
+/** Retell credentials stored per inbound agent. webhookSecret is optional. */
+export const retellCredentialsSchema = z.object({
+  apiKey: z.string().min(10),
+  webhookSecret: z.string().min(1).optional(),
+});
+
 // Matches the call_outcome enum in the database so task-config outcome
 // filters are typed correctly when inserted.
 export const callOutcomeSchema = z.enum([
@@ -42,11 +48,80 @@ export const taskConfigSchema = z.object({
 
 export const agentSchema = z.object({
   name: z.string().min(1),
+  direction: z.enum(["inbound", "outbound"]).default("outbound"),
+  enroll_tag: z.string().nullable().default(null),
   retell_agent_id: z.string().nullable().default(null),
   retell_from_number: z.string().nullable().default(null),
   objective: z.string().nullable().default(null),
+  // Per-agent CRM. Optional here so the workspace-provisioning path (where
+  // CRM lives on the workspace) keeps validating; required in createAgentSchema.
+  crm_provider: z.enum(["followupboss", "highlevel"]).nullable().default(null),
+  crm_credentials: crmCredentialsSchema.nullable().default(null),
+  // Per-agent Retell creds (inbound agents only).
+  retell_credentials: retellCredentialsSchema.nullable().default(null),
   callConfig: callConfigSchema,
   taskConfig: taskConfigSchema,
+});
+
+/**
+ * Payload for adding an agent to an existing workspace. Requires a CRM choice +
+ * credentials, and enforces direction-specific rules:
+ *   - outbound → enroll tag required (drives enrollment + cadence).
+ *   - inbound  → Retell agent id + Retell credentials required.
+ */
+export const createAgentSchema = agentSchema.superRefine((val, ctx) => {
+  if (!val.crm_provider) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["crm_provider"],
+      message: "Choose a CRM (Follow Up Boss or HighLevel).",
+    });
+  }
+  if (!val.crm_credentials) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["crm_credentials"],
+      message: "CRM credentials are required.",
+    });
+  } else if (val.crm_provider === "followupboss" && !("apiKey" in val.crm_credentials)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["crm_credentials"],
+      message: "Follow Up Boss needs an API key.",
+    });
+  } else if (val.crm_provider === "highlevel" && !("accessToken" in val.crm_credentials)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["crm_credentials"],
+      message: "HighLevel needs an access token and location id.",
+    });
+  }
+
+  if (val.direction === "outbound") {
+    if (!val.enroll_tag || val.enroll_tag.trim().length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["enroll_tag"],
+        message: "Outbound agents need an enrollment tag.",
+      });
+    }
+  } else {
+    // inbound
+    if (!val.retell_agent_id || val.retell_agent_id.trim().length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["retell_agent_id"],
+        message: "Inbound agents need their Retell agent ID.",
+      });
+    }
+    if (!val.retell_credentials) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["retell_credentials"],
+        message: "Inbound agents need Retell credentials.",
+      });
+    }
+  }
 });
 
 export const provisionWorkspaceSchema = z.object({
@@ -63,3 +138,4 @@ export const provisionWorkspaceSchema = z.object({
 });
 
 export type ProvisionWorkspaceInput = z.infer<typeof provisionWorkspaceSchema>;
+export type CreateAgentInput = z.infer<typeof createAgentSchema>;

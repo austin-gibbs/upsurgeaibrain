@@ -7,8 +7,8 @@
 // attempt. Outcome processing happens later via the Retell webhook.
 // =====================================================================
 import { createServiceClient } from "@/lib/supabase/server";
-import { getCrmAdapter } from "@/lib/crm";
-import { RetellClient } from "@/lib/retell/client";
+import { getCrmAdapterForAgent } from "@/lib/crm";
+import { getRetellClientForAgent } from "@/lib/retell/client";
 import { buildDynamicVariables } from "./memory";
 import { todayInTz } from "./cadence";
 import type { CallJob } from "@/lib/queue/queues";
@@ -63,7 +63,7 @@ export async function placeCall(job: CallJob): Promise<{ callId: string; retellC
     attemptNumber: job.attemptNumber,
   });
 
-  const retell = new RetellClient();
+  const retell = getRetellClientForAgent(agent);
   const { callId: retellCallId } = await retell.createPhoneCall({
     fromNumber: agent.retell_from_number,
     toNumber: job.toNumber,
@@ -87,7 +87,7 @@ export async function placeCall(job: CallJob): Promise<{ callId: string; retellC
 
   // Best-effort CRM "dialed" marker (mirrors WF1's Mark Contact Dialed).
   try {
-    const crm = getCrmAdapter(workspace);
+    const crm = getCrmAdapterForAgent(agent, workspace);
     const dialedTag = `upsurgecalled${today.replace(/-/g, "")}`;
     if (!contact.tags.includes(dialedTag)) {
       await crm.setTags(contact.id, Array.from(new Set([...contact.tags, dialedTag])));

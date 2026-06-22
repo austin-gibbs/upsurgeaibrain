@@ -3,7 +3,7 @@
 //
 // Triggered by the Retell `call_analyzed` webhook. For one completed call:
 //   1. classify the outcome
-//   2. write a formatted note to the CRM
+//   2. log the call to the CRM (recording + call notes)
 //   3. reconcile tags (strip stale, add current; drop enroll tag if terminal)
 //   4. create a follow-up task (if configured)
 //   5. update cadence state (attempt, next eligible date, terminal flag)
@@ -11,11 +11,12 @@
 // Idempotent on retell_call_id so duplicate webhooks are no-ops.
 // =====================================================================
 import { createServiceClient } from "@/lib/supabase/server";
-import { getCrmAdapter } from "@/lib/crm";
+import { getCrmAdapterForAgent } from "@/lib/crm";
 import { classifyOutcome, outcomeLabel, extractFromRetellPayload } from "./outcome";
 import { reconcileTags } from "./tags";
 import { nextEligibleDate, todayInTz } from "./cadence";
 import { updateMemoryAfterCall } from "./memory";
+import { processInboundCall } from "./process-inbound";
 import type {
   Agent, AgentCallConfig, AgentMemory, AgentTaskConfig,
   Contact, OutcomeTag, Workspace,
@@ -25,6 +26,12 @@ export async function processRetellWebhook(body: any): Promise<{ ok: boolean; re
   // Retell fires `call_ended` (no analysis) then `call_analyzed` (full).
   const event = body?.event;
   if (event && event !== "call_analyzed") return { ok: true, reason: `ignored event: ${event}` };
+
+  // Inbound concierge calls (answered on the business line) have no
+  // pre-created call row — hand them to the dedicated inbound processor.
+  if ((body?.call ?? body)?.direction === "inbound") {
+    return processInboundCall(body);
+  }
 
   const supabase = createServiceClient();
   const parsed = extractFromRetellPayload(body);
@@ -52,9 +59,9 @@ export async function processRetellWebhook(body: any): Promise<{ ok: boolean; re
     .returns<OutcomeTag[]>();
 
   const outcome = classifyOutcome({ rawOutcome: parsed.rawOutcome, inVoicemail: parsed.inVoicemail });
-  const crm = getCrmAdapter(workspace);
+  const crm = getCrmAdapterForAgent(agent, workspace);
 
-  // 2. CRM note (matches the production note format).
+  // 2. CRM call log (recording play button + call notes in FUB).
   const today = todayInTz(workspace.timezone);
   const note = [
     `AI Agent: ${agent.name}`,
@@ -63,18 +70,33 @@ export async function processRetellWebhook(body: any): Promise<{ ok: boolean; re
     "",
     `Summary: ${parsed.summary ?? "(none)"}`,
   ].join("\n");
-  try { await crm.addNote(contact.crm_contact_id, note); } catch { /* non-fatal */ }
+  try {
+    await crm.logCall({
+      contactId: contact.crm_contact_id,
+      phone: call.to_number,
+      isIncoming: false,
+      note,
+      durationSeconds: parsed.durationSeconds || undefined,
+      fromNumber: parsed.fromNumber ?? undefined,
+      toNumber: call.to_number,
+      recordingUrl: parsed.recordingUrl ?? undefined,
+    });
+  } catch {
+    try { await crm.addNote(contact.crm_contact_id, note); } catch { /* non-fatal */ }
+  }
 
   // 3. Tags.
   const reconciled = reconcileTags({
     currentTags: contact.tags,
     taxonomy: taxonomy ?? [],
     outcome,
-    enrollTag: workspace.enroll_tag,
+    enrollTag: agent.enroll_tag ?? workspace.enroll_tag,
   });
   try { await crm.setTags(contact.crm_contact_id, reconciled.tags); } catch { /* non-fatal */ }
 
-  // 4. Task.
+  // 4. Task(s). assignee_crm_id may hold several comma-separated CRM user
+  // ids ("1,17"); in that case we create one task per assignee so each team
+  // member gets their own copy.
   let taskCreated = false;
   const { data: taskConfig } = await supabase
     .from("agent_task_configs").select("*").eq("agent_id", agent.id).maybeSingle<AgentTaskConfig>();
@@ -83,16 +105,21 @@ export async function processRetellWebhook(body: any): Promise<{ ok: boolean; re
       .replace("{contact_name}", contact.full_name ?? "Contact")
       .replace("{date}", today);
     const dueAt = new Date(Date.now() + taskConfig.due_offset_minutes * 60_000).toISOString();
-    try {
-      await crm.createTask({
-        contactId: contact.crm_contact_id,
-        name,
-        type: taskConfig.task_type,
-        dueAt,
-        assigneeId: taskConfig.assignee_crm_id,
-      });
-      taskCreated = true;
-    } catch { /* non-fatal */ }
+    const assignees = parseAssignees(taskConfig.assignee_crm_id);
+    // No assignee configured → one unassigned task (prior behavior).
+    const targets = assignees.length ? assignees : [null];
+    for (const assigneeId of targets) {
+      try {
+        await crm.createTask({
+          contactId: contact.crm_contact_id,
+          name,
+          type: taskConfig.task_type,
+          dueAt,
+          assigneeId,
+        });
+        taskCreated = true;
+      } catch { /* non-fatal */ }
+    }
   }
 
   // 5. Cadence state.
@@ -147,4 +174,11 @@ export async function processRetellWebhook(body: any): Promise<{ ok: boolean; re
 function shouldCreateTask(cfg: AgentTaskConfig, outcome: string): boolean {
   if (!cfg.only_outcomes || cfg.only_outcomes.length === 0) return true;
   return cfg.only_outcomes.includes(outcome as any);
+}
+
+// assignee_crm_id may hold a single CRM user id ("17") or several
+// comma/space-separated ids ("1,17"). Split so each listed user gets a task.
+function parseAssignees(raw: string | null): string[] {
+  if (!raw) return [];
+  return raw.split(/[,\s]+/).map((s) => s.trim()).filter(Boolean);
 }

@@ -18,9 +18,10 @@ export async function tickScheduler(): Promise<{ enqueued: string[] }> {
 
   const { data: agents } = await supabase
     .from("agents")
-    .select("id, workspace_id, status")
+    .select("id, workspace_id, status, direction")
     .eq("status", "active")
-    .returns<Pick<Agent, "id" | "workspace_id" | "status">[]>();
+    .eq("direction", "outbound")
+    .returns<Pick<Agent, "id" | "workspace_id" | "status" | "direction">[]>();
   if (!agents?.length) return { enqueued };
 
   const queue = getPollQueue();

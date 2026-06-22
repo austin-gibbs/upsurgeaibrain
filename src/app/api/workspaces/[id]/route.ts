@@ -3,7 +3,8 @@
 // recent calls, and contact counts. RLS scopes to the caller's orgs.
 // =====================================================================
 import { NextRequest, NextResponse } from "next/server";
-import { createServerClient } from "@/lib/supabase/server";
+import { createServerClient, createServiceClient } from "@/lib/supabase/server";
+import { z } from "zod";
 
 export const runtime = "nodejs";
 
@@ -30,7 +31,7 @@ export async function GET(
   const { data: agents } = await db
     .from("agents")
     .select(
-      "id, name, status, objective, retell_agent_id, retell_from_number, " +
+      "id, name, status, objective, enroll_tag, retell_agent_id, retell_from_number, " +
         "agent_call_configs(*), agent_task_configs(*)"
     )
     .eq("workspace_id", params.id)
@@ -65,5 +66,64 @@ export async function GET(
     contactCount: contactCount ?? 0,
     contacts: contacts ?? [],
     outcomeTags: tags ?? [],
+  });
+}
+
+// PATCH /api/workspaces/:id — workspace-level controls. Currently a single
+// switch that turns follow-up task creation on/off for every agent in the
+// workspace (flips each agent_task_configs.enabled).
+const patchSchema = z.object({ tasks_enabled: z.boolean() });
+
+export async function PATCH(
+  req: NextRequest,
+  { params }: { params: { id: string } }
+) {
+  const userClient = createServerClient();
+  const {
+    data: { user },
+  } = await userClient.auth.getUser();
+  if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+
+  const json = await req.json().catch(() => null);
+  const parsed = patchSchema.safeParse(json);
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: "invalid payload", issues: parsed.error.issues },
+      { status: 400 }
+    );
+  }
+
+  // Authorize: ensure the caller can see this workspace under RLS before writing.
+  const { data: workspace } = await userClient
+    .from("workspaces")
+    .select("id")
+    .eq("id", params.id)
+    .single<{ id: string }>();
+  if (!workspace) {
+    return NextResponse.json({ error: "not found" }, { status: 404 });
+  }
+
+  const db = createServiceClient();
+  const { data: agents } = await db
+    .from("agents")
+    .select("id")
+    .eq("workspace_id", params.id)
+    .returns<{ id: string }[]>();
+  const agentIds = (agents ?? []).map((a) => a.id);
+
+  if (agentIds.length > 0) {
+    const { error } = await db
+      .from("agent_task_configs")
+      .update({ enabled: parsed.data.tasks_enabled })
+      .in("agent_id", agentIds);
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+  }
+
+  return NextResponse.json({
+    ok: true,
+    tasks_enabled: parsed.data.tasks_enabled,
+    agents_updated: agentIds.length,
   });
 }

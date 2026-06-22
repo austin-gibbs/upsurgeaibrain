@@ -27,10 +27,34 @@ export interface CreateTaskInput {
   assigneeId?: string | null;
 }
 
+export interface LogCallInput {
+  contactId: string;
+  phone: string;
+  isIncoming?: boolean;
+  note?: string;
+  outcome?: string;
+  durationSeconds?: number;
+  fromNumber?: string;
+  toNumber?: string;
+  recordingUrl?: string;
+}
+
 export interface CrmUser {
   id: string;
   name: string;
   email?: string;
+}
+
+export interface CreateContactInput {
+  fullName: string | null;
+  /** E.164 preferred. */
+  phone?: string | null;
+  email?: string | null;
+  tags?: string[];
+  /** Lead source label (FUB "source"). */
+  source?: string;
+  /** Provider-native user id to assign the new lead to. */
+  assignedUserId?: string | null;
 }
 
 export interface CrmAdapter {
@@ -47,6 +71,9 @@ export interface CrmAdapter {
   /** Append a timeline note / activity. */
   addNote(contactId: string, note: string): Promise<void>;
 
+  /** Log a completed call (with recording) to the CRM timeline. */
+  logCall(input: LogCallInput): Promise<void>;
+
   createTask(input: CreateTaskInput): Promise<void>;
 
   /** Users who can be assigned tasks — powers the wizard assignee picker. */
@@ -54,6 +81,17 @@ export interface CrmAdapter {
 
   /** Cheap call to validate stored credentials. Returns true if usable. */
   verifyCredentials(): Promise<boolean>;
+
+  // ----- Inbound concierge support (optional; FUB implements these) -----
+
+  /** Find an existing contact by phone number (E.164). Inbound caller match. */
+  findContactByPhone?(phone: string): Promise<CrmContact | null>;
+
+  /** Create a new contact and return it. Used when an inbound caller is new. */
+  createContact?(input: CreateContactInput): Promise<CrmContact>;
+
+  /** Set the assigned user (owner) of a contact. */
+  assignContact?(contactId: string, userId: string): Promise<void>;
 }
 
 /** Shape of decrypted credentials per provider. */

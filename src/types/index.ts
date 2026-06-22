@@ -8,6 +8,9 @@ export type MemberRole = "owner" | "admin" | "member";
 
 export type AgentStatus = "draft" | "active" | "paused";
 
+/** Whether the agent dials out on a cadence or answers the business line. */
+export type AgentDirection = "inbound" | "outbound";
+
 export type CallOutcome =
   | "voicemail"
   | "no_answer"
@@ -52,9 +55,18 @@ export interface Agent {
   id: string;
   workspace_id: string;
   name: string;
+  /** CRM tag that enrolls contacts into this agent's call flow. Falls back to workspace.enroll_tag when null. */
+  enroll_tag: string | null;
+  /** Inbound (answers the line) vs outbound (dials on a cadence). */
+  direction: AgentDirection;
   retell_agent_id: string | null;
   retell_from_number: string | null;
   objective: string | null;
+  /** Per-agent CRM. When null the agent inherits the workspace CRM. */
+  crm_provider: CrmProvider | null;
+  crm_credentials_encrypted: string | null;
+  /** Encrypted Retell creds ({ apiKey, webhookSecret? }); set for inbound agents. */
+  retell_credentials_encrypted: string | null;
   status: AgentStatus;
   created_at: string;
   updated_at: string;
@@ -101,7 +113,8 @@ export interface Call {
   id: string;
   workspace_id: string;
   agent_id: string;
-  contact_id: string;
+  contact_id: string | null;
+  direction: AgentDirection;
   attempt_number: number;
   to_number: string;
   retell_call_id: string | null;

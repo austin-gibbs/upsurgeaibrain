@@ -1,0 +1,75 @@
+---
+description: UpSurge Nova-grade design system — always apply when building or editing UI
+globs:
+alwaysApply: true
+---
+
+# UpSurge Design System
+
+All UI work must follow the Nova-grade design language established in this project.
+
+## Stack
+
+- **Framework:** Next.js 14 App Router + Tailwind CSS only (no shadcn/MUI/Chakra)
+- **Icons:** `lucide-react` (strokeWidth 1.75)
+- **Font:** Inter via `next/font/google` (`--font-inter`)
+- **Charts:** `recharts` only when displaying real data (no mock charts)
+
+## Layout
+
+- Authenticated pages use `PageShell` from `@/components/TopNav` (sidebar + top bar + main content)
+- Login page is standalone (no `PageShell`)
+- Main content max-width: `max-w-6xl`, padding `px-6 py-8`
+- Sidebar width: `240px`, fixed left
+
+## Design Tokens (tailwind.config.ts)
+
+- **Background:** `bg-ink-50`, `bg-page-gradient`
+- **Cards:** `bg-white`, `rounded-2xl`, `border-ink-200/50`, `shadow-card`
+- **Text:** `text-ink-900` (primary), `text-ink-500` (secondary), `text-ink-400` (tertiary)
+- **Brand:** `brand-*` blues + `bg-brand-gradient` (blue→green)
+- **Accents:** `accent-mint-*`, `accent-sky-*`, `accent-violet-*`, `accent-amber-*`, `accent-rose-*`
+- **Shadows:** `shadow-soft`, `shadow-card`, `shadow-lifted`, `shadow-pill`
+- **Radii:** `rounded-xl` (inputs/buttons), `rounded-2xl` (cards), `rounded-3xl` (hero elements)
+
+## Components (src/components/ui.tsx)
+
+Always use these primitives — never raw Tailwind for common patterns:
+
+| Component | Use for |
+|-----------|---------|
+| `Button` | Actions (variants: primary, secondary, danger, ghost; sizes: sm, md, lg) |
+| `Input`, `Select`, `Label` | Form fields |
+| `Card` | Containers (`hover` prop for clickable cards) |
+| `Badge`, `StatusBadge` | Status indicators |
+| `IconBadge` | Colored icon in rounded-square (tones: mint, sky, violet, amber, rose) |
+| `StatTile` | KPI/metric display |
+| `SectionHeader` | Section titles with optional description + action |
+| `PageGreeting` | Page title + subtitle |
+| `Segmented` | Pill-style toggle groups |
+| `Pill` | Selectable tag chips |
+| `Tabs` | Tab navigation |
+| `EmptyState` | Zero-data states |
+| `Skeleton` | Loading placeholders |
+| `InsightPanel` | Gradient AI/highlight panels |
+| `cn()` | Class merging |
+
+## Page Patterns
+
+1. Wrap authenticated pages in `<PageShell>`
+2. Use `PageGreeting` or `SectionHeader` for page/section titles
+3. Use `StatTile` + `IconBadge` for metrics
+4. Use `Card hover` for clickable list items with `ArrowUpRight` affordance
+5. Use `EmptyState` for zero-data, `Skeleton` for loading
+6. Back links: `ArrowLeft` icon + muted text, `hover:text-ink-700`
+7. Error messages: `bg-accent-rose-bg text-accent-rose-fg rounded-xl`
+8. Success messages: `bg-accent-mint-bg text-accent-mint-fg rounded-xl`
+
+## Do NOT
+
+- Add harsh borders (`border-slate-300`) — use `border-ink-200/50` or shadows
+- Use `rounded-lg` for cards — cards are `rounded-2xl`
+- Use system default font — Inter is required
+- Create one-off button/card styles — extend `ui.tsx` instead
+- Add mock data visualizations — charts only with real API data
+- Change API routes, fetch URLs, state logic, or validation when doing UI work
