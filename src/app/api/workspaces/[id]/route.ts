@@ -41,6 +41,19 @@ export async function GET(
     .select("id", { count: "exact", head: true })
     .eq("workspace_id", params.id);
 
+  // Per-contact cadence state so the dashboard can show when each contact's
+  // next call is scheduled. Active contacts (soonest next call first) come
+  // before terminal/finished ones.
+  const { data: contacts } = await db
+    .from("contacts")
+    .select(
+      "id, full_name, phones, attempt_count, last_called_on, next_eligible_on, is_terminal, terminal_outcome"
+    )
+    .eq("workspace_id", params.id)
+    .order("is_terminal", { ascending: true })
+    .order("next_eligible_on", { ascending: true, nullsFirst: true })
+    .limit(1000);
+
   const { data: tags } = await db
     .from("workspace_outcome_tags")
     .select("outcome, tag, is_terminal")
@@ -50,6 +63,7 @@ export async function GET(
     workspace,
     agents: agents ?? [],
     contactCount: contactCount ?? 0,
+    contacts: contacts ?? [],
     outcomeTags: tags ?? [],
   });
 }
