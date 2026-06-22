@@ -39,6 +39,44 @@ export function withinCallWindow(timezone: string, start: string, end: string): 
   return now >= start && now <= end;
 }
 
+// ---------------------------------------------------------------------------
+// Hard business-hours guard (global). Independent of per-agent config so a
+// misconfiguration can never dial outside hours: never place a call before
+// 9:00am or after 7:00pm Eastern. America/New_York tracks EST/EDT, so the
+// window stays at 9am–7pm Eastern wall-clock year-round.
+// ---------------------------------------------------------------------------
+export const EASTERN_TZ = "America/New_York";
+const EASTERN_OPEN_SEC = 9 * 3600; // 09:00
+const EASTERN_CLOSE_SEC = 19 * 3600; // 19:00 (7:00pm)
+
+function easternSecondsIntoDay(): number {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: EASTERN_TZ,
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).formatToParts(new Date());
+  const val = (t: string) => Number(parts.find((p) => p.type === t)?.value ?? "0");
+  const hour = val("hour") % 24; // en-GB can emit "24" at midnight
+  return hour * 3600 + val("minute") * 60 + val("second");
+}
+
+/** True only between 9:00am (inclusive) and 7:00pm (exclusive) Eastern. */
+export function withinEasternBusinessHours(): boolean {
+  const s = easternSecondsIntoDay();
+  return s >= EASTERN_OPEN_SEC && s < EASTERN_CLOSE_SEC;
+}
+
+/** Milliseconds until the next 9:00am Eastern open (0 if open right now). */
+export function msUntilEasternWindowOpens(): number {
+  const s = easternSecondsIntoDay();
+  if (s >= EASTERN_OPEN_SEC && s < EASTERN_CLOSE_SEC) return 0;
+  const deltaSec =
+    s < EASTERN_OPEN_SEC ? EASTERN_OPEN_SEC - s : 24 * 3600 - s + EASTERN_OPEN_SEC;
+  return deltaSec * 1000;
+}
+
 /**
  * Is this contact eligible to be dialed today?
  * Mirrors the WF1 "Filter Eligible Contacts" gates, now typed:
