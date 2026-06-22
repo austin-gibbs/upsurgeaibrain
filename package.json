@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "description": "Upsurge — multi-tenant AI voice-agent orchestration platform (Retell AI + FUB/HighLevel)",
+  "engines": {
+    "node": "22.x"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
