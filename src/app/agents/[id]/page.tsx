@@ -89,6 +89,13 @@ export default function AgentDetailPage({
   const [callCfg, setCallCfg] = useState<CallConfig>(defaultCallConfig());
   const [taskCfg, setTaskCfg] = useState<TaskConfig>(defaultTaskConfig());
   const [workspaceTimezone, setWorkspaceTimezone] = useState("America/New_York");
+  // Effective CRM = agent's own provider/creds, else inherited from workspace.
+  // Drives the HighLevel-only routing editor so it also shows for older
+  // workspaces that configured HighLevel at the workspace level.
+  const [effectiveCrmProvider, setEffectiveCrmProvider] =
+    useState<CrmProvider | null>(null);
+  const [hasEffectiveCrmCredentials, setHasEffectiveCrmCredentials] =
+    useState(false);
   const [stageMap, setStageMap] = useState<StageMapEntry[]>([]);
   const [pipelines, setPipelines] = useState<Pipeline[]>([]);
   const [pipelinesLoading, setPipelinesLoading] = useState(false);
@@ -154,6 +161,8 @@ export default function AgentDetailPage({
           }))
         );
         setWorkspaceTimezone(d.workspaceTimezone ?? "America/New_York");
+        setEffectiveCrmProvider(d.effectiveCrmProvider ?? null);
+        setHasEffectiveCrmCredentials(Boolean(d.hasEffectiveCrmCredentials));
       })
       .catch((e) => setError(e.message));
   }
@@ -170,10 +179,10 @@ export default function AgentDetailPage({
     }
   }, []);
 
-  // Load HighLevel pipelines (for the routing UI) once the agent is known to
-  // use HighLevel with stored credentials.
+  // Load HighLevel pipelines (for the routing UI) once the effective CRM
+  // (agent's own or inherited from the workspace) is HighLevel with creds.
   useEffect(() => {
-    if (!agent || agent.crm_provider !== "highlevel" || !agent.has_crm_credentials) {
+    if (effectiveCrmProvider !== "highlevel" || !hasEffectiveCrmCredentials) {
       setPipelines([]);
       return;
     }
@@ -196,7 +205,7 @@ export default function AgentDetailPage({
     return () => {
       cancelled = true;
     };
-  }, [agent?.crm_provider, agent?.has_crm_credentials, params.id]);
+  }, [effectiveCrmProvider, hasEffectiveCrmCredentials, params.id]);
 
   async function patch(body: Record<string, unknown>) {
     setSaving(true);
@@ -298,7 +307,10 @@ export default function AgentDetailPage({
 
   const isInbound = direction === "inbound";
   const tc = agent.agent_task_configs[0];
-  const isHighLevel = crmProvider === "highlevel";
+  // HighLevel if the agent's own CRM is HighLevel OR it inherits HighLevel
+  // from its workspace (covers already-integrated workspaces).
+  const isHighLevel =
+    crmProvider === "highlevel" || effectiveCrmProvider === "highlevel";
 
   const linkageReady = isInbound
     ? Boolean(agent.retell_agent_id && agent.has_retell_credentials)

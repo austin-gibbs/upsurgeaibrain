@@ -66,16 +66,34 @@ export async function GET(
         "retell_agent_id, retell_from_number, crm_provider, " +
         "crm_credentials_encrypted, retell_credentials_encrypted, created_at, " +
         "agent_call_configs(*), agent_task_configs(*), " +
-        "workspaces(timezone)"
+        "workspaces(timezone, crm_provider, crm_credentials_encrypted)"
     )
     .eq("id", params.id)
-    .single<AgentRow & { workspaces: { timezone: string } | null }>();
+    .single<
+      AgentRow & {
+        workspaces: {
+          timezone: string;
+          crm_provider: "followupboss" | "highlevel" | null;
+          crm_credentials_encrypted: string | null;
+        } | null;
+      }
+    >();
 
   if (error || !agent) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
 
   const { workspaces, ...agentRow } = agent;
+
+  // Effective CRM = the agent's own provider/creds when set, otherwise the
+  // ones inherited from the workspace. Older workspaces configured HighLevel
+  // at the workspace level, so agents there have neither field of their own —
+  // the routing editor must key off this, not the agent's own columns.
+  const effectiveCrmProvider =
+    agentRow.crm_provider ?? workspaces?.crm_provider ?? null;
+  const hasEffectiveCrmCredentials =
+    Boolean(agentRow.crm_credentials_encrypted) ||
+    Boolean(workspaces?.crm_credentials_encrypted);
 
   const { data: calls } = await db
     .from("calls")
@@ -95,6 +113,8 @@ export async function GET(
   return NextResponse.json({
     agent: publicAgent(agentRow),
     workspaceTimezone: workspaces?.timezone ?? "America/New_York",
+    effectiveCrmProvider,
+    hasEffectiveCrmCredentials,
     calls: calls ?? [],
     pipelineStageMap: pipelineStageMap ?? [],
   });
