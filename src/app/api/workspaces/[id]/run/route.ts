@@ -9,6 +9,11 @@ import { pollWorkspace } from "@/lib/engine/poller";
 import { runWorkspacePollSchema } from "@/lib/validation";
 
 export const runtime = "nodejs";
+// The manual poll pulls + upserts the full enroll-tagged contact set (often
+// 1000+ contacts) before any dials are enqueued. That far exceeds the default
+// serverless timeout, which silently killed the request mid-pull and enqueued
+// nothing. 300s is the Vercel ceiling and gives the pull room to finish.
+export const maxDuration = 300;
 
 export async function POST(
   req: NextRequest,

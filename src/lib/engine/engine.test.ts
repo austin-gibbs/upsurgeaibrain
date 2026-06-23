@@ -259,14 +259,18 @@ describe("remainingWindowCapacity", () => {
     const end = "19:00";
     const drip = 60;
     const full = dailyWindowCapacity(start, end, drip);
-    const nowHHMM = new Intl.DateTimeFormat("en-GB", {
+    // Use seconds precision to match the implementation. Truncating to the
+    // minute made the partial-window assertion flaky (off by one whenever the
+    // wall clock was partway through a minute).
+    const nowParts = new Intl.DateTimeFormat("en-GB", {
       timeZone: "America/New_York",
       hour: "2-digit",
       minute: "2-digit",
+      second: "2-digit",
       hour12: false,
-    }).format(new Date());
-    const [h, m] = nowHHMM.split(":").map(Number);
-    const nowSec = h * 3600 + m * 60;
+    }).formatToParts(new Date());
+    const part = (t: string) => Number(nowParts.find((p) => p.type === t)?.value ?? "0");
+    const nowSec = (part("hour") % 24) * 3600 + part("minute") * 60 + part("second");
     const startSec = hhmmToSeconds(start);
     const endSec = hhmmToSeconds(end);
     const cap = remainingWindowCapacity("America/New_York", start, end, drip);
@@ -278,7 +282,12 @@ describe("remainingWindowCapacity", () => {
     } else {
       assert.ok(cap > 0 && cap <= full);
       const expected = Math.floor((endSec - nowSec) / drip) + 1;
-      assert.equal(cap, expected);
+      // Allow ±1: a second can elapse between this clock read and the one inside
+      // remainingWindowCapacity, nudging the floor division across a boundary.
+      assert.ok(
+        Math.abs(cap - expected) <= 1,
+        `cap ${cap} not within 1 of expected ${expected}`
+      );
     }
   });
 
