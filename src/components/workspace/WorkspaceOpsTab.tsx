@@ -27,7 +27,7 @@ import {
   Label,
   Select,
 } from "@/components/ui";
-import { dailyWindowCapacity, hhmmToSeconds } from "@/lib/engine/cadence";
+import { dailyWindowCapacity, projectDialSlot, rollScheduleForwardIfPast } from "@/lib/engine/cadence";
 
 type ContactRow = {
   id: string;
@@ -159,6 +159,11 @@ function formatTime(iso: string | null, timezone: string): string {
   }).format(new Date(iso));
 }
 
+function formatScheduledDisplay(iso: string | null, timezone: string): string {
+  if (!iso) return "—";
+  return formatTime(rollScheduleForwardIfPast(iso), timezone);
+}
+
 function formatClock(totalSeconds: number): string {
   const h24 = Math.floor(totalSeconds / 3600) % 24;
   const m = Math.floor((totalSeconds % 3600) / 60);
@@ -200,7 +205,6 @@ function buildSchedules(
     maxCallsPerDay,
     dailyWindowCapacity(windowStart, windowEnd, dripSeconds)
   );
-  const windowStartSec = hhmmToSeconds(windowStart);
   const perDay: Record<string, number> = {};
   const map = new Map<string, Schedule>();
 
@@ -245,10 +249,31 @@ function buildSchedules(
       earliest = today;
     }
 
-    const runDate = findRunDate(earliest);
-    const pos = perDay[runDate] ?? 0;
+    const runDateCandidate = findRunDate(earliest);
+    let pos = perDay[runDateCandidate] ?? 0;
+    let projected = projectDialSlot(
+      runDateCandidate,
+      today,
+      nowHHMM,
+      windowStart,
+      pos,
+      dripSeconds
+    );
+    if (projected.runDate !== runDateCandidate) {
+      const runDateTomorrow = findRunDate(projected.runDate);
+      pos = perDay[runDateTomorrow] ?? 0;
+      projected = projectDialSlot(
+        runDateTomorrow,
+        today,
+        nowHHMM,
+        windowStart,
+        pos,
+        dripSeconds
+      );
+    }
+    const runDate = projected.runDate;
+    const projectedSec = projected.slotSeconds;
     perDay[runDate] = pos + 1;
-    const projectedSec = windowStartSec + pos * dripSeconds;
     const rel = relativeWord(today, runDate);
     map.set(c.id, {
       label: `${formatDate(runDate)} · ${formatClock(projectedSec)} ${tzLabel}`,
@@ -832,7 +857,7 @@ export function WorkspaceOpsTab({
                         <td className="px-5 py-3.5 text-ink-600">
                           {entry.status === "dialing"
                             ? formatTime(entry.startedAt, workspace.timezone)
-                            : formatTime(entry.scheduledFor, workspace.timezone)}
+                            : formatScheduledDisplay(entry.scheduledFor, workspace.timezone)}
                         </td>
                       </tr>
                     ))}

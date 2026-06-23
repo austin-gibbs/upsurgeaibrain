@@ -13,6 +13,7 @@ import { startPollWorker } from "@/lib/queue/workers/poll.worker";
 import { startCallWorker } from "@/lib/queue/workers/call.worker";
 import { tickScheduler } from "@/lib/engine/scheduler";
 import { reconcileStuckCalls } from "@/lib/engine/reconcile";
+import { resyncCallQueue } from "@/lib/queue/sweeper";
 
 async function main() {
   console.log("[worker] starting Upsurge engine…");
@@ -50,11 +51,29 @@ async function main() {
     }
   }, 2 * 60_000);
 
+  // Queue self-heal sweep: every 90s, rebuild BullMQ dial jobs for durable
+  // `call_queue_entries` rows that are due but have no live job (e.g. after a
+  // worker redeploy or a Redis restart wiped the delayed-job set). This makes
+  // the durable Postgres queue the source of truth and lets the day's dials
+  // survive infra churn instead of silently dying. Idempotent and bounded.
+  let sweepTimer: NodeJS.Timeout | null = setInterval(async () => {
+    try {
+      const summary = await resyncCallQueue({ limit: 500 });
+      if (summary.reEnqueued) {
+        console.log("[sweeper] call-queue self-heal:", summary);
+      }
+    } catch (e) {
+      console.error("[sweeper] resync error:", e);
+    }
+  }, 90_000);
+
   const shutdown = async () => {
     console.log("[worker] shutting down…");
     if (timer) clearInterval(timer);
     if (reconcileTimer) clearInterval(reconcileTimer);
     reconcileTimer = null;
+    if (sweepTimer) clearInterval(sweepTimer);
+    sweepTimer = null;
     await Promise.all([pollWorker.close(), callWorker.close()]);
     process.exit(0);
   };

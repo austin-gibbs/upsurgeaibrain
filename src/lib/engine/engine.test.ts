@@ -18,6 +18,8 @@ import {
   dailyWindowCapacity,
   remainingWindowCapacity,
   hhmmToSeconds,
+  projectDialSlot,
+  rollScheduleForwardIfPast,
 } from "./cadence";
 import { reconcileTags } from "./tags";
 import type { AgentCallConfig, Contact, OutcomeTag } from "@/types";
@@ -295,6 +297,38 @@ describe("remainingWindowCapacity", () => {
     const cap = remainingWindowCapacity("America/New_York", "13:00", "19:00", 60);
     assert.ok(cap >= 0);
     assert.ok(cap <= dailyWindowCapacity("13:00", "19:00", 60));
+  });
+});
+
+describe("projectDialSlot", () => {
+  it("keeps today when the slot is still in the future", () => {
+    const result = projectDialSlot("2026-06-23", "2026-06-23", "12:00", "13:00", 0, 60);
+    assert.equal(result.runDate, "2026-06-23");
+    assert.equal(result.slotSeconds, hhmmToSeconds("13:00"));
+  });
+
+  it("rolls to tomorrow when today's slot already passed", () => {
+    const result = projectDialSlot("2026-06-23", "2026-06-23", "14:00", "13:00", 0, 60);
+    assert.equal(result.runDate, "2026-06-24");
+    assert.equal(result.slotSeconds, hhmmToSeconds("13:00"));
+  });
+});
+
+describe("rollScheduleForwardIfPast", () => {
+  it("returns the same timestamp when still in the future", () => {
+    const future = new Date(Date.now() + 3600_000).toISOString();
+    assert.equal(rollScheduleForwardIfPast(future), future);
+  });
+
+  it("rolls a past timestamp forward by whole days", () => {
+    const past = new Date("2026-06-23T17:00:00.000Z").toISOString();
+    const ref = new Date("2026-06-23T22:00:00.000Z").getTime();
+    const rolled = rollScheduleForwardIfPast(past, ref);
+    assert.ok(new Date(rolled).getTime() >= ref);
+    assert.equal(
+      new Date(rolled).getUTCHours(),
+      new Date(past).getUTCHours()
+    );
   });
 });
 

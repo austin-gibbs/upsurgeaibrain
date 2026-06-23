@@ -67,6 +67,44 @@ export function hhmmToSeconds(hhmm: string): number {
   return h * 3600 + m * 60;
 }
 
+/**
+ * Project dial date/time for a 0-based queue position on an earliest date.
+ * When today's slot at window start + drip is already past `nowHHMM`, roll to
+ * the next calendar day (Ops UI + schedule projection).
+ */
+export function projectDialSlot(
+  earliestDate: string,
+  today: string,
+  nowHHMM: string,
+  windowStart: string,
+  positionInDay: number,
+  dripSeconds: number
+): { runDate: string; slotSeconds: number } {
+  const windowStartSec = hhmmToSeconds(windowStart);
+  const nowSec = hhmmToSeconds(nowHHMM);
+  let runDate = earliestDate;
+  let slotSeconds = windowStartSec + positionInDay * dripSeconds;
+
+  if (runDate === today && slotSeconds <= nowSec) {
+    runDate = addDays(today, 1);
+    slotSeconds = windowStartSec + positionInDay * dripSeconds;
+  }
+
+  return { runDate, slotSeconds };
+}
+
+/** Roll a stored schedule timestamp forward day-by-day until it is in the future. */
+export function rollScheduleForwardIfPast(
+  scheduledForIso: string,
+  referenceMs: number = Date.now()
+): string {
+  let ms = new Date(scheduledForIso).getTime();
+  if (Number.isNaN(ms) || ms >= referenceMs) return scheduledForIso;
+  const dayMs = 24 * 3600 * 1000;
+  while (ms < referenceMs) ms += dayMs;
+  return new Date(ms).toISOString();
+}
+
 // Re-export for callers that already import from cadence.
 export { normalizeHHMM } from "@/lib/hhmm";
 

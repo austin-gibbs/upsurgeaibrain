@@ -337,16 +337,13 @@ export async function enqueueContactsNow(
       await closeCallQueue().catch(() => {});
     }
   } else if (jobSpecs.length > 0 && !process.env.REDIS_URL) {
-    errors.push("REDIS_URL is not configured — cannot schedule dials");
-    for (const spec of jobSpecs) {
-      await supabase
-        .from("call_queue_entries")
-        .delete()
-        .eq("agent_id", agentId)
-        .eq("contact_id", spec.data.contactId)
-        .eq("queue_day", today)
-        .eq("status", "pending");
-    }
+    // No Redis on this tier (e.g. Vercel serverless, where the Ops "Queue
+    // calls now" button runs and Railway's private Redis is unreachable).
+    // Leave the durable call_queue_entries rows in place — the worker's
+    // self-heal sweeper enqueues them into Redis on its next tick and the call
+    // worker dials them. The durable table is the source of truth, so this is a
+    // success, not a failure: do NOT roll the rows back.
+    enqueued = jobSpecs.length;
   }
 
   return { agentId, requested, eligible, enqueued, capped, errors: errors.length ? errors : undefined };
