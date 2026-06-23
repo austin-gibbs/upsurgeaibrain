@@ -137,7 +137,8 @@ async function llmSummarize(input: SummarizeInput): Promise<string> {
     input.transcript ? `Transcript:\n${input.transcript.slice(0, 6000)}` : "",
     "",
     "Write an updated memory in 4-6 sentences the agent can read before the NEXT call.",
-    "Capture: rapport, stated preferences/objections, commitments made, and the best next step toward the objective. Be concrete. No preamble.",
+    "Lead with the personal connection: name any hobbies, family, life events, or small-talk the contact shared (e.g. they practice karate) so the agent can pick the relationship back up naturally.",
+    "Then capture: stated preferences/objections, commitments made, and the best next step toward the objective. Be concrete and never drop a personal detail the contact volunteered. No preamble.",
   ].join("\n");
 
   const res = await fetch("https://api.anthropic.com/v1/messages", {
@@ -169,8 +170,24 @@ async function llmSummarize(input: SummarizeInput): Promise<string> {
 // happen to mention it.
 // =====================================================================
 
-/** The structured fields the agent tries to keep current for each contact. */
-export const FACT_KEYS = [
+// Personal / relationship facts. These are vertical-agnostic and exist so the
+// agent can build genuine rapport across calls — remembering hobbies, family,
+// life events, and how the person likes to be treated. A contact mentioning
+// "I'm off to karate" lands in `personal_interests`; "my daughter's graduating"
+// in `family_details`. Kept separate from the business fields below so the
+// rapport layer is reusable for any client vertical, not just probate.
+export const PERSONAL_FACT_KEYS = [
+  "personal_interests", // hobbies, sports, passions (e.g. "practices karate")
+  "family_details", // spouse, kids, relatives, pets the contact mentions
+  "life_events", // moves, jobs, retirement, health, milestones
+  "preferences", // how they like to be contacted / talked to
+  "rapport_notes", // small-talk hooks, jokes, shared ground to revisit
+] as const;
+
+// Business / qualification facts. Probate-leaning today (the live vertical) but
+// extend freely as new verticals come online. These drive the objective; the
+// personal keys above drive the relationship.
+export const BUSINESS_FACT_KEYS = [
   "probate_status",
   "executor_status",
   "motivation",
@@ -184,7 +201,12 @@ export const FACT_KEYS = [
   "best_phone",
   "best_call_window",
   "emotional_tone",
-  "important_family_details",
+] as const;
+
+/** The structured fields the agent tries to keep current for each contact. */
+export const FACT_KEYS = [
+  ...PERSONAL_FACT_KEYS,
+  ...BUSINESS_FACT_KEYS,
 ] as const;
 
 interface ExtractFactsInput {
@@ -234,7 +256,7 @@ async function llmExtractFacts(
   input: ExtractFactsInput
 ): Promise<Record<string, unknown>> {
   const prompt = [
-    "You maintain a structured fact sheet for an AI phone agent calling the same contact about a probate / inherited property over multiple calls.",
+    "You maintain a structured fact sheet for an AI phone agent that calls the same contact repeatedly and is trying to build a real, ongoing relationship with them.",
     "Given the existing fact sheet and the most recent call, return the UPDATED fact sheet.",
     "",
     `Existing fact sheet (JSON): ${JSON.stringify(input.priorFacts ?? {})}`,
@@ -242,7 +264,13 @@ async function llmExtractFacts(
     `Most recent call summary: ${input.callSummary ?? "(none)"}.`,
     input.transcript ? `Transcript:\n${input.transcript.slice(0, 6000)}` : "",
     "",
+    "Capture TWO kinds of information:",
+    "1. PERSONAL / RAPPORT details — anything that helps the agent connect like a person who remembers them:",
+    "   personal_interests (hobbies, sports, passions — e.g. 'practices karate'), family_details (spouse, kids, pets), life_events (moves, jobs, health, milestones), preferences (how they like to be contacted/spoken to), rapport_notes (small-talk hooks, jokes, shared ground to bring up next time).",
+    "2. BUSINESS / QUALIFICATION details relevant to the agent's objective (e.g. for a probate/real-estate call: probate_status, executor_status, motivation, timeline, property_condition, repairs_needed, occupancy_status, realtor_involved, appointment_status), plus contact logistics: email, best_phone, best_call_window, emotional_tone.",
+    "",
     "Rules:",
+    "- Always capture personal/rapport details when the contact volunteers them, even in passing ('I have to go to karate' -> personal_interests). These matter as much as the business fields.",
     "- Keep every existing value unless the latest call clearly updates it.",
     "- Only fill a field if the call gives real information for it; otherwise omit the key entirely.",
     "- Each value must be a short string (a few words).",
