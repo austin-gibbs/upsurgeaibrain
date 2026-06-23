@@ -10,7 +10,15 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
 import { classifyOutcome } from "./outcome";
-import { isEligible, nextEligibleDate, addDays, withinCallWindow } from "./cadence";
+import {
+  isEligible,
+  nextEligibleDate,
+  addDays,
+  withinCallWindow,
+  dailyWindowCapacity,
+  remainingWindowCapacity,
+  hhmmToSeconds,
+} from "./cadence";
 import { reconcileTags } from "./tags";
 import type { AgentCallConfig, Contact, OutcomeTag } from "@/types";
 
@@ -217,5 +225,75 @@ describe("withinCallWindow", () => {
     assert.equal("08:59" >= start && "08:59" <= end, false);
     // And the real function returns a boolean for the current time.
     assert.equal(typeof withinCallWindow("America/New_York", start, end), "boolean");
+  });
+});
+
+// ---------------------------------------------------------------------
+// dailyWindowCapacity + remainingWindowCapacity
+// ---------------------------------------------------------------------
+describe("dailyWindowCapacity", () => {
+  it("counts drip slots from window start through window end inclusive", () => {
+    // 13:00–19:00 = 6 hours, 60s drip → 360 intervals + 1 = 361
+    assert.equal(dailyWindowCapacity("13:00", "19:00", 60), 361);
+    assert.equal(dailyWindowCapacity("09:00", "10:00", 60), 61);
+  });
+
+  it("returns 0 for invalid windows or drip", () => {
+    assert.equal(dailyWindowCapacity("19:00", "13:00", 60), 0);
+    assert.equal(dailyWindowCapacity("13:00", "19:00", 0), 0);
+  });
+
+  it("last projected slot never exceeds window end", () => {
+    const start = "13:00";
+    const end = "19:00";
+    const drip = 60;
+    const cap = dailyWindowCapacity(start, end, drip);
+    const lastSec = hhmmToSeconds(start) + (cap - 1) * drip;
+    assert.ok(lastSec <= hhmmToSeconds(end));
+  });
+});
+
+describe("remainingWindowCapacity", () => {
+  it("matches window phase: full before open, partial mid-window, zero after close", () => {
+    const start = "13:00";
+    const end = "19:00";
+    const drip = 60;
+    const full = dailyWindowCapacity(start, end, drip);
+    const nowHHMM = new Intl.DateTimeFormat("en-GB", {
+      timeZone: "America/New_York",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }).format(new Date());
+    const [h, m] = nowHHMM.split(":").map(Number);
+    const nowSec = h * 3600 + m * 60;
+    const startSec = hhmmToSeconds(start);
+    const endSec = hhmmToSeconds(end);
+    const cap = remainingWindowCapacity("America/New_York", start, end, drip);
+
+    if (nowSec < startSec) {
+      assert.equal(cap, full);
+    } else if (nowSec >= endSec) {
+      assert.equal(cap, 0);
+    } else {
+      assert.ok(cap > 0 && cap <= full);
+      const expected = Math.floor((endSec - nowSec) / drip) + 1;
+      assert.equal(cap, expected);
+    }
+  });
+
+  it("returns a boolean-safe non-negative count", () => {
+    const cap = remainingWindowCapacity("America/New_York", "13:00", "19:00", 60);
+    assert.ok(cap >= 0);
+    assert.ok(cap <= dailyWindowCapacity("13:00", "19:00", 60));
+  });
+});
+
+describe("daily cap rollover math", () => {
+  it("1200 eligible contacts span multiple days at window capacity", () => {
+    const perDay = dailyWindowCapacity("13:00", "19:00", 60);
+    assert.equal(perDay, 361);
+    const daysNeeded = Math.ceil(1200 / perDay);
+    assert.equal(daysNeeded, 4);
   });
 });

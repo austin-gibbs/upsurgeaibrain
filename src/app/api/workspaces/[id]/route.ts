@@ -52,18 +52,40 @@ export async function GET(
     .select("id", { count: "exact", head: true })
     .eq("workspace_id", params.id);
 
+  type ContactRow = {
+    id: string;
+    full_name: string | null;
+    phones: string[];
+    attempt_count: number;
+    last_called_on: string | null;
+    next_eligible_on: string | null;
+    is_terminal: boolean;
+    terminal_outcome: string | null;
+  };
+
   // Per-contact cadence state so the dashboard can show when each contact's
   // next call is scheduled. Active contacts (soonest next call first) come
-  // before terminal/finished ones.
-  const { data: contacts } = await db
-    .from("contacts")
-    .select(
-      "id, full_name, phones, attempt_count, last_called_on, next_eligible_on, is_terminal, terminal_outcome"
-    )
-    .eq("workspace_id", params.id)
-    .order("is_terminal", { ascending: true })
-    .order("next_eligible_on", { ascending: true, nullsFirst: true })
-    .limit(1000);
+  // before terminal/finished ones. Paginate past PostgREST's 1,000-row default.
+  const PAGE = 1000;
+  const total = contactCount ?? 0;
+  const contacts: ContactRow[] = [];
+  for (let offset = 0; offset < total; offset += PAGE) {
+    const { data: page, error: pageErr } = await db
+      .from("contacts")
+      .select(
+        "id, full_name, phones, attempt_count, last_called_on, next_eligible_on, is_terminal, terminal_outcome"
+      )
+      .eq("workspace_id", params.id)
+      .order("is_terminal", { ascending: true })
+      .order("next_eligible_on", { ascending: true, nullsFirst: true })
+      .range(offset, Math.min(offset + PAGE - 1, total - 1));
+    if (pageErr) {
+      console.error("contacts fetch failed", { id: params.id, error: pageErr.message });
+      return NextResponse.json({ error: "failed to load contacts" }, { status: 500 });
+    }
+    if (page?.length) contacts.push(...page);
+    if (!page?.length || page.length < PAGE) break;
+  }
 
   const { data: tags } = await db
     .from("workspace_outcome_tags")
@@ -74,7 +96,7 @@ export async function GET(
     workspace: { ...workspace, crm_account_url: null },
     agents: agents ?? [],
     contactCount: contactCount ?? 0,
-    contacts: contacts ?? [],
+    contacts,
     outcomeTags: tags ?? [],
   });
 }

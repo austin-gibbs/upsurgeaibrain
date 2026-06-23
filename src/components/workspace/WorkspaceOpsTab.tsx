@@ -25,6 +25,7 @@ import {
   Label,
   Select,
 } from "@/components/ui";
+import { dailyWindowCapacity, hhmmToSeconds } from "@/lib/engine/cadence";
 
 type ContactRow = {
   id: string;
@@ -58,6 +59,8 @@ type OpsData = {
       max_calls_per_day: number;
       max_attempts_per_contact: number;
       daily_run_at: string;
+      call_window_start: string;
+      call_window_end: string;
       drip_seconds: number;
     }[];
     agent_task_configs: { enabled: boolean }[];
@@ -107,13 +110,6 @@ function nowHHMMInTz(timezone: string): string {
   }).format(new Date());
 }
 
-function formatRunTime(hhmm: string): string {
-  const [h, m] = hhmm.split(":").map(Number);
-  const period = h >= 12 ? "PM" : "AM";
-  const hr = h % 12 === 0 ? 12 : h % 12;
-  return `${hr}:${String(m ?? 0).padStart(2, "0")} ${period}`;
-}
-
 function addDaysIso(iso: string, n: number): string {
   const d = new Date(`${iso}T00:00:00Z`);
   d.setUTCDate(d.getUTCDate() + n);
@@ -141,16 +137,38 @@ function buildSchedules(
   contacts: ContactRow[],
   today: string,
   nowHHMM: string,
-  runAt: string,
+  windowStart: string,
+  windowEnd: string,
   dripSeconds: number,
+  maxCallsPerDay: number,
   maxAttempts: number | null
 ): Map<string, Schedule> {
-  const [rh, rm] = runAt.split(":").map(Number);
-  const runStartSec = (rh || 0) * 3600 + (rm || 0) * 60;
+  const dailyCap = Math.min(
+    maxCallsPerDay,
+    dailyWindowCapacity(windowStart, windowEnd, dripSeconds)
+  );
+  const windowStartSec = hhmmToSeconds(windowStart);
   const perDay: Record<string, number> = {};
   const map = new Map<string, Schedule>();
 
-  for (const c of contacts) {
+  const sorted = [...contacts].sort((a, b) => {
+    if (a.is_terminal !== b.is_terminal) return a.is_terminal ? 1 : -1;
+    const na = a.next_eligible_on ?? "0000-00-00";
+    const nb = b.next_eligible_on ?? "0000-00-00";
+    if (na !== nb) return na.localeCompare(nb);
+    return a.attempt_count - b.attempt_count;
+  });
+
+  function findRunDate(earliest: string): string {
+    let d = earliest;
+    for (;;) {
+      const count = perDay[d] ?? 0;
+      if (count < dailyCap) return d;
+      d = addDaysIso(d, 1);
+    }
+  }
+
+  for (const c of sorted) {
     if (c.is_terminal) {
       map.set(c.id, {
         label: "Completed",
@@ -163,16 +181,21 @@ function buildSchedules(
       map.set(c.id, { label: "Finished", tone: "slate", note: "max attempts reached" });
       continue;
     }
+
     const next = c.next_eligible_on;
-    const runDate =
-      !next || next <= today
-        ? nowHHMM < runAt
-          ? today
-          : addDaysIso(today, 1)
-        : next;
+    let earliest: string;
+    if (next && next > today) {
+      earliest = next;
+    } else if (nowHHMM > windowEnd) {
+      earliest = addDaysIso(today, 1);
+    } else {
+      earliest = today;
+    }
+
+    const runDate = findRunDate(earliest);
     const pos = perDay[runDate] ?? 0;
     perDay[runDate] = pos + 1;
-    const projectedSec = runStartSec + pos * dripSeconds;
+    const projectedSec = windowStartSec + pos * dripSeconds;
     const rel = relativeWord(today, runDate);
     map.set(c.id, {
       label: `${formatDate(runDate)} · ${formatClock(projectedSec)} ET`,
@@ -352,19 +375,21 @@ export function WorkspaceOpsTab({
       (m, a) => Math.max(m, a.agent_call_configs[0]?.max_attempts_per_contact ?? 0),
       0
     ) || null;
-  const runAt =
-    agents.reduce<string | null>((min, a) => {
-      const r = a.agent_call_configs[0]?.daily_run_at;
-      if (!r) return min;
-      return min === null || r < min ? r : min;
-    }, null) ?? "09:00";
-  const dripSeconds = agents[0]?.agent_call_configs[0]?.drip_seconds ?? 60;
+  const outboundConfig =
+    agents.find((a) => a.direction === "outbound")?.agent_call_configs[0] ??
+    agents[0]?.agent_call_configs[0];
+  const windowStart = outboundConfig?.call_window_start ?? "09:00";
+  const windowEnd = outboundConfig?.call_window_end ?? "18:00";
+  const dripSeconds = outboundConfig?.drip_seconds ?? 60;
+  const maxCallsPerDay = outboundConfig?.max_calls_per_day ?? 100;
   const schedules = buildSchedules(
     contacts,
     today,
     nowEt,
-    runAt,
+    windowStart,
+    windowEnd,
     dripSeconds,
+    maxCallsPerDay,
     maxAttempts
   );
   const q = query.trim().toLowerCase();

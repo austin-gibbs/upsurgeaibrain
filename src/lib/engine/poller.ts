@@ -8,7 +8,13 @@
 import { createServiceClient } from "@/lib/supabase/server";
 import { getCrmAdapterForAgent } from "@/lib/crm";
 import { getCallQueue } from "@/lib/queue/queues";
-import { isEligible, todayInTz, withinCallWindow } from "./cadence";
+import {
+  isEligible,
+  msUntilCallWindowOpens,
+  remainingWindowCapacity,
+  todayInTz,
+  withinCallWindow,
+} from "./cadence";
 import type { Agent, AgentCallConfig, Contact, Workspace } from "@/types";
 
 export interface PollOptions {
@@ -105,11 +111,36 @@ export async function pollAgent(
     if (saved) contacts.push(saved);
   }
 
-  // 3. Filter eligible + respect the daily cap.
-  const eligible = contacts.filter((c) => isEligible(c, config, today) && c.phones.length > 0);
-  const capped = eligible.slice(0, config.max_calls_per_day);
+  // 3. Filter eligible, sort for fair rollover, cap to what fits today's window.
+  const eligible = contacts
+    .filter((c) => isEligible(c, config, today) && c.phones.length > 0)
+    .sort((a, b) => {
+      const na = a.next_eligible_on ?? "0000-00-00";
+      const nb = b.next_eligible_on ?? "0000-00-00";
+      if (na !== nb) return na.localeCompare(nb);
+      return a.attempt_count - b.attempt_count;
+    });
 
-  // 4. Enqueue with drip throttle (delay = index * drip_seconds).
+  const windowCapacity = options?.testMode
+    ? config.max_calls_per_day
+    : remainingWindowCapacity(
+        workspace.timezone,
+        config.call_window_start,
+        config.call_window_end,
+        config.drip_seconds
+      );
+  const dailyCap = Math.min(config.max_calls_per_day, windowCapacity);
+  const capped = eligible.slice(0, dailyCap);
+
+  const baseDelay = options?.testMode
+    ? 0
+    : msUntilCallWindowOpens(
+        workspace.timezone,
+        config.call_window_start,
+        config.call_window_end
+      );
+
+  // 4. Enqueue with drip throttle anchored to window open.
   const queue = getCallQueue();
   let enqueued = 0;
   for (let i = 0; i < capped.length; i++) {
@@ -124,7 +155,7 @@ export async function pollAgent(
         testMode: options?.testMode,
       },
       {
-        delay: i * config.drip_seconds * 1000,
+        delay: baseDelay + i * config.drip_seconds * 1000,
         jobId: `${agentId}:${contact.id}:${today}`, // idempotent per day
       }
     );

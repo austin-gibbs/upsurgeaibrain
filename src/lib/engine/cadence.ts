@@ -52,9 +52,46 @@ function secondsIntoDayInTz(timezone: string): number {
   return hour * 3600 + val("minute") * 60 + val("second");
 }
 
-function hhmmToSeconds(hhmm: string): number {
+export function hhmmToSeconds(hhmm: string): number {
   const [h, m] = hhmm.split(":").map(Number);
   return h * 3600 + m * 60;
+}
+
+/**
+ * Max dials that fit inside a call window at the given drip spacing.
+ * First dial lands at window start; each subsequent dial is drip_seconds later.
+ */
+export function dailyWindowCapacity(
+  start: string,
+  end: string,
+  dripSeconds: number
+): number {
+  if (dripSeconds <= 0) return 0;
+  const windowSeconds = hhmmToSeconds(end) - hhmmToSeconds(start);
+  if (windowSeconds <= 0) return 0;
+  return Math.floor(windowSeconds / dripSeconds) + 1;
+}
+
+/**
+ * How many dials can still fit today from the current moment until window end.
+ * Before window open, returns the full daily capacity; after window close, 0.
+ */
+export function remainingWindowCapacity(
+  timezone: string,
+  start: string,
+  end: string,
+  dripSeconds: number
+): number {
+  if (dripSeconds <= 0) return 0;
+  const nowSec = secondsIntoDayInTz(timezone);
+  const startSec = hhmmToSeconds(start);
+  const endSec = hhmmToSeconds(end);
+  if (nowSec >= endSec) return 0;
+  if (nowSec < startSec) {
+    return dailyWindowCapacity(start, end, dripSeconds);
+  }
+  const remainingSeconds = endSec - nowSec;
+  return Math.floor(remainingSeconds / dripSeconds) + 1;
 }
 
 /** Milliseconds until the next call-window open in a timezone (0 if open right now). */
