@@ -1,7 +1,7 @@
 // =====================================================================
-// GET /api/oauth/highlevel/callback — finish the HighLevel OAuth flow.
+// GET /api/oauth/crm/callback — finish the CRM OAuth flow (HighLevel).
 //
-// HighLevel redirects here with `code` + the signed `state` we minted in
+// The provider redirects here with `code` + the signed `state` we minted in
 // the connect route. We exchange the code for tokens, then store them
 // (access + refresh + expiry + locationId) encrypted on the agent so the
 // adapter can auto-refresh from then on.
@@ -9,17 +9,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient, createServiceClient } from "@/lib/supabase/server";
 import { decryptJson, encryptJson } from "@/lib/crypto";
-import { exchangeHighLevelCode } from "@/lib/crm/highlevel-oauth";
+import {
+  crmOAuthCallbackUrl,
+  exchangeHighLevelCode,
+} from "@/lib/crm/highlevel-oauth";
 import type { HighLevelCredentials } from "@/lib/crm/types";
 
 export const runtime = "nodejs";
 
 const STATE_MAX_AGE_MS = 10 * 60 * 1000; // 10 minutes
-
-function callbackUrl(): string {
-  const base = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
-  return `${base.replace(/\/$/, "")}/api/oauth/highlevel/callback`;
-}
 
 function appUrl(path: string): string {
   const base = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
@@ -32,7 +30,7 @@ export async function GET(req: NextRequest) {
   const oauthError = req.nextUrl.searchParams.get("error");
 
   if (oauthError) {
-    return NextResponse.redirect(appUrl(`/?highlevel=error`));
+    return NextResponse.redirect(appUrl(`/?crm=error`));
   }
   if (!code || !state) {
     return NextResponse.json({ error: "missing code or state" }, { status: 400 });
@@ -66,7 +64,7 @@ export async function GET(req: NextRequest) {
 
   // Exchange the code and persist the tokens encrypted on the agent.
   try {
-    const tokens = await exchangeHighLevelCode(code, callbackUrl());
+    const tokens = await exchangeHighLevelCode(code, crmOAuthCallbackUrl());
     if (!tokens.locationId) {
       throw new Error("HighLevel did not return a locationId for this token");
     }
@@ -85,10 +83,10 @@ export async function GET(req: NextRequest) {
       })
       .eq("id", agentId);
 
-    return NextResponse.redirect(appUrl(`/agents/${agentId}?highlevel=connected`));
+    return NextResponse.redirect(appUrl(`/agents/${agentId}?crm=connected`));
   } catch (e: any) {
     return NextResponse.json(
-      { error: e?.message ?? "HighLevel token exchange failed" },
+      { error: e?.message ?? "CRM token exchange failed" },
       { status: 502 }
     );
   }

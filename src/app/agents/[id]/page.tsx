@@ -169,9 +169,9 @@ export default function AgentDetailPage({
 
   useEffect(load, [params.id]);
 
-  // Surface the HighLevel OAuth callback result (redirects back with ?highlevel=).
+  // Surface the CRM OAuth callback result (redirects back with ?crm=).
   useEffect(() => {
-    const status = new URLSearchParams(window.location.search).get("highlevel");
+    const status = new URLSearchParams(window.location.search).get("crm");
     if (status === "connected") {
       setActionMsg("HighLevel connected — token will auto-refresh.");
     } else if (status === "error") {
@@ -501,7 +501,7 @@ export default function AgentDetailPage({
           </Button>
           {crmProvider === "highlevel" && (
             <a
-              href={`/api/agents/${params.id}/highlevel/connect`}
+              href={`/api/agents/${params.id}/crm/connect`}
               className="block w-full rounded-xl border border-ink-200 px-4 py-2 text-center text-sm font-medium text-ink-700 transition-colors hover:bg-ink-50"
             >
               Connect via OAuth

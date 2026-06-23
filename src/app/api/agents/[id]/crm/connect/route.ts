@@ -1,22 +1,20 @@
 // =====================================================================
-// GET /api/agents/:id/highlevel/connect — start the HighLevel OAuth flow.
+// GET /api/agents/:id/crm/connect — start the CRM OAuth flow (HighLevel).
 //
 // Authorizes the current user against the agent (RLS), mints a short-lived
 // signed `state` binding the flow to this agent, and 302-redirects to the
-// HighLevel authorize screen. HighLevel then redirects back to
-// /api/oauth/highlevel/callback with a code we exchange for tokens.
+// provider authorize screen. The provider then redirects back to
+// /api/oauth/crm/callback with a code we exchange for tokens.
 // =====================================================================
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase/server";
 import { encryptJson } from "@/lib/crypto";
-import { highLevelAuthorizeUrl } from "@/lib/crm/highlevel-oauth";
+import {
+  crmOAuthCallbackUrl,
+  highLevelAuthorizeUrl,
+} from "@/lib/crm/highlevel-oauth";
 
 export const runtime = "nodejs";
-
-function callbackUrl(): string {
-  const base = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
-  return `${base.replace(/\/$/, "")}/api/oauth/highlevel/callback`;
-}
 
 export async function GET(
   _req: NextRequest,
@@ -40,13 +38,13 @@ export async function GET(
     // State is AES-GCM encrypted (authenticated) so it can't be tampered with.
     const state = encryptJson({ agentId: params.id, ts: Date.now() });
     const url = highLevelAuthorizeUrl({
-      redirectUri: callbackUrl(),
+      redirectUri: crmOAuthCallbackUrl(),
       state,
     });
     return NextResponse.redirect(url);
   } catch (e: any) {
     return NextResponse.json(
-      { error: e?.message ?? "failed to start HighLevel OAuth" },
+      { error: e?.message ?? "failed to start CRM OAuth" },
       { status: 500 }
     );
   }

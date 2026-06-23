@@ -75,14 +75,14 @@ own editable map on its detail page.
 
 3. **Register a HighLevel Marketplace app** (HighLevel → Settings → Apps / the
    developer marketplace). Set the **redirect URI** to exactly:
-   `{NEXT_PUBLIC_APP_URL}/api/oauth/highlevel/callback`
-   (e.g. `https://upsurgeprosai.com/api/oauth/highlevel/callback`). Grant scopes:
+   `{NEXT_PUBLIC_APP_URL}/api/oauth/crm/callback`
+   (e.g. `https://upsurgeprosai.com/api/oauth/crm/callback`). Grant scopes:
    `contacts.readonly contacts.write opportunities.readonly opportunities.write
    locations.readonly users.readonly`. Copy the client id/secret into the env vars above.
 
 4. **Connect a location.** On a HighLevel agent's detail page, click **Connect via
    OAuth** → choose the sub-account → you're redirected back with
-   `?highlevel=connected`. Tokens are stored encrypted on the agent and auto-refresh
+   `?crm=connected`. Tokens are stored encrypted on the agent and auto-refresh
    from then on.
 
 ---
@@ -112,8 +112,8 @@ every HighLevel call, so routing (and all other HighLevel calls) survive token e
 - `src/lib/crm/highlevel-oauth.ts` — token refresh, code exchange, authorize URL
 - `src/components/agent-form/PipelineStageSettings.tsx` — the routing editor UI
 - `src/app/api/agents/[id]/pipelines/route.ts` — GET pipelines+stages for the UI
-- `src/app/api/agents/[id]/highlevel/connect/route.ts` — start OAuth (redirect)
-- `src/app/api/oauth/highlevel/callback/route.ts` — finish OAuth (store tokens)
+- `src/app/api/agents/[id]/crm/connect/route.ts` — start OAuth (redirect)
+- `src/app/api/oauth/crm/callback/route.ts` — finish OAuth (store tokens)
 
 **Modified files (this work)**
 - `src/lib/crm/highlevel.ts` — `listPipelines`/`moveContactToStage` + auto-refresh in `request()`
@@ -138,7 +138,7 @@ Decide separately whether to commit these with or apart from the routing/OAuth w
 
 - [ ] `npm run typecheck` passes (currently clean).
 - [ ] Migration 0009 applied; `agent_pipeline_stage_map` exists with RLS.
-- [ ] OAuth connect → callback stores tokens; agent shows `?highlevel=connected`.
+- [ ] OAuth connect → callback stores tokens; agent shows `?crm=connected`.
 - [ ] Agent detail (HighLevel) shows Pipeline routing; dropdowns populate from the sub-account.
 - [ ] Save a map (e.g. `appointment → Sales / Booked`); reload — selection persists.
 - [ ] Existing **workspace-level** HighLevel agent (no per-agent creds) also shows the editor.

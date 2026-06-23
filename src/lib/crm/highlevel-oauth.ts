@@ -12,6 +12,12 @@
 const TOKEN_URL = "https://services.leadconnectorhq.com/oauth/token";
 const AUTHORIZE_URL = "https://marketplace.gohighlevel.com/oauth/chooselocation";
 
+/** Redirect URI registered in the Marketplace app (no vendor name in the path). */
+export function crmOAuthCallbackUrl(): string {
+  const base = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+  return `${base.replace(/\/$/, "")}/api/oauth/crm/callback`;
+}
+
 /** Tokens as we store them in encrypted CRM credentials. */
 export interface HighLevelTokens {
   accessToken: string;
