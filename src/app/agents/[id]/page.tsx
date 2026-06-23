@@ -172,11 +172,17 @@ export default function AgentDetailPage({
 
   // Surface the CRM OAuth callback result (redirects back with ?crm=).
   useEffect(() => {
-    const status = new URLSearchParams(window.location.search).get("crm");
+    const params = new URLSearchParams(window.location.search);
+    const status = params.get("crm");
     if (status === "connected") {
       setActionMsg("HighLevel connected — token will auto-refresh.");
     } else if (status === "error") {
-      setActionMsg("HighLevel connection was cancelled or failed.");
+      const reason = params.get("reason");
+      setActionMsg(
+        reason
+          ? `HighLevel connection failed: ${reason}`
+          : "HighLevel connection was cancelled or failed."
+      );
     }
   }, []);
 

@@ -39,16 +39,24 @@ export type PostCallWebhookPayload = {
   duration_seconds: number;
 };
 
-function hlLocationId(workspace: Workspace): string | null {
-  if (workspace.crm_provider !== "highlevel" || !workspace.crm_credentials_encrypted) {
-    return null;
+// Resolve the HighLevel location id from the *effective* connection: an
+// agent connected directly (e.g. via OAuth) wins over the workspace default,
+// mirroring getCrmAdapterForAgent's precedence.
+function hlLocationId(agent: Agent, workspace: Workspace): string | null {
+  const sources: Array<{ provider: string | null; encrypted: string | null }> = [
+    { provider: agent.crm_provider, encrypted: agent.crm_credentials_encrypted },
+    { provider: workspace.crm_provider, encrypted: workspace.crm_credentials_encrypted },
+  ];
+  for (const { provider, encrypted } of sources) {
+    if (provider !== "highlevel" || !encrypted) continue;
+    try {
+      const creds = decryptJson<HighLevelCredentials>(encrypted);
+      if (creds.locationId) return creds.locationId;
+    } catch {
+      /* try the next source */
+    }
   }
-  try {
-    const creds = decryptJson<HighLevelCredentials>(workspace.crm_credentials_encrypted);
-    return creds.locationId ?? null;
-  } catch {
-    return null;
-  }
+  return null;
 }
 
 export async function dispatchPostCallWebhook(opts: {
@@ -84,7 +92,7 @@ export async function dispatchPostCallWebhook(opts: {
       phone: opts.call.to_number,
       tags: opts.contact.tags,
     },
-    location_id: hlLocationId(opts.workspace),
+    location_id: hlLocationId(opts.agent, opts.workspace),
     summary: opts.parsed.summary,
     transcript: opts.parsed.transcript,
     recording_url: opts.parsed.recordingUrl,

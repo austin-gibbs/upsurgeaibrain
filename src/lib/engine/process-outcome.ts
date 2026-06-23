@@ -85,6 +85,11 @@ export async function processRetellWebhook(body: any): Promise<{ ok: boolean; re
 
   const outcome = classifyOutcome({ rawOutcome: parsed.rawOutcome, inVoicemail: parsed.inVoicemail });
   const crm = getCrmAdapterForAgent(agent, workspace);
+  // The agent can be connected to a CRM directly (e.g. HighLevel via OAuth)
+  // even when the workspace defaults to a different provider. Gate
+  // provider-specific side effects on this *effective* provider so an
+  // agent-level HighLevel connection still drives opportunity/webhook logic.
+  const effectiveProvider = agent.crm_provider ?? workspace.crm_provider;
 
   // 2. CRM call log (recording play button + call notes in FUB).
   const today = todayInTz(workspace.timezone);
@@ -149,7 +154,7 @@ export async function processRetellWebhook(body: any): Promise<{ ok: boolean; re
 
   // 4b. HighLevel post-call workflow webhook (best-effort).
   if (
-    workspace.crm_provider === "highlevel" &&
+    effectiveProvider === "highlevel" &&
     taskConfig?.post_call_webhook_enabled &&
     taskConfig.post_call_webhook_url &&
     shouldDispatchWebhook(taskConfig, outcome)
@@ -173,7 +178,7 @@ export async function processRetellWebhook(body: any): Promise<{ ok: boolean; re
   // contact's opportunity to the stage mapped for this outcome — no
   // hand-built HighLevel workflow required. No-op when disabled, when the
   // CRM has no pipelines (FUB), or when the outcome has no mapped stage.
-  if (workspace.crm_provider === "highlevel" && taskConfig?.pipeline_automation_enabled) {
+  if (effectiveProvider === "highlevel" && taskConfig?.pipeline_automation_enabled) {
     try {
       await applyPipelineRouting({
         supabase,
