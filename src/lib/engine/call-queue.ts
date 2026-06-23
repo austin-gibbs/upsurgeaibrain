@@ -134,6 +134,21 @@ export interface ActiveQueueRow {
   agents: { name: string } | null;
 }
 
+/** Count pending + dialing rows for an agent today (for queue position offset). */
+export async function countActiveQueueForAgent(
+  supabase: DbClient,
+  agentId: string,
+  queueDay: string
+): Promise<number> {
+  const { count } = await supabase
+    .from("call_queue_entries")
+    .select("id", { count: "exact", head: true })
+    .eq("agent_id", agentId)
+    .eq("queue_day", queueDay)
+    .in("status", ["pending", "dialing"]);
+  return count ?? 0;
+}
+
 /** Active queue rows for the Ops UI (pending + dialing only). */
 export async function listActiveQueueEntries(
   supabase: DbClient,

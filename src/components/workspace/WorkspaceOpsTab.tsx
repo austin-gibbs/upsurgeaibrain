@@ -368,11 +368,11 @@ export function WorkspaceOpsTab({
       if (d.enqueued > 0) {
         setRunMessage({
           type: "success",
-          text: `Queued ${d.enqueued} call${d.enqueued === 1 ? "" : "s"} now, ${
-            d.enqueued === 1 ? "" : "60s apart, "
-          }starting immediately.${
+          text: `Queued ${d.enqueued} of ${d.requested ?? ids.length} contact${
+            (d.requested ?? ids.length) === 1 ? "" : "s"
+          }${d.enqueued > 1 ? ", drip-spaced" : ""}.${
             d.capped > 0
-              ? ` ${d.capped} didn't fit before the call window closes and were skipped — re-queue them tomorrow.`
+              ? ` ${d.capped} skipped (terminal or no phone number).`
               : ""
           }`,
         });

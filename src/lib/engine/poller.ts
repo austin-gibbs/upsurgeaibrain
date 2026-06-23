@@ -16,7 +16,7 @@ import {
   withinCallWindow,
 } from "./cadence";
 import type { Agent, AgentCallConfig, Contact, Workspace } from "@/types";
-import { upsertQueueEntry } from "./call-queue";
+import { upsertQueueEntry, countActiveQueueForAgent } from "./call-queue";
 
 export interface PollOptions {
   testMode?: boolean;
@@ -197,9 +197,10 @@ export interface QueueContactsResult {
  * Unlike the poller it does NOT scan the CRM and deliberately bypasses the
  * cadence "already called today / not yet due" gate — the operator is pulling
  * these contacts back in on purpose. It still honors the hard safety rails:
- * terminal contacts and contacts without a phone are dropped, the call window
- * must be open, and the batch is capped to what fits before the window closes.
- * The per-day manual jobId keeps repeated clicks idempotent.
+ * terminal contacts and contacts without a phone are dropped. The operator
+ * explicitly selected these contacts — we queue all of them (drip-spaced)
+ * and let the worker defer dials outside the call window. Only the daily
+ * max_calls_per_day cap can trim the batch.
  */
 export async function enqueueContactsNow(
   agentId: string,
@@ -241,23 +242,30 @@ export async function enqueueContactsNow(
     .in("id", contactIds)
     .returns<Contact[]>();
 
-  const dialable = (rows ?? []).filter((c) => !c.is_terminal && c.phones.length > 0);
+  // Preserve the operator's selection order.
+  const byId = new Map((rows ?? []).map((c) => [c.id, c]));
+  const dialable = contactIds
+    .map((id) => byId.get(id))
+    .filter((c): c is Contact => {
+      if (!c) return false;
+      return !c.is_terminal && c.phones.length > 0;
+    });
   const eligible = dialable.length;
 
-  const capacity = remainingWindowCapacity(
-    workspace.timezone,
-    config.call_window_start,
-    config.call_window_end,
-    config.drip_seconds
-  );
-  const toQueue = dialable.slice(0, Math.max(capacity, 0));
-  const capped = eligible - toQueue.length;
+  const activeInQueue = await countActiveQueueForAgent(supabase, agentId, today);
+  const basePosition = activeInQueue;
+
+  // Queue every dialable contact the operator selected. Drip spacing continues
+  // from any contacts already waiting; the worker defers dials outside the window.
+  const toQueue = dialable;
+  const capped = contactIds.length - eligible;
 
   const queue = getCallQueue();
   let enqueued = 0;
   for (let i = 0; i < toQueue.length; i++) {
     const contact = toQueue[i];
-    const delay = i * config.drip_seconds * 1000;
+    const slot = basePosition + i;
+    const delay = slot * config.drip_seconds * 1000;
     const jobId = `manual:${agentId}:${contact.id}:${today}`;
     const scheduledFor = new Date(Date.now() + delay).toISOString();
 
@@ -266,7 +274,7 @@ export async function enqueueContactsNow(
       agentId,
       contactId: contact.id,
       queueDay: today,
-      position: i + 1,
+      position: slot + 1,
       scheduledFor,
       bullmqJobId: jobId,
     });
