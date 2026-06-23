@@ -11,6 +11,7 @@ import { getCrmAdapterForAgent } from "@/lib/crm";
 import { getRetellClientForAgent } from "@/lib/retell/client";
 import { buildDynamicVariables } from "./memory";
 import { todayInTz } from "./cadence";
+import { cancelQueueEntries, markQueueDialing } from "./call-queue";
 import { getCallQueue, type CallJob } from "@/lib/queue/queues";
 import type { Agent, AgentMemory, Contact, Workspace } from "@/types";
 
@@ -43,6 +44,10 @@ export async function cancelPendingDials(
           // Job may have started running between the scan and removal — skip it.
         }
       }
+    }
+    if (removed > 0) {
+      const supabase = createServiceClient();
+      await cancelQueueEntries(supabase, { agentId, contactId });
     }
     return removed;
   } catch {
@@ -114,6 +119,13 @@ export async function placeCall(job: CallJob): Promise<{ callId: string; retellC
     .from("calls")
     .update({ retell_call_id: retellCallId, status: "dialing", dialed_at: new Date().toISOString() })
     .eq("id", call.id);
+
+  await markQueueDialing(supabase, {
+    agentId: agent.id,
+    contactId: contact.id,
+    callId: call.id,
+    queueDay: today,
+  });
 
   // Stamp the attempt + mark dialed-today so the same-day filter excludes it.
   await supabase

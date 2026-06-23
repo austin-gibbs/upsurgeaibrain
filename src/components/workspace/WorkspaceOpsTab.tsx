@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import {
   Bot,
@@ -11,6 +11,8 @@ import {
   Search,
   Plus,
   Phone,
+  ListOrdered,
+  Loader2,
 } from "lucide-react";
 import {
   Card,
@@ -123,6 +125,15 @@ function relativeWord(today: string, target: string): string {
   return `in ${d} days`;
 }
 
+function formatTime(iso: string | null, timezone: string): string {
+  if (!iso) return "—";
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone,
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(new Date(iso));
+}
+
 function formatClock(totalSeconds: number): string {
   const h24 = Math.floor(totalSeconds / 3600) % 24;
   const m = Math.floor((totalSeconds % 3600) / 60);
@@ -132,6 +143,22 @@ function formatClock(totalSeconds: number): string {
 }
 
 type Schedule = { label: string; tone: BadgeTone; note?: string };
+
+type QueueEntry = {
+  id: string;
+  agentId: string;
+  agentName: string;
+  contactId: string;
+  contactName: string;
+  phone: string | null;
+  status: "pending" | "dialing";
+  position: number;
+  scheduledFor: string | null;
+  enqueuedAt: string;
+  startedAt: string | null;
+};
+
+type QueueSummary = { total: number; pending: number; dialing: number };
 
 function buildSchedules(
   contacts: ContactRow[],
@@ -231,6 +258,38 @@ export function WorkspaceOpsTab({
   } | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [queuing, setQueuing] = useState(false);
+  const [queueEntries, setQueueEntries] = useState<QueueEntry[]>([]);
+  const [queueSummary, setQueueSummary] = useState<QueueSummary>({
+    total: 0,
+    pending: 0,
+    dialing: 0,
+  });
+  const [queueLoading, setQueueLoading] = useState(true);
+
+  const fetchQueue = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/workspaces/${workspaceId}/queue-calls`);
+      if (!res.ok) return;
+      const data = (await res.json()) as {
+        entries: QueueEntry[];
+        summary: QueueSummary;
+      };
+      setQueueEntries(data.entries ?? []);
+      setQueueSummary(
+        data.summary ?? { total: 0, pending: 0, dialing: 0 }
+      );
+    } catch {
+      /* keep last good snapshot */
+    } finally {
+      setQueueLoading(false);
+    }
+  }, [workspaceId]);
+
+  useEffect(() => {
+    fetchQueue();
+    const timer = setInterval(fetchQueue, 10_000);
+    return () => clearInterval(timer);
+  }, [fetchQueue]);
 
   const { workspace, agents, contactCount, contacts, outcomeTags } = data;
 
@@ -327,6 +386,7 @@ export function WorkspaceOpsTab({
         });
       }
       onRefresh();
+      await fetchQueue();
     } catch (e) {
       setRunMessage({
         type: "error",
@@ -415,6 +475,7 @@ export function WorkspaceOpsTab({
         });
       }
       onRefresh();
+      await fetchQueue();
     } catch (e) {
       setRunMessage({
         type: "error",
@@ -665,6 +726,90 @@ export function WorkspaceOpsTab({
             </Link>
           );
         })}
+      </div>
+
+      <div className="mb-10">
+        <SectionHeader
+          title="Call queue"
+          description="Live queue of contacts waiting to dial or currently on a call. Contacts appear here when enqueued and are removed automatically after the call finishes and CRM write-back completes."
+          action={
+            <Button variant="ghost" size="sm" onClick={fetchQueue} disabled={queueLoading}>
+              Refresh
+            </Button>
+          }
+        />
+        <Card className="overflow-hidden p-0">
+          {queueLoading && queueEntries.length === 0 ? (
+            <div className="flex items-center justify-center gap-2 p-8 text-sm text-ink-500">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Loading queue…
+            </div>
+          ) : queueEntries.length === 0 ? (
+            <div className="p-6">
+              <EmptyState
+                icon={ListOrdered}
+                title="Queue is empty"
+                description='Select contacts below and click "Queue calls now", or run a poll to fill the queue.'
+              />
+            </div>
+          ) : (
+            <>
+              <div className="flex flex-wrap items-center gap-3 border-b border-ink-100 bg-ink-50/50 px-5 py-3 text-sm text-ink-600">
+                <span>
+                  <span className="font-semibold text-ink-900">{queueSummary.total}</span>{" "}
+                  in queue
+                </span>
+                <span className="text-ink-300">·</span>
+                <span>
+                  {queueSummary.pending} waiting
+                </span>
+                <span className="text-ink-300">·</span>
+                <span>
+                  {queueSummary.dialing} on call
+                </span>
+              </div>
+              <div className="max-h-80 overflow-y-auto">
+                <table className="w-full text-sm">
+                  <thead className="sticky top-0 z-10 bg-white">
+                    <tr className="border-b border-ink-100 text-left text-xs font-medium uppercase tracking-wide text-ink-400">
+                      <th className="px-5 py-3 w-12">#</th>
+                      <th className="px-5 py-3">Contact</th>
+                      <th className="px-5 py-3">Agent</th>
+                      <th className="px-5 py-3">Status</th>
+                      <th className="px-5 py-3">Scheduled</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-ink-100">
+                    {queueEntries.map((entry) => (
+                      <tr key={entry.id} className="transition-colors hover:bg-ink-50/50">
+                        <td className="px-5 py-3.5 font-mono text-xs text-ink-400">
+                          {entry.position}
+                        </td>
+                        <td className="px-5 py-3.5">
+                          <div className="font-medium text-ink-900">{entry.contactName}</div>
+                          {entry.phone && (
+                            <div className="font-mono text-xs text-ink-400">{entry.phone}</div>
+                          )}
+                        </td>
+                        <td className="px-5 py-3.5 text-ink-600">{entry.agentName}</td>
+                        <td className="px-5 py-3.5">
+                          <Badge tone={entry.status === "dialing" ? "amber" : "blue"}>
+                            {entry.status === "dialing" ? "On call" : "Waiting"}
+                          </Badge>
+                        </td>
+                        <td className="px-5 py-3.5 text-ink-600">
+                          {entry.status === "dialing"
+                            ? formatTime(entry.startedAt, workspace.timezone)
+                            : formatTime(entry.scheduledFor, workspace.timezone)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+        </Card>
       </div>
 
       <div className="mb-10">

@@ -434,6 +434,86 @@ export type Database = {
           },
         ]
       }
+      call_queue_entries: {
+        Row: {
+          agent_id: string
+          bullmq_job_id: string | null
+          call_id: string | null
+          completed_at: string | null
+          contact_id: string
+          enqueued_at: string
+          error_message: string | null
+          id: string
+          position: number
+          queue_day: string
+          scheduled_for: string | null
+          started_at: string | null
+          status: Database["public"]["Enums"]["call_queue_status"]
+          workspace_id: string
+        }
+        Insert: {
+          agent_id: string
+          bullmq_job_id?: string | null
+          call_id?: string | null
+          completed_at?: string | null
+          contact_id: string
+          enqueued_at?: string
+          error_message?: string | null
+          id?: string
+          position?: number
+          queue_day: string
+          scheduled_for?: string | null
+          started_at?: string | null
+          status?: Database["public"]["Enums"]["call_queue_status"]
+          workspace_id: string
+        }
+        Update: {
+          agent_id?: string
+          bullmq_job_id?: string | null
+          call_id?: string | null
+          completed_at?: string | null
+          contact_id?: string
+          enqueued_at?: string
+          error_message?: string | null
+          id?: string
+          position?: number
+          queue_day?: string
+          scheduled_for?: string | null
+          started_at?: string | null
+          status?: Database["public"]["Enums"]["call_queue_status"]
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "call_queue_entries_agent_id_fkey"
+            columns: ["agent_id"]
+            isOneToOne: false
+            referencedRelation: "agents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "call_queue_entries_call_id_fkey"
+            columns: ["call_id"]
+            isOneToOne: false
+            referencedRelation: "calls"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "call_queue_entries_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "call_queue_entries_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       contacts: {
         Row: {
           attempt_count: number
@@ -683,6 +763,7 @@ export type Database = {
     Enums: {
       agent_status: "draft" | "active" | "paused"
       call_finalized_by: "webhook" | "reconcile"
+      call_queue_status: "pending" | "dialing" | "completed" | "failed" | "cancelled"
       call_outcome:
         | "voicemail"
         | "no_answer"
@@ -827,6 +908,7 @@ export const Constants = {
     Enums: {
       agent_status: ["draft", "active", "paused"],
       call_finalized_by: ["webhook", "reconcile"],
+      call_queue_status: ["pending", "dialing", "completed", "failed", "cancelled"],
       call_outcome: [
         "voicemail",
         "no_answer",

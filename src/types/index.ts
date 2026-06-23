@@ -25,6 +25,25 @@ export type CallStatus = "queued" | "dialing" | "completed" | "failed";
 
 export type CallFinalizedBy = "webhook" | "reconcile";
 
+export type CallQueueStatus = "pending" | "dialing" | "completed" | "failed" | "cancelled";
+
+export interface CallQueueEntry {
+  id: string;
+  workspace_id: string;
+  agent_id: string;
+  contact_id: string;
+  status: CallQueueStatus;
+  queue_day: string;
+  position: number;
+  scheduled_for: string | null;
+  enqueued_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+  call_id: string | null;
+  bullmq_job_id: string | null;
+  error_message: string | null;
+}
+
 /** Outcomes that remove a contact from the call flow entirely. */
 export const TERMINAL_OUTCOMES: CallOutcome[] = [
   "appointment",

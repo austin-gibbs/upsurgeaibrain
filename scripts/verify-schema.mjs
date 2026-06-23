@@ -59,6 +59,8 @@ const CHECKS = [
   { table: "calls", column: "recording_logged", migration: "0011" },
   { table: "calls", column: "tags_synced", migration: "0011" },
   { table: "calls", column: "crm_error", migration: "0011" },
+  { table: "call_queue_entries", column: "status", migration: "0012" },
+  { table: "call_queue_entries", column: "queue_day", migration: "0012" },
 ];
 
 async function verifyViaManagementApi() {
@@ -123,7 +125,7 @@ const found = await verifyViaManagementApi();
 if (found) {
   const missing = CHECKS.filter((c) => !found.has(`${c.table}.${c.column}`));
   if (missing.length === 0) {
-    console.log("Schema OK — all required columns present (0004–0008).");
+    console.log("Schema OK — all required columns present (0004–0012).");
     process.exit(0);
   }
   console.error("Schema INCOMPLETE — missing columns:");
@@ -137,7 +139,7 @@ if (found) {
 console.log("Verifying schema via service role probes…");
 const missing = await verifyViaServiceRole();
 if (missing.length === 0) {
-  console.log("Schema OK — all required columns present (0004–0008).");
+  console.log("Schema OK — all required columns present (0004–0012).");
   process.exit(0);
 }
 

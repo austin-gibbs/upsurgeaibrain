@@ -16,6 +16,7 @@ import {
   withinCallWindow,
 } from "./cadence";
 import type { Agent, AgentCallConfig, Contact, Workspace } from "@/types";
+import { upsertQueueEntry } from "./call-queue";
 
 export interface PollOptions {
   testMode?: boolean;
@@ -145,6 +146,20 @@ export async function pollAgent(
   let enqueued = 0;
   for (let i = 0; i < capped.length; i++) {
     const contact = capped[i];
+    const delay = baseDelay + i * config.drip_seconds * 1000;
+    const jobId = `${agentId}:${contact.id}:${today}`;
+    const scheduledFor = new Date(Date.now() + delay).toISOString();
+
+    await upsertQueueEntry(supabase, {
+      workspaceId: workspace.id,
+      agentId,
+      contactId: contact.id,
+      queueDay: today,
+      position: i + 1,
+      scheduledFor,
+      bullmqJobId: jobId,
+    });
+
     await queue.add(
       "dial",
       {
@@ -155,8 +170,8 @@ export async function pollAgent(
         testMode: options?.testMode,
       },
       {
-        delay: baseDelay + i * config.drip_seconds * 1000,
-        jobId: `${agentId}:${contact.id}:${today}`, // idempotent per day
+        delay,
+        jobId,
       }
     );
     enqueued++;
@@ -242,6 +257,20 @@ export async function enqueueContactsNow(
   let enqueued = 0;
   for (let i = 0; i < toQueue.length; i++) {
     const contact = toQueue[i];
+    const delay = i * config.drip_seconds * 1000;
+    const jobId = `manual:${agentId}:${contact.id}:${today}`;
+    const scheduledFor = new Date(Date.now() + delay).toISOString();
+
+    await upsertQueueEntry(supabase, {
+      workspaceId: workspace.id,
+      agentId,
+      contactId: contact.id,
+      queueDay: today,
+      position: i + 1,
+      scheduledFor,
+      bullmqJobId: jobId,
+    });
+
     await queue.add(
       "dial",
       {
@@ -251,8 +280,8 @@ export async function enqueueContactsNow(
         attemptNumber: contact.attempt_count + 1,
       },
       {
-        delay: i * config.drip_seconds * 1000,
-        jobId: `manual:${agentId}:${contact.id}:${today}`, // idempotent per day
+        delay,
+        jobId,
       }
     );
     enqueued++;

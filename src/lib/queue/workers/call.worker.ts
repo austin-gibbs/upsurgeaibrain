@@ -3,6 +3,7 @@ import { Worker } from "bullmq";
 import { getRedis } from "../connection";
 import { CALL_QUEUE, getCallQueue, type CallJob } from "../queues";
 import { placeCall } from "@/lib/engine/caller";
+import { failQueueEntry } from "@/lib/engine/call-queue";
 import {
   withinCallWindow,
   withinEasternBusinessHours,
@@ -107,6 +108,11 @@ export function startCallWorker(): Worker<CallJob> {
         .update({ status: "failed", error_message: err.message })
         .eq("contact_id", job.data.contactId)
         .eq("status", "queued");
+      await failQueueEntry(supabase, {
+        agentId: job.data.agentId,
+        contactId: job.data.contactId,
+        errorMessage: err.message,
+      });
     }
   });
 

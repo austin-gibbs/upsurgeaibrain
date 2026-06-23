@@ -26,6 +26,7 @@ import {
   syncTagsToCrm,
   type FinalizedBy,
 } from "./crm-writeback";
+import { completeQueueEntry } from "./call-queue";
 import type {
   Agent, AgentCallConfig, AgentMemory, AgentTaskConfig,
   Contact, OutcomeTag, Workspace,
@@ -240,6 +241,8 @@ export async function processRetellWebhook(
       crm_error: summarizeCrmErrors(crmFlags.crmErrors),
     })
     .eq("id", call.id);
+
+  await completeQueueEntry(supabase, { callId: call.id });
 
   // 6. V2 memory.
   const { data: priorMemory } = await supabase
