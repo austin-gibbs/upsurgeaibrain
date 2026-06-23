@@ -26,20 +26,28 @@ export async function cancelPendingDials(
   agentId: string,
   contactId: string
 ): Promise<number> {
-  const queue = getCallQueue();
-  const jobs = await queue.getJobs(["waiting", "delayed", "prioritized", "paused"]);
-  let removed = 0;
-  for (const job of jobs) {
-    if (job?.data?.contactId === contactId && job.data.agentId === agentId) {
-      try {
-        await job.remove();
-        removed++;
-      } catch {
-        // Job may have started running between the scan and removal — skip it.
+  // Call-now runs on Vercel where Redis may be absent; skipping is safe —
+  // the inline dial still proceeds and duplicate prevention is best-effort.
+  if (!process.env.REDIS_URL) return 0;
+
+  try {
+    const queue = getCallQueue();
+    const jobs = await queue.getJobs(["waiting", "delayed", "prioritized", "paused"]);
+    let removed = 0;
+    for (const job of jobs) {
+      if (job?.data?.contactId === contactId && job.data.agentId === agentId) {
+        try {
+          await job.remove();
+          removed++;
+        } catch {
+          // Job may have started running between the scan and removal — skip it.
+        }
       }
     }
+    return removed;
+  } catch {
+    return 0;
   }
-  return removed;
 }
 
 export async function placeCall(job: CallJob): Promise<{ callId: string; retellCallId: string }> {
