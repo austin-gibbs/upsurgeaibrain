@@ -16,6 +16,8 @@ import {
 } from "@/lib/validation";
 import type { AgentDirection } from "@/types";
 import type { Database } from "@/types/database";
+import { normalizeHHMM } from "@/lib/hhmm";
+import { rescheduleAgentCallQueue } from "@/lib/queue/reschedule";
 import { z } from "zod";
 
 export const runtime = "nodejs";
@@ -110,14 +112,40 @@ export async function GET(
     .select("outcome, pipeline_id, pipeline_stage_id, pipeline_name, stage_name")
     .eq("agent_id", params.id);
 
+  const normalizedAgent = {
+    ...publicAgent(agentRow),
+    agent_call_configs: (agentRow.agent_call_configs ?? []).map((config) =>
+      normalizeCallConfigTimes(config as Record<string, unknown>)
+    ),
+  };
+
   return NextResponse.json({
-    agent: publicAgent(agentRow),
+    agent: normalizedAgent,
     workspaceTimezone: workspaces?.timezone ?? "America/New_York",
     effectiveCrmProvider,
     hasEffectiveCrmCredentials,
     calls: calls ?? [],
     pipelineStageMap: pipelineStageMap ?? [],
   });
+}
+
+function normalizeCallConfigTimes(config: Record<string, unknown> | null | undefined) {
+  if (!config || typeof config !== "object") return config;
+  return {
+    ...config,
+    call_window_start:
+      typeof config.call_window_start === "string"
+        ? normalizeHHMM(config.call_window_start)
+        : config.call_window_start,
+    call_window_end:
+      typeof config.call_window_end === "string"
+        ? normalizeHHMM(config.call_window_end)
+        : config.call_window_end,
+    daily_run_at:
+      typeof config.daily_run_at === "string"
+        ? normalizeHHMM(config.daily_run_at)
+        : config.daily_run_at,
+  };
 }
 
 const patchSchema = z.object({
@@ -273,6 +301,18 @@ export async function PATCH(
     }
   }
 
+  let queueRescheduled = 0;
+  if (input.call_config) {
+    try {
+      queueRescheduled = await rescheduleAgentCallQueue(params.id);
+    } catch (err) {
+      console.error(
+        `[agents/${params.id}] failed to reschedule call queue:`,
+        err
+      );
+    }
+  }
+
   if (input.task_config) {
     const { error: taskError } = await db.from("agent_task_configs").upsert(
       {
@@ -329,5 +369,15 @@ export async function PATCH(
   if (error || !updated) {
     return NextResponse.json({ error: error?.message ?? "not found" }, { status: 500 });
   }
-  return NextResponse.json({ ok: true, agent: publicAgent(updated) });
+  const agent = publicAgent(updated);
+  return NextResponse.json({
+    ok: true,
+    agent: {
+      ...agent,
+      agent_call_configs: (updated.agent_call_configs ?? []).map((config) =>
+        normalizeCallConfigTimes(config as Record<string, unknown>)
+      ),
+    },
+    queueRescheduled,
+  });
 }

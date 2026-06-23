@@ -68,6 +68,7 @@ export function CallSettings({
         <Label>Call window start</Label>
         <Input
           type="time"
+          step={60}
           value={cfg.call_window_start}
           onChange={(e) => onChange({ call_window_start: e.target.value })}
         />
@@ -76,6 +77,7 @@ export function CallSettings({
         <Label>Call window end</Label>
         <Input
           type="time"
+          step={60}
           value={cfg.call_window_end}
           onChange={(e) => onChange({ call_window_end: e.target.value })}
         />
@@ -84,6 +86,7 @@ export function CallSettings({
         <Label hint="when the daily poll fires">Daily run at</Label>
         <Input
           type="time"
+          step={60}
           value={cfg.daily_run_at}
           onChange={(e) => onChange({ daily_run_at: e.target.value })}
         />

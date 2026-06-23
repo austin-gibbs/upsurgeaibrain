@@ -1,5 +1,11 @@
 // Zod schemas for the workspace setup wizard payload.
 import { z } from "zod";
+import { normalizeHHMM } from "@/lib/hhmm";
+
+const hhmmSchema = z.preprocess(
+  (val) => (typeof val === "string" ? normalizeHHMM(val) : val),
+  z.string().regex(/^\d{2}:\d{2}$/)
+);
 
 export const crmCredentialsSchema = z.union([
   z.object({ apiKey: z.string().min(10) }), // FUB
@@ -44,9 +50,9 @@ export const callConfigSchema = z.object({
   max_total_calls: z.number().int().positive().nullable().default(null),
   max_calls_per_day: z.number().int().positive().default(100),
   max_attempts_per_contact: z.number().int().positive().default(10),
-  call_window_start: z.string().regex(/^\d{2}:\d{2}$/).default("09:00"),
-  call_window_end: z.string().regex(/^\d{2}:\d{2}$/).default("18:00"),
-  daily_run_at: z.string().regex(/^\d{2}:\d{2}$/).default("09:00"),
+  call_window_start: hhmmSchema.default("09:00"),
+  call_window_end: hhmmSchema.default("18:00"),
+  daily_run_at: hhmmSchema.default("09:00"),
   drip_seconds: z.number().int().min(1).default(60),
   cadence_day_gaps: z
     .array(z.number().int().min(0))

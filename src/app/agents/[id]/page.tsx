@@ -15,6 +15,7 @@ import {
   type StageMapEntry,
   type TaskConfig,
 } from "@/components/agent-form/types";
+import { normalizeHHMM } from "@/lib/hhmm";
 import { PageShell } from "@/components/TopNav";
 import {
   Button,
@@ -124,9 +125,9 @@ export default function AgentDetailPage({
             max_total_calls: cc.max_total_calls ?? null,
             max_calls_per_day: cc.max_calls_per_day ?? 100,
             max_attempts_per_contact: cc.max_attempts_per_contact ?? 10,
-            call_window_start: cc.call_window_start ?? "09:00",
-            call_window_end: cc.call_window_end ?? "18:00",
-            daily_run_at: cc.daily_run_at ?? "09:00",
+            call_window_start: normalizeHHMM(cc.call_window_start ?? "09:00"),
+            call_window_end: normalizeHHMM(cc.call_window_end ?? "18:00"),
+            daily_run_at: normalizeHHMM(cc.daily_run_at ?? "09:00"),
             drip_seconds: cc.drip_seconds ?? 60,
             cadence_day_gaps: cc.cadence_day_gaps ?? defaultCallConfig().cadence_day_gaps,
           });
@@ -219,7 +220,13 @@ export default function AgentDetailPage({
       const data = await res.json();
       if (!res.ok || data.error) throw new Error(data.error ?? "Failed");
       load();
-      setActionMsg("Saved.");
+      if (data.queueRescheduled > 0) {
+        setActionMsg(
+          `Saved. Rescheduled ${data.queueRescheduled} queued call${data.queueRescheduled === 1 ? "" : "s"} to the new window.`
+        );
+      } else {
+        setActionMsg("Saved.");
+      }
     } catch (e: any) {
       setActionMsg(e.message);
     } finally {
@@ -277,7 +284,21 @@ export default function AgentDetailPage({
   }
 
   function saveCallSettings() {
-    patch({ call_config: callCfg });
+    patch({
+      call_config: {
+        ...callCfg,
+        call_window_start: normalizeHHMM(callCfg.call_window_start),
+        call_window_end: normalizeHHMM(callCfg.call_window_end),
+        daily_run_at: normalizeHHMM(callCfg.daily_run_at),
+        max_calls_per_day:
+          callCfg.max_calls_per_day >= 1 ? callCfg.max_calls_per_day : 100,
+        max_attempts_per_contact:
+          callCfg.max_attempts_per_contact >= 1
+            ? callCfg.max_attempts_per_contact
+            : 10,
+        drip_seconds: callCfg.drip_seconds >= 1 ? callCfg.drip_seconds : 60,
+      },
+    });
   }
 
   function saveTaskSettings() {

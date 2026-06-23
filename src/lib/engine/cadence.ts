@@ -6,6 +6,7 @@
 // computes the next eligible date from the per-agent day-gap schedule.
 // =====================================================================
 import type { AgentCallConfig, Contact } from "@/types";
+import { normalizeHHMM } from "@/lib/hhmm";
 
 /** Today's date (YYYY-MM-DD) in a given IANA timezone. */
 export function todayInTz(timezone: string): string {
@@ -36,7 +37,9 @@ export function nowHHMMInTz(timezone: string): string {
 
 export function withinCallWindow(timezone: string, start: string, end: string): boolean {
   const now = nowHHMMInTz(timezone);
-  return now >= start && now <= end;
+  const windowStart = normalizeHHMM(start);
+  const windowEnd = normalizeHHMM(end);
+  return now >= windowStart && now <= windowEnd;
 }
 
 function secondsIntoDayInTz(timezone: string): number {
@@ -53,8 +56,35 @@ function secondsIntoDayInTz(timezone: string): number {
 }
 
 export function hhmmToSeconds(hhmm: string): number {
-  const [h, m] = hhmm.split(":").map(Number);
+  const [h, m] = normalizeHHMM(hhmm).split(":").map(Number);
   return h * 3600 + m * 60;
+}
+
+// Re-export for callers that already import from cadence.
+export { normalizeHHMM } from "@/lib/hhmm";
+
+/**
+ * Milliseconds from now until queue slot `slotIndex` (0-based) at the given
+ * drip spacing. Slot 0 lands at the next window open (or immediately if open).
+ */
+export function msUntilQueueSlot(
+  timezone: string,
+  start: string,
+  end: string,
+  dripSeconds: number,
+  slotIndex: number
+): number {
+  const dailyCap = dailyWindowCapacity(start, end, dripSeconds);
+  if (dailyCap <= 0 || slotIndex < 0) {
+    return msUntilCallWindowOpens(timezone, start, end);
+  }
+
+  const dayNum = Math.floor(slotIndex / dailyCap);
+  const posInDay = slotIndex % dailyCap;
+  const msToNextOpen = msUntilCallWindowOpens(timezone, start, end);
+  const dayMs = 24 * 3600 * 1000;
+
+  return msToNextOpen + dayNum * dayMs + posInDay * dripSeconds * 1000;
 }
 
 /**
@@ -67,7 +97,9 @@ export function dailyWindowCapacity(
   dripSeconds: number
 ): number {
   if (dripSeconds <= 0) return 0;
-  const windowSeconds = hhmmToSeconds(end) - hhmmToSeconds(start);
+  const windowStart = normalizeHHMM(start);
+  const windowEnd = normalizeHHMM(end);
+  const windowSeconds = hhmmToSeconds(windowEnd) - hhmmToSeconds(windowStart);
   if (windowSeconds <= 0) return 0;
   return Math.floor(windowSeconds / dripSeconds) + 1;
 }
@@ -83,12 +115,14 @@ export function remainingWindowCapacity(
   dripSeconds: number
 ): number {
   if (dripSeconds <= 0) return 0;
+  const windowStart = normalizeHHMM(start);
+  const windowEnd = normalizeHHMM(end);
   const nowSec = secondsIntoDayInTz(timezone);
-  const startSec = hhmmToSeconds(start);
-  const endSec = hhmmToSeconds(end);
+  const startSec = hhmmToSeconds(windowStart);
+  const endSec = hhmmToSeconds(windowEnd);
   if (nowSec >= endSec) return 0;
   if (nowSec < startSec) {
-    return dailyWindowCapacity(start, end, dripSeconds);
+    return dailyWindowCapacity(windowStart, windowEnd, dripSeconds);
   }
   const remainingSeconds = endSec - nowSec;
   return Math.floor(remainingSeconds / dripSeconds) + 1;
@@ -100,9 +134,11 @@ export function msUntilCallWindowOpens(
   start: string,
   end: string
 ): number {
-  if (withinCallWindow(timezone, start, end)) return 0;
+  const windowStart = normalizeHHMM(start);
+  const windowEnd = normalizeHHMM(end);
+  if (withinCallWindow(timezone, windowStart, windowEnd)) return 0;
   const nowSec = secondsIntoDayInTz(timezone);
-  const startSec = hhmmToSeconds(start);
+  const startSec = hhmmToSeconds(windowStart);
   const deltaSec =
     nowSec < startSec ? startSec - nowSec : 24 * 3600 - nowSec + startSec;
   return deltaSec * 1000;
