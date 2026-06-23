@@ -70,6 +70,7 @@ export default function SetupWizard() {
   const [crmProvider, setCrmProvider] = useState<CrmProvider>("followupboss");
   const [enrollTag, setEnrollTag] = useState("upsurgecallflowai");
   const [fubApiKey, setFubApiKey] = useState("");
+  const [crmAccountUrl, setCrmAccountUrl] = useState("");
   const [hlToken, setHlToken] = useState("");
   const [hlLocation, setHlLocation] = useState("");
 
@@ -179,6 +180,7 @@ export default function SetupWizard() {
           timezone,
           crm_provider: crmProvider,
           enroll_tag: enrollTag.trim(),
+          crm_account_url: crmAccountUrl.trim() || null,
           credentials: credentials(),
         },
         agents: agents.map((a) => ({
@@ -337,18 +339,30 @@ export default function SetupWizard() {
             </div>
 
             {crmProvider === "followupboss" ? (
-              <div className="space-y-1.5">
-                <Label>Follow Up Boss API key</Label>
-                <Input
-                  type="password"
-                  value={fubApiKey}
-                  onChange={(e) => {
-                    setFubApiKey(e.target.value);
-                    setVerified(false);
-                  }}
-                  placeholder="fka_…"
-                />
-              </div>
+              <>
+                <div className="space-y-1.5">
+                  <Label>Follow Up Boss API key</Label>
+                  <Input
+                    type="password"
+                    value={fubApiKey}
+                    onChange={(e) => {
+                      setFubApiKey(e.target.value);
+                      setVerified(false);
+                    }}
+                    placeholder="fka_…"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label hint="for contact deep-links in the dashboard">
+                    FUB account URL
+                  </Label>
+                  <Input
+                    value={crmAccountUrl}
+                    onChange={(e) => setCrmAccountUrl(e.target.value)}
+                    placeholder="https://nilpatel.followupboss.com"
+                  />
+                </div>
+              </>
             ) : (
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-1.5">

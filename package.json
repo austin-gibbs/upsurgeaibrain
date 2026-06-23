@@ -12,6 +12,7 @@
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
+    "test": "tsx --test src/lib/**/*.test.ts",
     "db:apply-pending": "node scripts/apply-migrations-api.mjs",
     "worker": "tsx watch worker/index.ts",
     "worker:prod": "tsx worker/index.ts"

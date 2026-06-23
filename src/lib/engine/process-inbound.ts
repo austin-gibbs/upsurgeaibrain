@@ -199,6 +199,9 @@ export async function processInboundCall(
     transcript: base.transcript,
     raw_payload: body,
     completed_at: new Date().toISOString(),
+    crm_contact_id: contact.id,
+    contact_name: contact.fullName ?? callerName,
+    contact_email: contact.email ?? callerEmail,
   };
   if (existing) {
     const update: CallUpdate = row;
@@ -231,7 +234,7 @@ function formatInboundNote(p: {
   callType: string;
 }): string {
   const c = p.custom;
-  const line = (label: string, val: unknown) => `${label}: ${str(val) || "—"}`;
+  const line = (label: string, val: unknown) => `${label}: ${str(val)}`;
   return [
     `NEW CALL - ${p.priority} - ${p.callerName ?? "Unknown"} - ${p.callType}`,
     "",

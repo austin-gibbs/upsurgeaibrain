@@ -12,6 +12,7 @@ export interface CrmContact {
   /** Provider's native id. */
   id: string;
   fullName: string | null;
+  email: string | null;
   /** E.164 phone numbers in preferred dial order. */
   phones: string[];
   tags: string[];

@@ -3,8 +3,36 @@ import { Worker } from "bullmq";
 import { getRedis } from "../connection";
 import { CALL_QUEUE, getCallQueue, type CallJob } from "../queues";
 import { placeCall } from "@/lib/engine/caller";
-import { withinEasternBusinessHours, msUntilEasternWindowOpens } from "@/lib/engine/cadence";
+import {
+  withinCallWindow,
+  withinEasternBusinessHours,
+  msUntilEasternWindowOpens,
+  msUntilCallWindowOpens,
+} from "@/lib/engine/cadence";
 import { createServiceClient } from "@/lib/supabase/server";
+
+type AgentWindowRow = {
+  agent_call_configs: {
+    call_window_start: string;
+    call_window_end: string;
+  } | {
+    call_window_start: string;
+    call_window_end: string;
+  }[] | null;
+  workspaces: { timezone: string } | null;
+};
+
+async function deferDial(job: CallJob, delayMs: number, reason: string) {
+  const delay = Math.max(delayMs, 60_000);
+  await getCallQueue().add("dial", job, {
+    delay,
+    jobId: `defer:${job.agentId}:${job.contactId}`,
+  });
+  console.log(
+    `[call.worker] ${reason} — deferred contact ${job.contactId} ~${Math.round(delay / 60000)}m`
+  );
+  return { deferred: true };
+}
 
 export function startCallWorker(): Worker<CallJob> {
   const worker = new Worker<CallJob>(
@@ -15,17 +43,47 @@ export function startCallWorker(): Worker<CallJob> {
       // backoff — when that happens, re-queue it to fire when the window next
       // opens instead of placing the call now. The deterministic jobId keeps
       // at most one pending deferral per contact.
-      if (!withinEasternBusinessHours()) {
+      if (!job.data.testMode && !withinEasternBusinessHours()) {
         const delay = Math.max(msUntilEasternWindowOpens(), 60_000);
-        await getCallQueue().add("dial", job.data, {
-          delay,
-          jobId: `defer:${job.data.agentId}:${job.data.contactId}`,
-        });
-        console.log(
-          `[call.worker] outside 9am-7pm ET — deferred contact ${job.data.contactId} ~${Math.round(delay / 60000)}m`
-        );
-        return { deferred: true };
+        return deferDial(job.data, delay, "outside 9am-7pm ET");
       }
+
+      if (!job.data.testMode) {
+        const supabase = createServiceClient();
+        const { data: agentRow } = await supabase
+          .from("agents")
+          .select(
+            "agent_call_configs(call_window_start, call_window_end), workspaces(timezone)"
+          )
+          .eq("id", job.data.agentId)
+          .single<AgentWindowRow>();
+
+        const config = Array.isArray(agentRow?.agent_call_configs)
+          ? agentRow.agent_call_configs[0]
+          : agentRow?.agent_call_configs;
+        const timezone = agentRow?.workspaces?.timezone ?? "America/New_York";
+
+        if (
+          config &&
+          !withinCallWindow(
+            timezone,
+            config.call_window_start,
+            config.call_window_end
+          )
+        ) {
+          const delay = msUntilCallWindowOpens(
+            timezone,
+            config.call_window_start,
+            config.call_window_end
+          );
+          return deferDial(
+            job.data,
+            delay,
+            `outside agent window ${config.call_window_start}-${config.call_window_end} ${timezone}`
+          );
+        }
+      }
+
       const result = await placeCall(job.data);
       return result;
     },

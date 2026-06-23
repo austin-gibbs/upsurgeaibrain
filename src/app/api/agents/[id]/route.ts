@@ -1,12 +1,14 @@
 // =====================================================================
 // GET   /api/agents/:id        — agent detail (configs + recent calls)
 // PATCH /api/agents/:id         — update status, direction, linkage,
-//                                 and/or per-agent CRM + Retell creds.
+//                                 per-agent CRM + Retell creds, and/or
+//                                 call_config (dialing rules).
 // =====================================================================
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient, createServiceClient } from "@/lib/supabase/server";
 import { encryptJson } from "@/lib/crypto";
 import {
+  callConfigSchema,
   crmCredentialsSchema,
   retellCredentialsSchema,
 } from "@/lib/validation";
@@ -61,14 +63,17 @@ export async function GET(
       "id, workspace_id, name, status, direction, objective, enroll_tag, " +
         "retell_agent_id, retell_from_number, crm_provider, " +
         "crm_credentials_encrypted, retell_credentials_encrypted, created_at, " +
-        "agent_call_configs(*), agent_task_configs(*)"
+        "agent_call_configs(*), agent_task_configs(*), " +
+        "workspaces(timezone)"
     )
     .eq("id", params.id)
-    .single<AgentRow>();
+    .single<AgentRow & { workspaces: { timezone: string } | null }>();
 
   if (error || !agent) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
+
+  const { workspaces, ...agentRow } = agent;
 
   const { data: calls } = await db
     .from("calls")
@@ -80,7 +85,11 @@ export async function GET(
     .order("queued_at", { ascending: false })
     .limit(50);
 
-  return NextResponse.json({ agent: publicAgent(agent), calls: calls ?? [] });
+  return NextResponse.json({
+    agent: publicAgent(agentRow),
+    workspaceTimezone: workspaces?.timezone ?? "America/New_York",
+    calls: calls ?? [],
+  });
 }
 
 const patchSchema = z.object({
@@ -93,6 +102,7 @@ const patchSchema = z.object({
   crm_provider: z.enum(["followupboss", "highlevel"]).nullable().optional(),
   crm_credentials: crmCredentialsSchema.nullable().optional(),
   retell_credentials: retellCredentialsSchema.nullable().optional(),
+  call_config: callConfigSchema.optional(),
 });
 
 export async function PATCH(
@@ -208,19 +218,43 @@ export async function PATCH(
   }
 
   const db = createServiceClient();
+
+  if (Object.keys(update).length > 0) {
+    const { error: agentError } = await db
+      .from("agents")
+      .update(update)
+      .eq("id", params.id);
+    if (agentError) {
+      return NextResponse.json({ error: agentError.message }, { status: 500 });
+    }
+  }
+
+  if (input.call_config) {
+    const { error: configError } = await db.from("agent_call_configs").upsert(
+      {
+        agent_id: params.id,
+        ...input.call_config,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "agent_id" }
+    );
+    if (configError) {
+      return NextResponse.json({ error: configError.message }, { status: 500 });
+    }
+  }
+
   const { data: updated, error } = await db
     .from("agents")
-    .update(update)
-    .eq("id", params.id)
     .select(
       "id, status, direction, objective, enroll_tag, retell_agent_id, " +
         "retell_from_number, crm_provider, crm_credentials_encrypted, " +
-        "retell_credentials_encrypted"
+        "retell_credentials_encrypted, agent_call_configs(*)"
     )
+    .eq("id", params.id)
     .single<AgentRow>();
 
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error || !updated) {
+    return NextResponse.json({ error: error?.message ?? "not found" }, { status: 500 });
   }
   return NextResponse.json({ ok: true, agent: publicAgent(updated) });
 }

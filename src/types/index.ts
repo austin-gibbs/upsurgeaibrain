@@ -37,6 +37,8 @@ export interface Workspace {
   timezone: string;
   crm_provider: CrmProvider;
   crm_credentials_encrypted: string | null;
+  /** Base URL for CRM contact pages, e.g. https://nilpatel.followupboss.com */
+  crm_account_url: string | null;
   enroll_tag: string;
   is_active: boolean;
   created_by: string | null;
@@ -100,6 +102,7 @@ export interface Contact {
   workspace_id: string;
   crm_contact_id: string;
   full_name: string | null;
+  email: string | null;
   phones: string[];
   tags: string[];
   attempt_count: number;
@@ -118,6 +121,9 @@ export interface Call {
   attempt_number: number;
   to_number: string;
   retell_call_id: string | null;
+  crm_contact_id: string | null;
+  contact_name: string | null;
+  contact_email: string | null;
   status: CallStatus;
   outcome: CallOutcome | null;
   in_voicemail: boolean | null;

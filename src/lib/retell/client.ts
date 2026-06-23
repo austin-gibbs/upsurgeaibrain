@@ -23,6 +23,58 @@ export interface CreatePhoneCallResult {
   callId: string;
 }
 
+export interface ListCallsFilterCriteria {
+  agent_id?: string[];
+  direction?: Array<"inbound" | "outbound">;
+  call_status?: Array<"not_connected" | "ongoing" | "ended" | "error">;
+  start_timestamp?: {
+    lower_threshold?: number;
+    upper_threshold?: number;
+  };
+}
+
+export interface ListCallsInput {
+  filter_criteria?: ListCallsFilterCriteria;
+  limit?: number;
+  sort_order?: "ascending" | "descending";
+  pagination_key?: string;
+}
+
+/** Minimal call shape returned by Retell v3 list-calls. */
+export interface RetellCallListItem {
+  call_id: string;
+  agent_id?: string;
+  call_type?: string;
+  direction?: "inbound" | "outbound";
+  call_status?: string;
+  start_timestamp?: number;
+  end_timestamp?: number;
+  duration_ms?: number;
+  from_number?: string;
+  to_number?: string;
+  recording_url?: string;
+  disconnection_reason?: string;
+  call_analysis?: {
+    call_summary?: string;
+    call_successful?: boolean;
+    user_sentiment?: string;
+    in_voicemail?: boolean;
+    call_outcome?: string;
+    custom_analysis_data?: Record<string, unknown>;
+  };
+  call_cost?: {
+    combined_cost?: number;
+    total_duration_seconds?: number;
+    product_costs?: Array<{ product: string; cost: number }>;
+  };
+  latency?: {
+    e2e?: { p50?: number; p90?: number; p99?: number };
+    llm?: { p50?: number; p90?: number };
+    tts?: { p50?: number; p90?: number };
+  };
+  metadata?: Record<string, string>;
+}
+
 /** Shape stored in agents.retell_credentials_encrypted (encrypted at rest). */
 export interface RetellCredentials {
   apiKey: string;
@@ -65,6 +117,64 @@ export class RetellClient {
     });
     if (!res.ok) throw new Error(`Retell get-call ${res.status}: ${await res.text()}`);
     return res.json();
+  }
+
+  /**
+   * Fetch one page of calls from Retell v3 list-calls.
+   * Returns items plus pagination metadata for follow-up pages.
+   */
+  async listCallsPage(input: ListCallsInput = {}): Promise<{
+    items: RetellCallListItem[];
+    pagination_key: string | null;
+    has_more: boolean;
+  }> {
+    const res = await fetch(`${RETELL_BASE}/v3/list-calls`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${this.apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        filter_criteria: input.filter_criteria ?? {},
+        limit: input.limit ?? 1000,
+        sort_order: input.sort_order ?? "descending",
+        ...(input.pagination_key ? { pagination_key: input.pagination_key } : {}),
+      }),
+    });
+    if (!res.ok) {
+      throw new Error(`Retell list-calls ${res.status}: ${await res.text()}`);
+    }
+    const data = (await res.json()) as {
+      items?: RetellCallListItem[];
+      pagination_key?: string | null;
+      has_more?: boolean;
+    };
+    return {
+      items: data.items ?? [],
+      pagination_key: data.pagination_key ?? null,
+      has_more: data.has_more ?? false,
+    };
+  }
+
+  /**
+   * Paginate through all matching calls up to maxPages (default 10 = 10k calls).
+   */
+  async listCalls(
+    input: ListCallsInput = {},
+    maxPages = 10
+  ): Promise<RetellCallListItem[]> {
+    const all: RetellCallListItem[] = [];
+    let paginationKey: string | undefined;
+    for (let page = 0; page < maxPages; page++) {
+      const result = await this.listCallsPage({
+        ...input,
+        pagination_key: paginationKey,
+      });
+      all.push(...result.items);
+      if (!result.has_more || !result.pagination_key) break;
+      paginationKey = result.pagination_key;
+    }
+    return all;
   }
 }
 

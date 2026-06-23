@@ -6,6 +6,14 @@ export const crmCredentialsSchema = z.union([
   z.object({ accessToken: z.string().min(10), locationId: z.string().min(1) }), // HighLevel
 ]);
 
+/** Base URL for CRM contact pages (e.g. https://nilpatel.followupboss.com). */
+export const crmAccountUrlSchema = z
+  .string()
+  .trim()
+  .url({ message: "Enter a valid URL like https://youraccount.followupboss.com" })
+  .optional()
+  .nullable();
+
 /** Retell credentials stored per inbound agent. webhookSecret is optional. */
 export const retellCredentialsSchema = z.object({
   apiKey: z.string().min(10),
@@ -132,6 +140,7 @@ export const provisionWorkspaceSchema = z.object({
     timezone: z.string().default("America/New_York"),
     crm_provider: z.enum(["followupboss", "highlevel"]),
     enroll_tag: z.string().default("upsurgecallflowai"),
+    crm_account_url: crmAccountUrlSchema.default(null),
     credentials: crmCredentialsSchema,
   }),
   agents: z.array(agentSchema).min(1),
@@ -139,3 +148,7 @@ export const provisionWorkspaceSchema = z.object({
 
 export type ProvisionWorkspaceInput = z.infer<typeof provisionWorkspaceSchema>;
 export type CreateAgentInput = z.infer<typeof createAgentSchema>;
+
+export const runWorkspacePollSchema = z.object({
+  testMode: z.boolean().default(false),
+});

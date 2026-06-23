@@ -39,6 +39,38 @@ export function withinCallWindow(timezone: string, start: string, end: string): 
   return now >= start && now <= end;
 }
 
+function secondsIntoDayInTz(timezone: string): number {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: timezone,
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).formatToParts(new Date());
+  const val = (t: string) => Number(parts.find((p) => p.type === t)?.value ?? "0");
+  const hour = val("hour") % 24;
+  return hour * 3600 + val("minute") * 60 + val("second");
+}
+
+function hhmmToSeconds(hhmm: string): number {
+  const [h, m] = hhmm.split(":").map(Number);
+  return h * 3600 + m * 60;
+}
+
+/** Milliseconds until the next call-window open in a timezone (0 if open right now). */
+export function msUntilCallWindowOpens(
+  timezone: string,
+  start: string,
+  end: string
+): number {
+  if (withinCallWindow(timezone, start, end)) return 0;
+  const nowSec = secondsIntoDayInTz(timezone);
+  const startSec = hhmmToSeconds(start);
+  const deltaSec =
+    nowSec < startSec ? startSec - nowSec : 24 * 3600 - nowSec + startSec;
+  return deltaSec * 1000;
+}
+
 // ---------------------------------------------------------------------------
 // Hard business-hours guard (global). Independent of per-agent config so a
 // misconfiguration can never dial outside hours: never place a call before

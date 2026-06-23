@@ -56,6 +56,7 @@ export class HighLevelAdapter implements CrmAdapter {
       id: String(c.id),
       fullName:
         c.contactName ?? [c.firstName, c.lastName].filter(Boolean).join(" ") ?? null,
+      email: c.email ? String(c.email) : null,
       phones: phones.filter(Boolean),
       tags: Array.isArray(c.tags) ? c.tags.map(String) : [],
     };

@@ -1,201 +1,67 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import {
-  ArrowLeft,
-  Bot,
-  Users,
-  Tags,
-  ArrowUpRight,
-  CalendarClock,
-  Search,
-  Plus,
-} from "lucide-react";
+import { ArrowLeft, SlidersHorizontal } from "lucide-react";
 import { PageShell } from "@/components/TopNav";
 import {
-  Card,
-  StatusBadge,
-  Badge,
-  StatTile,
-  SectionHeader,
-  IconBadge,
-  Input,
-  EmptyState,
   Button,
+  Card,
+  EmptyState,
+  Input,
+  Label,
+  Segmented,
+  Select,
+  Skeleton,
+  Tabs,
 } from "@/components/ui";
+import { KpiGrid } from "@/components/reporting/KpiGrid";
+import { ReportingCharts } from "@/components/reporting/ReportingCharts";
+import { CallLog } from "@/components/reporting/CallLog";
+import {
+  DEFAULT_WIDGETS,
+  WIDGET_LABELS,
+  type DashboardWidgetId,
+  type ReportingResponse,
+} from "@/components/reporting/types";
+import { WorkspaceOpsTab, CRM_LABEL } from "@/components/workspace/WorkspaceOpsTab";
 
-type Detail = {
+type OpsDetail = {
   workspace: {
     id: string;
     name: string;
     timezone: string;
     crm_provider: string;
+    crm_account_url?: string | null;
     enroll_tag: string;
     is_active: boolean;
-    created_at: string;
   };
-  agents: {
-    id: string;
-    name: string;
-    status: string;
-    objective: string | null;
-    enroll_tag: string | null;
-    retell_agent_id: string | null;
-    retell_from_number: string | null;
-    agent_call_configs: {
-      max_calls_per_day: number;
-      max_attempts_per_contact: number;
-      daily_run_at: string;
-      drip_seconds: number;
-    }[];
-    agent_task_configs: { enabled: boolean }[];
-  }[];
+  agents: Parameters<typeof WorkspaceOpsTab>[0]["data"]["agents"];
   contactCount: number;
-  contacts: ContactRow[];
-  outcomeTags: { outcome: string; tag: string; is_terminal: boolean }[];
+  contacts: Parameters<typeof WorkspaceOpsTab>[0]["data"]["contacts"];
+  outcomeTags: Parameters<typeof WorkspaceOpsTab>[0]["data"]["outcomeTags"];
 };
 
-type ContactRow = {
-  id: string;
-  full_name: string | null;
-  phones: string[];
-  attempt_count: number;
-  last_called_on: string | null;
-  next_eligible_on: string | null;
-  is_terminal: boolean;
-  terminal_outcome: string | null;
-};
-
-const CRM_LABEL: Record<string, string> = {
-  followupboss: "Follow Up Boss",
-  highlevel: "HighLevel",
-};
-
-type BadgeTone = "slate" | "green" | "amber" | "red" | "blue";
-
-/** Today's date (YYYY-MM-DD) in the workspace timezone. */
-function todayInTz(timezone: string): string {
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: timezone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(new Date());
-}
-
-/** Friendly label for a YYYY-MM-DD calendar date (e.g. "Mon, Jun 23"). */
-function formatDate(iso: string): string {
-  return new Intl.DateTimeFormat("en-US", {
-    timeZone: "UTC",
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-  }).format(new Date(`${iso}T12:00:00Z`));
-}
-
-/** Whole days from one YYYY-MM-DD to another. */
-function daysBetween(fromIso: string, toIso: string): number {
-  const a = new Date(`${fromIso}T00:00:00Z`).getTime();
-  const b = new Date(`${toIso}T00:00:00Z`).getTime();
-  return Math.round((b - a) / 86_400_000);
-}
-
-/** Current HH:MM (24h) in a timezone, for comparing against the run time. */
-function nowHHMMInTz(timezone: string): string {
-  return new Intl.DateTimeFormat("en-GB", {
-    timeZone: timezone,
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).format(new Date());
-}
-
-/** "09:00" -> "9:00 AM". */
-function formatRunTime(hhmm: string): string {
-  const [h, m] = hhmm.split(":").map(Number);
-  const period = h >= 12 ? "PM" : "AM";
-  const hr = h % 12 === 0 ? 12 : h % 12;
-  return `${hr}:${String(m ?? 0).padStart(2, "0")} ${period}`;
-}
-
-/** Add whole days to a YYYY-MM-DD string. */
-function addDaysIso(iso: string, n: number): string {
-  const d = new Date(`${iso}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + n);
+function defaultFromDate(): string {
+  const d = new Date();
+  d.setDate(d.getDate() - 30);
   return d.toISOString().slice(0, 10);
 }
 
-function relativeWord(today: string, target: string): string {
-  const d = daysBetween(today, target);
-  if (d <= 0) return "today";
-  if (d === 1) return "tomorrow";
-  return `in ${d} days`;
+function todayDate(): string {
+  return new Date().toISOString().slice(0, 10);
 }
 
-/** Seconds-of-day -> "9:02 AM". */
-function formatClock(totalSeconds: number): string {
-  const h24 = Math.floor(totalSeconds / 3600) % 24;
-  const m = Math.floor((totalSeconds % 3600) / 60);
-  const period = h24 >= 12 ? "PM" : "AM";
-  const hr = h24 % 12 === 0 ? 12 : h24 % 12;
-  return `${hr}:${String(m).padStart(2, "0")} ${period}`;
-}
-
-type Schedule = { label: string; tone: BadgeTone; note?: string };
-
-/**
- * Project each contact's next-call slot. Mirrors the engine: terminal /
- * attempt-capped contacts are done; everyone else lands on their next eligible
- * date at the agent's run time, dialed in sequence `dripSeconds` apart. So a
- * contact's projected time ≈ run time + (its position that day × drip).
- * Positions are a best-effort projection — the true order is fixed at poll
- * time — but the first contact each day is accurate to the run time.
- */
-function buildSchedules(
-  contacts: ContactRow[],
-  today: string,
-  nowHHMM: string,
-  runAt: string,
-  dripSeconds: number,
-  maxAttempts: number | null
-): Map<string, Schedule> {
-  const [rh, rm] = runAt.split(":").map(Number);
-  const runStartSec = (rh || 0) * 3600 + (rm || 0) * 60;
-  const perDay: Record<string, number> = {};
-  const map = new Map<string, Schedule>();
-
-  for (const c of contacts) {
-    if (c.is_terminal) {
-      map.set(c.id, {
-        label: "Completed",
-        tone: "slate",
-        note: c.terminal_outcome ? c.terminal_outcome.replace(/_/g, " ") : undefined,
-      });
-      continue;
-    }
-    if (maxAttempts != null && c.attempt_count >= maxAttempts) {
-      map.set(c.id, { label: "Finished", tone: "slate", note: "max attempts reached" });
-      continue;
-    }
-    const next = c.next_eligible_on;
-    const runDate =
-      !next || next <= today
-        ? nowHHMM < runAt
-          ? today
-          : addDaysIso(today, 1)
-        : next;
-    const pos = perDay[runDate] ?? 0;
-    perDay[runDate] = pos + 1;
-    const projectedSec = runStartSec + pos * dripSeconds;
-    const rel = relativeWord(today, runDate);
-    map.set(c.id, {
-      label: `${formatDate(runDate)} · ${formatClock(projectedSec)} ET`,
-      tone: runDate === today ? "green" : "blue",
-      note: pos === 0 ? `${rel} · first in line` : `${rel} · ~#${pos + 1} in line`,
-    });
+function loadWidgets(workspaceId: string): Set<DashboardWidgetId> {
+  if (typeof window === "undefined") return new Set(DEFAULT_WIDGETS);
+  try {
+    const raw = localStorage.getItem(`upsurge-dashboard-widgets-${workspaceId}`);
+    if (!raw) return new Set(DEFAULT_WIDGETS);
+    const parsed = JSON.parse(raw) as DashboardWidgetId[];
+    return new Set(parsed.length ? parsed : DEFAULT_WIDGETS);
+  } catch {
+    return new Set(DEFAULT_WIDGETS);
   }
-  return map;
 }
 
 export default function WorkspaceDetailPage({
@@ -203,68 +69,120 @@ export default function WorkspaceDetailPage({
 }: {
   params: { id: string };
 }) {
-  const [data, setData] = useState<Detail | null>(null);
+  const [tab, setTab] = useState<"dashboard" | "operations">("dashboard");
+  const [opsData, setOpsData] = useState<OpsDetail | null>(null);
+  const [reporting, setReporting] = useState<ReportingResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [query, setQuery] = useState("");
+  const [loadingReporting, setLoadingReporting] = useState(true);
 
-  useEffect(() => {
+  const [agentId, setAgentId] = useState("all");
+  const [direction, setDirection] = useState<"all" | "inbound" | "outbound">("all");
+  const [fromDate, setFromDate] = useState(defaultFromDate);
+  const [toDate, setToDate] = useState(todayDate);
+  const [widgets, setWidgets] = useState<Set<DashboardWidgetId>>(() =>
+    loadWidgets(params.id)
+  );
+  const [showCustomize, setShowCustomize] = useState(false);
+  const [crmAccountUrl, setCrmAccountUrl] = useState("");
+  const [savingUrl, setSavingUrl] = useState(false);
+
+  const refreshOps = useCallback(() => {
     fetch(`/api/workspaces/${params.id}`)
       .then((r) => r.json())
-      .then((d) => (d.error ? setError(d.error) : setData(d)))
+      .then((d) => {
+        if (d.error) setError(d.error);
+        else {
+          setOpsData(d);
+          setCrmAccountUrl(d.workspace.crm_account_url ?? "");
+        }
+      })
       .catch((e) => setError(e.message));
   }, [params.id]);
 
-  if (error)
+  const fetchReporting = useCallback(() => {
+    setLoadingReporting(true);
+    const qs = new URLSearchParams({
+      agentId,
+      direction,
+      from: new Date(`${fromDate}T00:00:00`).toISOString(),
+      to: new Date(`${toDate}T23:59:59`).toISOString(),
+    });
+    fetch(`/api/workspaces/${params.id}/reporting?${qs}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.error) setError(d.error);
+        else setReporting(d);
+      })
+      .catch((e) => setError(e.message))
+      .finally(() => setLoadingReporting(false));
+  }, [params.id, agentId, direction, fromDate, toDate]);
+
+  useEffect(() => {
+    refreshOps();
+  }, [refreshOps]);
+
+  useEffect(() => {
+    if (tab === "dashboard") fetchReporting();
+  }, [tab, fetchReporting]);
+
+  useEffect(() => {
+    localStorage.setItem(
+      `upsurge-dashboard-widgets-${params.id}`,
+      JSON.stringify([...widgets])
+    );
+  }, [widgets, params.id]);
+
+  function toggleWidget(id: DashboardWidgetId) {
+    setWidgets((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  async function saveCrmUrl() {
+    setSavingUrl(true);
+    try {
+      const res = await fetch(`/api/workspaces/${params.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ crm_account_url: crmAccountUrl.trim() || null }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error ?? "Failed to save");
+      refreshOps();
+      fetchReporting();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to save CRM URL");
+    } finally {
+      setSavingUrl(false);
+    }
+  }
+
+  const selectedAgent = useMemo(
+    () => reporting?.agents.find((a) => a.id === agentId),
+    [reporting, agentId]
+  );
+
+  if (error && !opsData) {
     return (
       <PageShell>
         <Card className="p-5 text-sm text-accent-rose-fg">{error}</Card>
       </PageShell>
     );
-  if (!data)
+  }
+
+  if (!opsData) {
     return (
       <PageShell>
-        <p className="text-sm text-ink-500">Loading…</p>
+        <Skeleton className="mb-4 h-8 w-48" />
+        <Skeleton className="h-64 w-full" />
       </PageShell>
     );
+  }
 
-  const { workspace, agents, contactCount, contacts, outcomeTags } = data;
-
-  const today = todayInTz(workspace.timezone);
-  const nowEt = nowHHMMInTz(workspace.timezone);
-  const maxAttempts =
-    agents.reduce(
-      (m, a) => Math.max(m, a.agent_call_configs[0]?.max_attempts_per_contact ?? 0),
-      0
-    ) || null;
-  // Earliest daily run time across the workspace's agents (when dialing starts).
-  const runAt =
-    agents.reduce<string | null>((min, a) => {
-      const r = a.agent_call_configs[0]?.daily_run_at;
-      if (!r) return min;
-      return min === null || r < min ? r : min;
-    }, null) ?? "09:00";
-  const dripSeconds = agents[0]?.agent_call_configs[0]?.drip_seconds ?? 60;
-  // Projected schedule for every contact (positions based on the full list,
-  // not the search filter), keyed by contact id.
-  const schedules = buildSchedules(
-    contacts,
-    today,
-    nowEt,
-    runAt,
-    dripSeconds,
-    maxAttempts
-  );
-  const q = query.trim().toLowerCase();
-  const filteredContacts = q
-    ? contacts.filter(
-        (c) =>
-          (c.full_name ?? "").toLowerCase().includes(q) ||
-          c.phones.some((p) => p.toLowerCase().includes(q))
-      )
-    : contacts;
-  const upcomingCount = contacts.filter(
-    (c) => !c.is_terminal && !(maxAttempts != null && c.attempt_count >= maxAttempts)
-  ).length;
+  const { workspace } = opsData;
 
   return (
     <PageShell>
@@ -276,7 +194,7 @@ export default function WorkspaceDetailPage({
         Workspaces
       </Link>
 
-      <div className="mb-8 flex flex-wrap items-start justify-between gap-4">
+      <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-ink-900 sm:text-3xl">
             {workspace.name}
@@ -285,208 +203,174 @@ export default function WorkspaceDetailPage({
             {CRM_LABEL[workspace.crm_provider]} · {workspace.timezone}
           </p>
         </div>
-        <StatusBadge status={workspace.is_active ? "active" : "paused"} />
       </div>
 
-      <div className="mb-10 grid gap-5 sm:grid-cols-3">
-        <StatTile label="Agents" value={agents.length} icon={Bot} tone="sky" />
-        <StatTile
-          label="Enrolled contacts"
-          value={contactCount}
-          icon={Users}
-          tone="mint"
-        />
-        <StatTile
-          label="Enroll tag"
-          value={
-            <span className="font-mono text-base">{workspace.enroll_tag}</span>
-          }
-          icon={Tags}
-          tone="violet"
-        />
-      </div>
-
-      <SectionHeader
-        title="Agents"
-        action={
-          <Link href={`/workspaces/${params.id}/agents/new`}>
-            <Button variant="secondary" className="gap-1.5">
-              <Plus className="h-4 w-4" />
-              Add agent
-            </Button>
-          </Link>
-        }
+      <Tabs
+        items={[
+          { id: "dashboard", label: "Dashboard" },
+          { id: "operations", label: "Operations" },
+        ]}
+        active={tab}
+        onSelect={(v) => setTab(v as "dashboard" | "operations")}
       />
-      <div className="mb-10 grid gap-4">
-        {agents.map((a) => {
-          const cc = a.agent_call_configs[0];
-          const tc = a.agent_task_configs[0];
-          return (
-            <Link key={a.id} href={`/agents/${a.id}`}>
-              <Card hover className="group flex items-center justify-between p-5">
-                <div className="flex items-center gap-4">
-                  <IconBadge icon={Bot} tone="sky" className="h-10 w-10" />
-                  <div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-semibold text-ink-900">
-                        {a.name}
-                      </span>
-                      <StatusBadge status={a.status} />
-                      {!a.retell_agent_id && (
-                        <Badge tone="amber">no Retell ID</Badge>
-                      )}
-                    </div>
-                    {a.objective && (
-                      <p className="mt-0.5 text-sm text-ink-500">
-                        {a.objective}
-                      </p>
-                    )}
-                    <p className="mt-0.5 font-mono text-xs text-ink-400">
-                      enroll: {a.enroll_tag ?? workspace.enroll_tag}
-                    </p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-4 text-right">
-                  <div className="text-sm text-ink-500">
-                    {cc && (
-                      <span>
-                        {cc.max_calls_per_day}/day ·{" "}
-                        {cc.max_attempts_per_contact} attempts
-                      </span>
-                    )}
-                    <div className="text-xs">
-                      {tc?.enabled ? "tasks on" : "no tasks"}
-                    </div>
-                  </div>
-                  <ArrowUpRight className="h-4 w-4 text-ink-300 transition-colors group-hover:text-brand-500" />
-                </div>
-              </Card>
-            </Link>
-          );
-        })}
-      </div>
+      <div className="mb-2" />
 
-      <div className="mb-10">
-        <SectionHeader
-          title="Call schedule"
-          description={`When each enrolled contact is next set to dial. Calls begin at the ${formatRunTime(runAt)} ET daily run and are placed in sequence (~${dripSeconds}s apart), only between 9am–7pm ET. Times are projected from queue position.`}
-          action={
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-400" />
-              <Input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search name or number"
-                className="w-64 pl-9"
-              />
+      {tab === "dashboard" && (
+        <>
+          <Card className="mb-6 space-y-4 p-5">
+            <div className="flex flex-wrap items-end gap-4">
+              <div className="min-w-[180px] flex-1 space-y-1.5">
+                <Label>Agent</Label>
+                <Select
+                  value={agentId}
+                  onChange={(e) => setAgentId(e.target.value)}
+                >
+                  <option value="all">All agents</option>
+                  {(reporting?.agents ?? opsData.agents).map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.name} ({a.direction})
+                    </option>
+                  ))}
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label>Direction</Label>
+                <Segmented
+                  value={direction}
+                  onChange={(v) => setDirection(v as typeof direction)}
+                  options={[
+                    { value: "all", label: "All" },
+                    { value: "inbound", label: "Inbound" },
+                    { value: "outbound", label: "Outbound" },
+                  ]}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label>From</Label>
+                <Input
+                  type="date"
+                  value={fromDate}
+                  onChange={(e) => setFromDate(e.target.value)}
+                  className="w-40"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label>To</Label>
+                <Input
+                  type="date"
+                  value={toDate}
+                  onChange={(e) => setToDate(e.target.value)}
+                  className="w-40"
+                />
+              </div>
+              <Button variant="secondary" onClick={fetchReporting} disabled={loadingReporting}>
+                {loadingReporting ? "Loading…" : "Refresh"}
+              </Button>
+              <Button
+                variant="ghost"
+                className="gap-1.5"
+                onClick={() => setShowCustomize((s) => !s)}
+              >
+                <SlidersHorizontal className="h-4 w-4" />
+                Customize
+              </Button>
             </div>
-          }
-        />
-        {contacts.length > 0 && (
-          <p className="-mt-2 mb-4 text-sm text-ink-500">
-            <span className="font-medium text-ink-700">{upcomingCount}</span> upcoming
-            {" · "}
-            <span className="font-medium text-ink-700">
-              {contacts.length - upcomingCount}
-            </span>{" "}
-            finished
-            {contactCount > contacts.length && ` · showing ${contacts.length} of ${contactCount}`}
-          </p>
-        )}
-        <Card className="overflow-hidden p-0">
-          {filteredContacts.length === 0 ? (
-            <div className="p-6">
-              <EmptyState
-                icon={CalendarClock}
-                title={q ? "No matching contacts" : "No enrolled contacts yet"}
-                description={
-                  q
-                    ? "Try a different name or phone number."
-                    : `Contacts tagged "${workspace.enroll_tag}" will appear here once the agent runs its first poll.`
-                }
-              />
-            </div>
-          ) : (
-            <div className="max-h-[34rem] overflow-y-auto">
-              <table className="w-full text-sm">
-                <thead className="sticky top-0 z-10 bg-white">
-                  <tr className="border-b border-ink-100 text-left text-xs font-medium uppercase tracking-wide text-ink-400">
-                    <th className="px-5 py-3 font-medium">Contact</th>
-                    <th className="px-5 py-3 font-medium">Attempts</th>
-                    <th className="px-5 py-3 font-medium">Last call</th>
-                    <th className="px-5 py-3 font-medium">Next call</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-ink-100">
-                  {filteredContacts.map((c) => {
-                    const s = schedules.get(c.id) ?? {
-                      label: "—",
-                      tone: "slate" as BadgeTone,
-                    };
-                    return (
-                      <tr
-                        key={c.id}
-                        className="transition-colors hover:bg-ink-50/50"
-                      >
-                        <td className="px-5 py-3.5">
-                          <div className="font-medium text-ink-900">
-                            {c.full_name ?? "Unknown contact"}
-                          </div>
-                          {c.phones[0] && (
-                            <div className="font-mono text-xs text-ink-400">
-                              {c.phones[0]}
-                            </div>
-                          )}
-                        </td>
-                        <td className="px-5 py-3.5 text-ink-600">
-                          {c.attempt_count}
-                          {maxAttempts != null && (
-                            <span className="text-ink-400"> / {maxAttempts}</span>
-                          )}
-                        </td>
-                        <td className="px-5 py-3.5 text-ink-600">
-                          {c.last_called_on ? (
-                            formatDate(c.last_called_on)
-                          ) : (
-                            <span className="text-ink-400">never</span>
-                          )}
-                        </td>
-                        <td className="px-5 py-3.5">
-                          <div className="flex flex-col items-start gap-0.5">
-                            <Badge tone={s.tone}>{s.label}</Badge>
-                            {s.note && (
-                              <span className="text-xs text-ink-400">{s.note}</span>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+
+            {selectedAgent && agentId !== "all" && (
+              <p className="text-sm text-ink-500">
+                Showing reporting for{" "}
+                <span className="font-medium text-ink-700">{selectedAgent.name}</span>{" "}
+                ({selectedAgent.direction} · Retell {selectedAgent.retell_agent_id ?? "—"})
+              </p>
+            )}
+
+            {workspace.crm_provider === "followupboss" && !workspace.crm_account_url && (
+              <div className="rounded-xl border border-ink-200/50 bg-accent-amber-bg p-4">
+                <Label hint="enables View in CRM links">
+                  Follow Up Boss account URL
+                </Label>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <Input
+                    value={crmAccountUrl}
+                    onChange={(e) => setCrmAccountUrl(e.target.value)}
+                    placeholder="https://nilpatel.followupboss.com"
+                    className="max-w-md flex-1"
+                  />
+                  <Button onClick={saveCrmUrl} disabled={savingUrl} size="sm">
+                    {savingUrl ? "Saving…" : "Save"}
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {showCustomize && (
+              <div className="rounded-xl border border-ink-200/50 bg-ink-50/50 p-4">
+                <p className="mb-3 text-sm font-medium text-ink-700">
+                  Toggle report containers
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {(Object.keys(WIDGET_LABELS) as DashboardWidgetId[]).map((id) => (
+                    <button
+                      key={id}
+                      type="button"
+                      onClick={() => toggleWidget(id)}
+                      className={`rounded-xl border px-3 py-1.5 text-xs font-medium transition-all ${
+                        widgets.has(id)
+                          ? "border-brand-500 bg-accent-sky-bg text-accent-sky-fg"
+                          : "border-ink-200/80 bg-white text-ink-500"
+                      }`}
+                    >
+                      {WIDGET_LABELS[id]}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </Card>
+
+          {reporting?.retellErrors && (
+            <div className="mb-6 rounded-xl bg-accent-rose-bg px-4 py-3 text-sm text-accent-rose-fg">
+              Retell API: {reporting.retellErrors.join("; ")}
             </div>
           )}
-        </Card>
-      </div>
 
-      <SectionHeader
-        title="Outcome taxonomy"
-        description="Tags applied to contacts based on call outcomes."
-      />
-      <Card className="divide-y divide-ink-100 overflow-hidden p-0">
-        {outcomeTags.map((t) => (
-          <div
-            key={t.outcome}
-            className="flex items-center justify-between px-5 py-3.5 text-sm transition-colors hover:bg-ink-50/50"
-          >
-            <span className="font-medium text-ink-700">{t.outcome}</span>
-            <div className="flex items-center gap-2">
-              <span className="font-mono text-xs text-ink-400">{t.tag}</span>
-              {t.is_terminal && <Badge tone="red">terminal</Badge>}
+          {loadingReporting && !reporting ? (
+            <div className="space-y-4">
+              <div className="grid gap-4 sm:grid-cols-3 lg:grid-cols-5">
+                {Array.from({ length: 5 }).map((_, i) => (
+                  <Skeleton key={i} className="h-24 rounded-2xl" />
+                ))}
+              </div>
+              <Skeleton className="h-72 rounded-2xl" />
             </div>
-          </div>
-        ))}
-      </Card>
+          ) : reporting && reporting.kpis.totalCalls === 0 ? (
+            <EmptyState
+              title="No calls in this range"
+              description="Calls will appear here once your Retell agents start handling inbound or outbound traffic."
+            />
+          ) : reporting ? (
+            <>
+              <KpiGrid kpis={reporting.kpis} visible={widgets} />
+              <ReportingCharts data={reporting} visible={widgets} />
+              {widgets.has("callLog") && (
+                <CallLog
+                  calls={reporting.calls}
+                  agents={reporting.agents}
+                  crmProvider={reporting.workspace.crm_provider}
+                />
+              )}
+            </>
+          ) : null}
+        </>
+      )}
+
+      {tab === "operations" && (
+        <WorkspaceOpsTab
+          data={opsData}
+          workspaceId={params.id}
+          onRefresh={refreshOps}
+        />
+      )}
     </PageShell>
   );
 }

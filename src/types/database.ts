@@ -269,7 +269,10 @@ export type Database = {
           applied_tag: string | null
           attempt_number: number
           completed_at: string | null
+          contact_email: string | null
           contact_id: string | null
+          contact_name: string | null
+          crm_contact_id: string | null
           dialed_at: string | null
           direction: string
           error_message: string | null
@@ -291,7 +294,10 @@ export type Database = {
           applied_tag?: string | null
           attempt_number: number
           completed_at?: string | null
+          contact_email?: string | null
           contact_id?: string | null
+          contact_name?: string | null
+          crm_contact_id?: string | null
           dialed_at?: string | null
           direction?: string
           error_message?: string | null
@@ -313,7 +319,10 @@ export type Database = {
           applied_tag?: string | null
           attempt_number?: number
           completed_at?: string | null
+          contact_email?: string | null
           contact_id?: string | null
+          contact_name?: string | null
+          crm_contact_id?: string | null
           dialed_at?: string | null
           direction?: string
           error_message?: string | null
@@ -359,6 +368,7 @@ export type Database = {
           attempt_count: number
           created_at: string
           crm_contact_id: string
+          email: string | null
           full_name: string | null
           id: string
           is_terminal: boolean
@@ -374,6 +384,7 @@ export type Database = {
           attempt_count?: number
           created_at?: string
           crm_contact_id: string
+          email?: string | null
           full_name?: string | null
           id?: string
           is_terminal?: boolean
@@ -389,6 +400,7 @@ export type Database = {
           attempt_count?: number
           created_at?: string
           crm_contact_id?: string
+          email?: string | null
           full_name?: string | null
           id?: string
           is_terminal?: boolean
@@ -529,6 +541,7 @@ export type Database = {
         Row: {
           created_at: string
           created_by: string | null
+          crm_account_url: string | null
           crm_credentials_encrypted: string | null
           crm_provider: Database["public"]["Enums"]["crm_provider"]
           enroll_tag: string
@@ -542,6 +555,7 @@ export type Database = {
         Insert: {
           created_at?: string
           created_by?: string | null
+          crm_account_url?: string | null
           crm_credentials_encrypted?: string | null
           crm_provider: Database["public"]["Enums"]["crm_provider"]
           enroll_tag?: string
@@ -555,6 +569,7 @@ export type Database = {
         Update: {
           created_at?: string
           created_by?: string | null
+          crm_account_url?: string | null
           crm_credentials_encrypted?: string | null
           crm_provider?: Database["public"]["Enums"]["crm_provider"]
           enroll_tag?: string

@@ -2,7 +2,12 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, Phone, Settings, Clock, KeyRound } from "lucide-react";
+import { ArrowLeft, Phone, Settings, KeyRound } from "lucide-react";
+import { CallSettings } from "@/components/agent-form/CallSettings";
+import {
+  defaultCallConfig,
+  type CallConfig,
+} from "@/components/agent-form/types";
 import { PageShell } from "@/components/TopNav";
 import {
   Button,
@@ -74,6 +79,8 @@ export default function AgentDetailPage({
 
   const [retellApiKey, setRetellApiKey] = useState("");
   const [retellWebhookSecret, setRetellWebhookSecret] = useState("");
+  const [callCfg, setCallCfg] = useState<CallConfig>(defaultCallConfig());
+  const [workspaceTimezone, setWorkspaceTimezone] = useState("America/New_York");
 
   function load() {
     fetch(`/api/agents/${params.id}`)
@@ -92,6 +99,22 @@ export default function AgentDetailPage({
         setHlLocationId("");
         setRetellApiKey("");
         setRetellWebhookSecret("");
+        const cc = d.agent.agent_call_configs?.[0];
+        if (cc) {
+          setCallCfg({
+            max_total_calls: cc.max_total_calls ?? null,
+            max_calls_per_day: cc.max_calls_per_day ?? 100,
+            max_attempts_per_contact: cc.max_attempts_per_contact ?? 10,
+            call_window_start: cc.call_window_start ?? "09:00",
+            call_window_end: cc.call_window_end ?? "18:00",
+            daily_run_at: cc.daily_run_at ?? "09:00",
+            drip_seconds: cc.drip_seconds ?? 60,
+            cadence_day_gaps: cc.cadence_day_gaps ?? defaultCallConfig().cadence_day_gaps,
+          });
+        } else {
+          setCallCfg(defaultCallConfig());
+        }
+        setWorkspaceTimezone(d.workspaceTimezone ?? "America/New_York");
       })
       .catch((e) => setError(e.message));
   }
@@ -167,6 +190,10 @@ export default function AgentDetailPage({
     });
   }
 
+  function saveCallSettings() {
+    patch({ call_config: callCfg });
+  }
+
   if (error)
     return (
       <PageShell>
@@ -181,7 +208,6 @@ export default function AgentDetailPage({
     );
 
   const isInbound = direction === "inbound";
-  const cc = agent.agent_call_configs[0];
   const tc = agent.agent_task_configs[0];
 
   const linkageReady = isInbound
@@ -410,34 +436,18 @@ export default function AgentDetailPage({
       )}
 
       {!isInbound && (
-        <Card className="mt-6 space-y-4 p-6">
-          <div className="flex items-center gap-2">
-            <Clock className="h-4 w-4 text-ink-400" />
-            <h2 className="text-sm font-semibold text-ink-900">
-              Call & task settings
-            </h2>
-          </div>
-          {cc && (
-            <dl className="grid grid-cols-2 gap-x-6 gap-y-4 text-sm sm:grid-cols-3">
-              <Stat label="Calls/day" value={cc.max_calls_per_day} />
-              <Stat label="Max attempts" value={cc.max_attempts_per_contact} />
-              <Stat label="Total cap" value={cc.max_total_calls ?? "∞"} />
-              <Stat
-                label="Window"
-                value={`${cc.call_window_start}–${cc.call_window_end}`}
-              />
-              <Stat label="Runs at" value={cc.daily_run_at} />
-              <Stat label="Drip" value={`${cc.drip_seconds}s`} />
-              <div className="col-span-2 sm:col-span-3">
-                <dt className="text-xs font-medium uppercase tracking-wide text-ink-400">
-                  Cadence (day-gaps)
-                </dt>
-                <dd className="mt-1 font-mono text-xs text-ink-600">
-                  {(cc.cadence_day_gaps ?? []).join(", ")}
-                </dd>
-              </div>
-            </dl>
-          )}
+        <Card className="mt-6 space-y-5 p-6">
+          <SectionHeader
+            title="Call settings"
+            description={`Dialing rules for this agent. Times use workspace timezone (${workspaceTimezone}).`}
+          />
+          <CallSettings
+            cfg={callCfg}
+            onChange={(patch) => setCallCfg((prev) => ({ ...prev, ...patch }))}
+          />
+          <Button variant="secondary" disabled={saving} onClick={saveCallSettings}>
+            Save call settings
+          </Button>
           <hr className="border-ink-100" />
           {tc?.enabled ? (
             <p className="text-sm text-ink-600">
@@ -522,16 +532,5 @@ export default function AgentDetailPage({
         </Card>
       )}
     </PageShell>
-  );
-}
-
-function Stat({ label, value }: { label: string; value: React.ReactNode }) {
-  return (
-    <div>
-      <dt className="text-xs font-medium uppercase tracking-wide text-ink-400">
-        {label}
-      </dt>
-      <dd className="mt-1 font-semibold text-ink-800">{value}</dd>
-    </div>
   );
 }

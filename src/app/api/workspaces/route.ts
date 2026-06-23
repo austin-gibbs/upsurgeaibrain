@@ -99,6 +99,7 @@ export async function POST(req: NextRequest) {
       crm_provider: input.workspace.crm_provider,
       crm_credentials_encrypted: encryptJson(input.workspace.credentials),
       enroll_tag: input.workspace.enroll_tag,
+      crm_account_url: input.workspace.crm_account_url ?? null,
       created_by: user.id,
     })
     .select("id")

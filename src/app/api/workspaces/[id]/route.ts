@@ -5,6 +5,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient, createServiceClient } from "@/lib/supabase/server";
 import { z } from "zod";
+import { crmAccountUrlSchema } from "@/lib/validation";
 
 export const runtime = "nodejs";
 
@@ -20,7 +21,7 @@ export async function GET(
 
   const { data: workspace, error: wsErr } = await db
     .from("workspaces")
-    .select("id, name, timezone, crm_provider, enroll_tag, is_active, created_at")
+    .select("id, name, timezone, crm_provider, crm_account_url, enroll_tag, is_active, created_at")
     .eq("id", params.id)
     .single();
 
@@ -31,7 +32,7 @@ export async function GET(
   const { data: agents } = await db
     .from("agents")
     .select(
-      "id, name, status, objective, enroll_tag, retell_agent_id, retell_from_number, " +
+      "id, name, status, direction, objective, enroll_tag, retell_agent_id, retell_from_number, " +
         "agent_call_configs(*), agent_task_configs(*)"
     )
     .eq("workspace_id", params.id)
@@ -72,7 +73,10 @@ export async function GET(
 // PATCH /api/workspaces/:id — workspace-level controls. Currently a single
 // switch that turns follow-up task creation on/off for every agent in the
 // workspace (flips each agent_task_configs.enabled).
-const patchSchema = z.object({ tasks_enabled: z.boolean() });
+const patchSchema = z.object({
+  tasks_enabled: z.boolean().optional(),
+  crm_account_url: crmAccountUrlSchema,
+});
 
 export async function PATCH(
   req: NextRequest,
@@ -104,26 +108,46 @@ export async function PATCH(
   }
 
   const db = createServiceClient();
-  const { data: agents } = await db
-    .from("agents")
-    .select("id")
-    .eq("workspace_id", params.id)
-    .returns<{ id: string }[]>();
-  const agentIds = (agents ?? []).map((a) => a.id);
 
-  if (agentIds.length > 0) {
+  if (parsed.data.tasks_enabled !== undefined) {
+    const { data: agents } = await db
+      .from("agents")
+      .select("id")
+      .eq("workspace_id", params.id)
+      .returns<{ id: string }[]>();
+    const agentIds = (agents ?? []).map((a) => a.id);
+
+    if (agentIds.length > 0) {
+      const { error } = await db
+        .from("agent_task_configs")
+        .update({ enabled: parsed.data.tasks_enabled })
+        .in("agent_id", agentIds);
+      if (error) {
+        return NextResponse.json({ error: error.message }, { status: 500 });
+      }
+    }
+  }
+
+  if (parsed.data.crm_account_url !== undefined) {
     const { error } = await db
-      .from("agent_task_configs")
-      .update({ enabled: parsed.data.tasks_enabled })
-      .in("agent_id", agentIds);
+      .from("workspaces")
+      .update({ crm_account_url: parsed.data.crm_account_url })
+      .eq("id", params.id);
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
   }
 
+  const { data: agents } = await db
+    .from("agents")
+    .select("id")
+    .eq("workspace_id", params.id)
+    .returns<{ id: string }[]>();
+
   return NextResponse.json({
     ok: true,
     tasks_enabled: parsed.data.tasks_enabled,
-    agents_updated: agentIds.length,
+    crm_account_url: parsed.data.crm_account_url,
+    agents_updated: parsed.data.tasks_enabled !== undefined ? (agents ?? []).length : undefined,
   });
 }

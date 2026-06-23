@@ -57,5 +57,5 @@ if (!res.ok) {
   process.exit(1);
 }
 
-console.log("Migrations 0005 + 0006 applied successfully.");
+console.log("Migrations 0005 + 0006 + 0007 applied successfully.");
 if (body.trim()) console.log(body);

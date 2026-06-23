@@ -11,6 +11,10 @@ import { getCallQueue } from "@/lib/queue/queues";
 import { isEligible, todayInTz, withinCallWindow } from "./cadence";
 import type { Agent, AgentCallConfig, Contact, Workspace } from "@/types";
 
+export interface PollOptions {
+  testMode?: boolean;
+}
+
 export interface PollResult {
   agentId: string;
   scanned: number;
@@ -19,7 +23,10 @@ export interface PollResult {
   skippedReason?: string;
 }
 
-export async function pollAgent(agentId: string): Promise<PollResult> {
+export async function pollAgent(
+  agentId: string,
+  options?: PollOptions
+): Promise<PollResult> {
   const supabase = createServiceClient();
 
   const { data: agent } = await supabase
@@ -51,7 +58,10 @@ export async function pollAgent(agentId: string): Promise<PollResult> {
     return { agentId, scanned: 0, eligible: 0, enqueued: 0, skippedReason: "workspace inactive" };
   }
 
-  if (!withinCallWindow(workspace.timezone, config.call_window_start, config.call_window_end)) {
+  if (
+    !options?.testMode &&
+    !withinCallWindow(workspace.timezone, config.call_window_start, config.call_window_end)
+  ) {
     return { agentId, scanned: 0, eligible: 0, enqueued: 0, skippedReason: "outside call window" };
   }
 
@@ -76,6 +86,7 @@ export async function pollAgent(agentId: string): Promise<PollResult> {
       workspace_id: workspace.id,
       crm_contact_id: c.id,
       full_name: c.fullName,
+      email: c.email,
       phones: c.phones,
       tags: c.tags,
       // Preserve engine-owned cadence fields if the row exists.
@@ -110,6 +121,7 @@ export async function pollAgent(agentId: string): Promise<PollResult> {
         contactId: contact.id,
         toNumber: contact.phones[0],
         attemptNumber: contact.attempt_count + 1,
+        testMode: options?.testMode,
       },
       {
         delay: i * config.drip_seconds * 1000,
@@ -120,4 +132,27 @@ export async function pollAgent(agentId: string): Promise<PollResult> {
   }
 
   return { agentId, scanned: contacts.length, eligible: eligible.length, enqueued };
+}
+
+/** Poll every active outbound agent in a workspace. */
+export async function pollWorkspace(
+  workspaceId: string,
+  options?: PollOptions
+): Promise<PollResult[]> {
+  const supabase = createServiceClient();
+  const { data: agents } = await supabase
+    .from("agents")
+    .select("id")
+    .eq("workspace_id", workspaceId)
+    .eq("status", "active")
+    .eq("direction", "outbound")
+    .returns<{ id: string }[]>();
+
+  if (!agents?.length) return [];
+
+  const results: PollResult[] = [];
+  for (const agent of agents) {
+    results.push(await pollAgent(agent.id, options));
+  }
+  return results;
 }

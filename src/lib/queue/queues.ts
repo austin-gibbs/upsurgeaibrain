@@ -13,6 +13,7 @@ export const CALL_QUEUE = "outbound-call";
 
 export interface PollJob {
   agentId: string;
+  testMode?: boolean;
 }
 
 export interface CallJob {
@@ -20,6 +21,7 @@ export interface CallJob {
   contactId: string;
   toNumber: string;
   attemptNumber: number;
+  testMode?: boolean;
 }
 
 let pollQueue: Queue<PollJob> | null = null;

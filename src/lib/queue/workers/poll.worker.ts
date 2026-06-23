@@ -8,7 +8,9 @@ export function startPollWorker(): Worker<PollJob> {
   const worker = new Worker<PollJob>(
     POLL_QUEUE,
     async (job) => {
-      const result = await pollAgent(job.data.agentId);
+      const result = await pollAgent(job.data.agentId, {
+        testMode: job.data.testMode,
+      });
       console.log(`[poll.worker] agent ${job.data.agentId}:`, result);
       return result;
     },

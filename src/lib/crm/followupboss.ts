@@ -68,9 +68,14 @@ export class FollowUpBossAdapter implements CrmAdapter {
           .map((x: any) => toE164(String(x.value)))
           .filter((v: string | null): v is string => Boolean(v))
       : [];
+    const email =
+      Array.isArray(p.emails) && p.emails.length > 0
+        ? String(p.emails[0].value ?? p.emails[0]).trim() || null
+        : null;
     return {
       id: String(p.id),
       fullName: p.name ?? [p.firstName, p.lastName].filter(Boolean).join(" ") ?? null,
+      email,
       phones,
       tags: Array.isArray(p.tags) ? p.tags.map(String) : [],
     };

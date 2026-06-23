@@ -149,6 +149,9 @@ export async function processRetellWebhook(body: any): Promise<{ ok: boolean; re
       applied_tag: reconciled.appliedTag,
       task_created: taskCreated,
       completed_at: new Date().toISOString(),
+      crm_contact_id: contact.crm_contact_id,
+      contact_name: contact.full_name,
+      contact_email: contact.email,
     })
     .eq("id", call.id);
 
