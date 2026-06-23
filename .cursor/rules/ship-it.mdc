@@ -1,0 +1,25 @@
+---
+description: "Ship it" trigger — push everything to production deployment
+alwaysApply: true
+---
+
+# "Ship it" — deploy trigger
+
+When the user says **"Ship it"** (or "ship it to prod", "ship everything"), treat it
+as an explicit instruction to release all current work to production. Run this flow:
+
+1. **Verify build is safe**: `npm run typecheck` and `npm test` must pass. If either
+   fails, stop and report — do NOT deploy broken code.
+2. **Protect secrets**: confirm no secret/env files are staged
+   (`.env*`, `.env.vercel*`, credentials). They are gitignored — keep it that way.
+3. **Apply pending DB migrations FIRST** if the diff adds columns the code reads/writes
+   (mirror the 0007/0008 sequence: migrate Supabase before deploying, or prod breaks).
+4. **Commit & push to `main`**: stage with `git add -A`, write a clear commit message
+   summarizing the change, then `git push origin main`.
+5. **Auto-deploy**: the Vercel project `upsurgeaiagentapp` is git-connected to
+   `austin-gibbs/upsurgeaibrain` (production branch `main`), so the push triggers a
+   production deploy to `upsurgeprosai.com`. No manual `vercel --prod` needed.
+6. **Verify**: confirm a new READY production deployment for the pushed commit (Vercel
+   API/CLI) and that `upsurgeprosai.com` responds (a `307` auth redirect is healthy).
+
+Never skip the typecheck/test gate or commit secrets, even when told to "ship it".
