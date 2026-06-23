@@ -7,9 +7,11 @@
 // =====================================================================
 import { createServiceClient } from "@/lib/supabase/server";
 import { getCrmAdapterForAgent } from "@/lib/crm";
-import { getCallQueue } from "@/lib/queue/queues";
+import { getCallQueue, addCallJobsBulk, closeCallQueue, type CallJobSpec } from "@/lib/queue/queues";
+import { getRedis } from "@/lib/queue/connection";
 import {
   isEligible,
+  isPastCallWindowEnd,
   msUntilCallWindowOpens,
   remainingWindowCapacity,
   todayInTz,
@@ -67,9 +69,9 @@ export async function pollAgent(
 
   if (
     !options?.testMode &&
-    !withinCallWindow(workspace.timezone, config.call_window_start, config.call_window_end)
+    isPastCallWindowEnd(workspace.timezone, config.call_window_end)
   ) {
-    return { agentId, scanned: 0, eligible: 0, enqueued: 0, skippedReason: "outside call window" };
+    return { agentId, scanned: 0, eligible: 0, enqueued: 0, skippedReason: "call window closed for today" };
   }
 
   const today = todayInTz(workspace.timezone);
@@ -186,6 +188,7 @@ export interface QueueContactsResult {
   eligible: number;
   enqueued: number;
   capped: number;
+  errors?: string[];
   skippedReason?: string;
 }
 
@@ -260,8 +263,11 @@ export async function enqueueContactsNow(
   const toQueue = dialable;
   const capped = contactIds.length - eligible;
 
-  const queue = getCallQueue();
-  let enqueued = 0;
+  const jobSpecs: CallJobSpec[] = [];
+  const errors: string[] = [];
+
+  // 1. Persist all queue rows first so the Ops UI reflects the full batch
+  // even if Redis is slow or partially fails.
   for (let i = 0; i < toQueue.length; i++) {
     const contact = toQueue[i];
     const slot = basePosition + i;
@@ -269,33 +275,81 @@ export async function enqueueContactsNow(
     const jobId = `manual:${agentId}:${contact.id}:${today}`;
     const scheduledFor = new Date(Date.now() + delay).toISOString();
 
-    await upsertQueueEntry(supabase, {
-      workspaceId: workspace.id,
-      agentId,
-      contactId: contact.id,
-      queueDay: today,
-      position: slot + 1,
-      scheduledFor,
-      bullmqJobId: jobId,
-    });
-
-    await queue.add(
-      "dial",
-      {
+    try {
+      await upsertQueueEntry(supabase, {
+        workspaceId: workspace.id,
         agentId,
         contactId: contact.id,
-        toNumber: contact.phones[0],
-        attemptNumber: contact.attempt_count + 1,
-      },
-      {
+        queueDay: today,
+        position: slot + 1,
+        scheduledFor,
+        bullmqJobId: jobId,
+      });
+      jobSpecs.push({
         delay,
         jobId,
-      }
-    );
-    enqueued++;
+        data: {
+          agentId,
+          contactId: contact.id,
+          toNumber: contact.phones[0],
+          attemptNumber: contact.attempt_count + 1,
+        },
+      });
+    } catch (e) {
+      errors.push(
+        `${contact.full_name ?? contact.id}: ${
+          e instanceof Error ? e.message : "failed to save queue row"
+        }`
+      );
+    }
   }
 
-  return { agentId, requested, eligible, enqueued, capped };
+  // 2. One Redis round-trip for every dial job (avoids serverless hang).
+  let enqueued = 0;
+  if (jobSpecs.length > 0 && process.env.REDIS_URL) {
+    try {
+      const queue = getCallQueue();
+      await getRedis().connect();
+      // Drop any scheduled poll jobs for these contacts so manual queue
+      // doesn't double-dial alongside today's poll batch.
+      for (const contact of toQueue) {
+        const pollJobId = `${agentId}:${contact.id}:${today}`;
+        const pollJob = await queue.getJob(pollJobId);
+        if (pollJob) await pollJob.remove().catch(() => {});
+      }
+      await addCallJobsBulk(jobSpecs);
+      enqueued = jobSpecs.length;
+    } catch (e) {
+      errors.push(
+        e instanceof Error ? e.message : "failed to enqueue dial jobs in Redis"
+      );
+      // Roll back rows that would never dial — avoids ghost entries in the UI.
+      for (const spec of jobSpecs) {
+        await supabase
+          .from("call_queue_entries")
+          .delete()
+          .eq("agent_id", agentId)
+          .eq("contact_id", spec.data.contactId)
+          .eq("queue_day", today)
+          .eq("status", "pending");
+      }
+    } finally {
+      await closeCallQueue().catch(() => {});
+    }
+  } else if (jobSpecs.length > 0 && !process.env.REDIS_URL) {
+    errors.push("REDIS_URL is not configured — cannot schedule dials");
+    for (const spec of jobSpecs) {
+      await supabase
+        .from("call_queue_entries")
+        .delete()
+        .eq("agent_id", agentId)
+        .eq("contact_id", spec.data.contactId)
+        .eq("queue_day", today)
+        .eq("status", "pending");
+    }
+  }
+
+  return { agentId, requested, eligible, enqueued, capped, errors: errors.length ? errors : undefined };
 }
 
 /** Poll every active outbound agent in a workspace. */

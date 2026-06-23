@@ -3,7 +3,7 @@ import { Worker } from "bullmq";
 import { getRedis } from "../connection";
 import { CALL_QUEUE, getCallQueue, type CallJob } from "../queues";
 import { placeCall } from "@/lib/engine/caller";
-import { failQueueEntry } from "@/lib/engine/call-queue";
+import { failQueueEntry, updateQueueScheduledFor } from "@/lib/engine/call-queue";
 import {
   withinCallWindow,
   withinEasternBusinessHours,
@@ -25,10 +25,20 @@ type AgentWindowRow = {
 
 async function deferDial(job: CallJob, delayMs: number, reason: string) {
   const delay = Math.max(delayMs, 60_000);
+  const scheduledFor = new Date(Date.now() + delay).toISOString();
+
   await getCallQueue().add("dial", job, {
     delay,
     jobId: `defer:${job.agentId}:${job.contactId}`,
   });
+
+  const supabase = createServiceClient();
+  await updateQueueScheduledFor(supabase, {
+    agentId: job.agentId,
+    contactId: job.contactId,
+    scheduledFor,
+  });
+
   console.log(
     `[call.worker] ${reason} — deferred contact ${job.contactId} ~${Math.round(delay / 60000)}m`
   );

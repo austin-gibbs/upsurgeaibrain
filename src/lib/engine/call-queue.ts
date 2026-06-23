@@ -19,7 +19,7 @@ export async function upsertQueueEntry(
   supabase: DbClient,
   input: EnqueueQueueEntryInput
 ): Promise<void> {
-  const { data: existing } = await supabase
+  const { data: existing, error: fetchErr } = await supabase
     .from("call_queue_entries")
     .select("id, status")
     .eq("agent_id", input.agentId)
@@ -27,11 +27,13 @@ export async function upsertQueueEntry(
     .eq("queue_day", input.queueDay)
     .maybeSingle<{ id: string; status: CallQueueStatus }>();
 
+  if (fetchErr) throw new Error(fetchErr.message);
+
   if (
     existing &&
     (existing.status === "pending" || existing.status === "dialing")
   ) {
-    await supabase
+    const { error } = await supabase
       .from("call_queue_entries")
       .update({
         position: input.position,
@@ -39,10 +41,11 @@ export async function upsertQueueEntry(
         bullmq_job_id: input.bullmqJobId,
       })
       .eq("id", existing.id);
+    if (error) throw new Error(error.message);
     return;
   }
 
-  await supabase.from("call_queue_entries").upsert(
+  const { error } = await supabase.from("call_queue_entries").upsert(
     {
       workspace_id: input.workspaceId,
       agent_id: input.agentId,
@@ -60,6 +63,7 @@ export async function upsertQueueEntry(
     },
     { onConflict: "agent_id,contact_id,queue_day" }
   );
+  if (error) throw new Error(error.message);
 }
 
 /** Mark the queue entry as actively dialing once Retell accepts the call. */
@@ -147,6 +151,19 @@ export async function countActiveQueueForAgent(
     .eq("queue_day", queueDay)
     .in("status", ["pending", "dialing"]);
   return count ?? 0;
+}
+
+/** Update scheduled_for on a pending queue row (e.g. after defer or reschedule). */
+export async function updateQueueScheduledFor(
+  supabase: DbClient,
+  params: { agentId: string; contactId: string; scheduledFor: string }
+): Promise<void> {
+  await supabase
+    .from("call_queue_entries")
+    .update({ scheduled_for: params.scheduledFor })
+    .eq("agent_id", params.agentId)
+    .eq("contact_id", params.contactId)
+    .eq("status", "pending");
 }
 
 /** Active queue rows for the Ops UI (pending + dialing only). */

@@ -8,6 +8,20 @@ export function getRedis(): Redis {
   connection = new Redis(process.env.REDIS_URL ?? "redis://localhost:6379", {
     maxRetriesPerRequest: null, // required by BullMQ
     family: 0, // resolve IPv4 + IPv6 (Railway private networking is IPv6-only)
+    // Fail fast on serverless — default ioredis retries indefinitely and the
+    // queue-calls API appears stuck on "Queuing…" after the first contact.
+    connectTimeout: 10_000,
+    commandTimeout: 15_000,
+    enableOfflineQueue: false,
+    lazyConnect: true,
   });
   return connection;
+}
+
+/** Tear down the singleton connection (call after one-off API enqueues). */
+export function closeRedis(): void {
+  if (connection) {
+    connection.disconnect();
+    connection = null;
+  }
 }

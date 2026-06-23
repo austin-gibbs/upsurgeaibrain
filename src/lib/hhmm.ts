@@ -8,3 +8,39 @@ export function normalizeHHMM(raw: string): string {
   if (h < 0 || h > 23 || m < 0 || m > 59) return "09:00";
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
 }
+
+/** Coerce a Supabase to-one embed (object or array) into a one-element array. */
+export function normalizeEmbedList<T>(raw: T | T[] | null | undefined): T[] {
+  if (Array.isArray(raw)) return raw;
+  if (raw == null) return [];
+  return [raw];
+}
+
+/** Normalize HH:MM fields on a single agent_call_configs row. */
+export function normalizeCallConfigTimes(
+  config: Record<string, unknown> | null | undefined
+): Record<string, unknown> | null | undefined {
+  if (!config || typeof config !== "object") return config;
+  return {
+    ...config,
+    call_window_start:
+      typeof config.call_window_start === "string"
+        ? normalizeHHMM(config.call_window_start)
+        : config.call_window_start,
+    call_window_end:
+      typeof config.call_window_end === "string"
+        ? normalizeHHMM(config.call_window_end)
+        : config.call_window_end,
+    daily_run_at:
+      typeof config.daily_run_at === "string"
+        ? normalizeHHMM(config.daily_run_at)
+        : config.daily_run_at,
+  };
+}
+
+/** Supabase may return agent_call_configs as object or array — normalize both. */
+export function normalizeCallConfigList(raw: unknown): Record<string, unknown>[] {
+  return normalizeEmbedList(raw as Record<string, unknown> | Record<string, unknown>[] | null).map(
+    (config) => normalizeCallConfigTimes(config) as Record<string, unknown>
+  );
+}

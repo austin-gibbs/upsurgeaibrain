@@ -6,7 +6,7 @@
 //          so dials for an agent are spaced `drip_seconds` apart.
 // =====================================================================
 import { Queue } from "bullmq";
-import { getRedis } from "./connection";
+import { closeRedis, getRedis } from "./connection";
 
 export const POLL_QUEUE = "agent-poll";
 export const CALL_QUEUE = "outbound-call";
@@ -47,4 +47,41 @@ export function getCallQueue(): Queue<CallJob> {
     });
   }
   return callQueue;
+}
+
+export interface CallJobSpec {
+  data: CallJob;
+  delay: number;
+  jobId: string;
+}
+
+/** One Redis round-trip for many delayed dial jobs (serverless-safe). */
+export async function addCallJobsBulk(specs: CallJobSpec[]): Promise<void> {
+  if (specs.length === 0) return;
+  const queue = getCallQueue();
+  const redis = getRedis();
+  await redis.connect();
+
+  // Replace any stale jobs with the same id (e.g. operator re-queues).
+  for (const spec of specs) {
+    const existing = await queue.getJob(spec.jobId);
+    if (existing) await existing.remove().catch(() => {});
+  }
+
+  await queue.addBulk(
+    specs.map((s) => ({
+      name: "dial",
+      data: s.data,
+      opts: { delay: s.delay, jobId: s.jobId },
+    }))
+  );
+}
+
+/** Release queue + Redis after a short-lived API enqueue. */
+export async function closeCallQueue(): Promise<void> {
+  if (callQueue) {
+    await callQueue.close();
+    callQueue = null;
+  }
+  closeRedis();
 }

@@ -3,6 +3,7 @@
 // anchored to the updated window.
 import { createServiceClient } from "@/lib/supabase/server";
 import { msUntilQueueSlot, todayInTz } from "@/lib/engine/cadence";
+import { upsertQueueEntry } from "@/lib/engine/call-queue";
 import { getCallQueue, type CallJob } from "./queues";
 import type { AgentCallConfig } from "@/types";
 
@@ -77,10 +78,23 @@ export async function rescheduleAgentCallQueue(agentId: string): Promise<number>
       config.drip_seconds,
       i
     );
+    const safeDelay = Math.max(delay, 0);
+    const scheduledFor = new Date(Date.now() + safeDelay).toISOString();
+    const jobId = `${agentId}:${job.contactId}:${today}`;
+
+    await upsertQueueEntry(supabase, {
+      workspaceId: agent.workspace_id,
+      agentId,
+      contactId: job.contactId,
+      queueDay: today,
+      position: i + 1,
+      scheduledFor,
+      bullmqJobId: jobId,
+    });
 
     await queue.add("dial", job, {
-      delay: Math.max(delay, 0),
-      jobId: `${agentId}:${job.contactId}:${today}`,
+      delay: safeDelay,
+      jobId,
     });
     rescheduled++;
   }

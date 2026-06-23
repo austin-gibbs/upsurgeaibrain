@@ -40,6 +40,15 @@ type ContactRow = {
   terminal_outcome: string | null;
 };
 
+type AgentCallConfigRow = {
+  max_calls_per_day: number;
+  max_attempts_per_contact: number;
+  daily_run_at: string;
+  call_window_start: string;
+  call_window_end: string;
+  drip_seconds: number;
+};
+
 type OpsData = {
   workspace: {
     id: string;
@@ -57,15 +66,8 @@ type OpsData = {
     objective: string | null;
     enroll_tag: string | null;
     retell_agent_id: string | null;
-    agent_call_configs: {
-      max_calls_per_day: number;
-      max_attempts_per_contact: number;
-      daily_run_at: string;
-      call_window_start: string;
-      call_window_end: string;
-      drip_seconds: number;
-    }[];
-    agent_task_configs: { enabled: boolean }[];
+    agent_call_configs: AgentCallConfigRow | AgentCallConfigRow[];
+    agent_task_configs: { enabled: boolean } | { enabled: boolean }[];
   }[];
   contactCount: number;
   contacts: ContactRow[];
@@ -78,6 +80,29 @@ const CRM_LABEL: Record<string, string> = {
 };
 
 type BadgeTone = "slate" | "green" | "amber" | "red" | "blue";
+
+function firstEmbed<T>(embed: T | T[] | null | undefined): T | undefined {
+  if (Array.isArray(embed)) return embed[0];
+  if (embed && typeof embed === "object") return embed;
+  return undefined;
+}
+
+function timezoneAbbrev(timezone: string): string {
+  try {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: timezone,
+      timeZoneName: "short",
+    }).formatToParts(new Date());
+    return parts.find((p) => p.type === "timeZoneName")?.value ?? timezone;
+  } catch {
+    return timezone;
+  }
+}
+
+function firstCallConfig(agents: OpsData["agents"]): AgentCallConfigRow | undefined {
+  const outbound = agents.find((a) => a.direction === "outbound");
+  return firstEmbed(outbound?.agent_call_configs) ?? firstEmbed(agents[0]?.agent_call_configs);
+}
 
 function todayInTz(timezone: string): string {
   return new Intl.DateTimeFormat("en-CA", {
@@ -168,7 +193,8 @@ function buildSchedules(
   windowEnd: string,
   dripSeconds: number,
   maxCallsPerDay: number,
-  maxAttempts: number | null
+  maxAttempts: number | null,
+  tzLabel: string
 ): Map<string, Schedule> {
   const dailyCap = Math.min(
     maxCallsPerDay,
@@ -225,7 +251,7 @@ function buildSchedules(
     const projectedSec = windowStartSec + pos * dripSeconds;
     const rel = relativeWord(today, runDate);
     map.set(c.id, {
-      label: `${formatDate(runDate)} · ${formatClock(projectedSec)} ET`,
+      label: `${formatDate(runDate)} · ${formatClock(projectedSec)} ${tzLabel}`,
       tone: runDate === today ? "green" : "blue",
       note: pos === 0 ? `${rel} · first in line` : `${rel} · ~#${pos + 1} in line`,
     });
@@ -374,6 +400,10 @@ export function WorkspaceOpsTab({
             d.capped > 0
               ? ` ${d.capped} skipped (terminal or no phone number).`
               : ""
+          }${
+            d.errors?.length
+              ? ` ${d.errors.length} issue${d.errors.length === 1 ? "" : "s"}: ${d.errors.join("; ")}`
+              : ""
           }`,
         });
         setSelectedIds(new Set());
@@ -382,7 +412,9 @@ export function WorkspaceOpsTab({
           type: "error",
           text: d.skippedReason
             ? `No calls queued — ${d.skippedReason}.`
-            : "No eligible contacts to queue (terminal or no phone number).",
+            : d.errors?.length
+              ? d.errors.join("; ")
+              : "No eligible contacts to queue (terminal or no phone number).",
         });
       }
       onRefresh();
@@ -488,14 +520,13 @@ export function WorkspaceOpsTab({
 
   const today = todayInTz(workspace.timezone);
   const nowEt = nowHHMMInTz(workspace.timezone);
+  const tzLabel = timezoneAbbrev(workspace.timezone);
   const maxAttempts =
     agents.reduce(
-      (m, a) => Math.max(m, a.agent_call_configs[0]?.max_attempts_per_contact ?? 0),
+      (m, a) => Math.max(m, firstEmbed(a.agent_call_configs)?.max_attempts_per_contact ?? 0),
       0
     ) || null;
-  const outboundConfig =
-    agents.find((a) => a.direction === "outbound")?.agent_call_configs[0] ??
-    agents[0]?.agent_call_configs[0];
+  const outboundConfig = firstCallConfig(agents);
   const windowStart = outboundConfig?.call_window_start ?? "09:00";
   const windowEnd = outboundConfig?.call_window_end ?? "18:00";
   const dripSeconds = outboundConfig?.drip_seconds ?? 60;
@@ -508,7 +539,8 @@ export function WorkspaceOpsTab({
     windowEnd,
     dripSeconds,
     maxCallsPerDay,
-    maxAttempts
+    maxAttempts,
+    tzLabel
   );
   const q = query.trim().toLowerCase();
   const filteredContacts = q
@@ -687,8 +719,8 @@ export function WorkspaceOpsTab({
       />
       <div className="mb-10 grid gap-4">
         {agents.map((a) => {
-          const cc = a.agent_call_configs[0];
-          const tc = a.agent_task_configs[0];
+          const cc = firstEmbed(a.agent_call_configs);
+          const tc = firstEmbed(a.agent_task_configs);
           return (
             <Link key={a.id} href={`/agents/${a.id}`}>
               <Card hover className="group flex items-center justify-between p-5">

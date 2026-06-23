@@ -16,7 +16,7 @@ import {
 } from "@/lib/validation";
 import type { AgentDirection } from "@/types";
 import type { Database } from "@/types/database";
-import { normalizeHHMM } from "@/lib/hhmm";
+import { normalizeCallConfigList, normalizeHHMM } from "@/lib/hhmm";
 import { rescheduleAgentCallQueue } from "@/lib/queue/reschedule";
 import { z } from "zod";
 
@@ -125,36 +125,6 @@ export async function GET(
     calls: calls ?? [],
     pipelineStageMap: pipelineStageMap ?? [],
   });
-}
-
-// Supabase returns `agent_call_configs` as a single object (to-one relation
-// via the agent_id PK) or, in some schema-cache states, as an array. The
-// client expects an array, so coerce both shapes and normalize each config's
-// HH:MM time fields.
-function normalizeCallConfigList(raw: unknown) {
-  const list = Array.isArray(raw) ? raw : raw ? [raw] : [];
-  return list.map((config) =>
-    normalizeCallConfigTimes(config as Record<string, unknown>)
-  );
-}
-
-function normalizeCallConfigTimes(config: Record<string, unknown> | null | undefined) {
-  if (!config || typeof config !== "object") return config;
-  return {
-    ...config,
-    call_window_start:
-      typeof config.call_window_start === "string"
-        ? normalizeHHMM(config.call_window_start)
-        : config.call_window_start,
-    call_window_end:
-      typeof config.call_window_end === "string"
-        ? normalizeHHMM(config.call_window_end)
-        : config.call_window_end,
-    daily_run_at:
-      typeof config.daily_run_at === "string"
-        ? normalizeHHMM(config.daily_run_at)
-        : config.daily_run_at,
-  };
 }
 
 const patchSchema = z.object({

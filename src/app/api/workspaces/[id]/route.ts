@@ -6,6 +6,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServerClient, createServiceClient } from "@/lib/supabase/server";
 import { z } from "zod";
 import { crmAccountUrlSchema } from "@/lib/validation";
+import { normalizeCallConfigList, normalizeEmbedList } from "@/lib/hhmm";
 
 export const runtime = "nodejs";
 
@@ -38,14 +39,34 @@ export async function GET(
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
 
-  const { data: agents } = await db
+  const { data: agentsRaw } = await db
     .from("agents")
     .select(
       "id, name, status, direction, objective, enroll_tag, retell_agent_id, retell_from_number, " +
         "agent_call_configs(*), agent_task_configs(*)"
     )
     .eq("workspace_id", params.id)
-    .order("created_at", { ascending: true });
+    .order("created_at", { ascending: true })
+    .returns<
+      {
+        id: string;
+        name: string;
+        status: string;
+        direction: string;
+        objective: string | null;
+        enroll_tag: string | null;
+        retell_agent_id: string | null;
+        retell_from_number: string | null;
+        agent_call_configs: unknown;
+        agent_task_configs: unknown;
+      }[]
+    >();
+
+  const agents = (agentsRaw ?? []).map((agent) => ({
+    ...agent,
+    agent_call_configs: normalizeCallConfigList(agent.agent_call_configs),
+    agent_task_configs: normalizeEmbedList(agent.agent_task_configs),
+  }));
 
   const { count: contactCount } = await db
     .from("contacts")

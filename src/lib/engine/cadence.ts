@@ -42,6 +42,13 @@ export function withinCallWindow(timezone: string, start: string, end: string): 
   return now >= windowStart && now <= windowEnd;
 }
 
+/** True when the workspace-local clock is past today's call_window_end. */
+export function isPastCallWindowEnd(timezone: string, end: string): boolean {
+  const now = nowHHMMInTz(timezone);
+  const windowEnd = normalizeHHMM(end);
+  return now > windowEnd;
+}
+
 function secondsIntoDayInTz(timezone: string): number {
   const parts = new Intl.DateTimeFormat("en-GB", {
     timeZone: timezone,

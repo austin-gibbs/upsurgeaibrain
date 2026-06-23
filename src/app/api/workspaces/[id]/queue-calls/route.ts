@@ -9,6 +9,7 @@ import { listActiveQueueEntries } from "@/lib/engine/call-queue";
 import { queueCallsSchema } from "@/lib/validation";
 
 export const runtime = "nodejs";
+export const maxDuration = 60;
 
 async function authorizeWorkspace(db: ReturnType<typeof createServerClient>, workspaceId: string) {
   const {
