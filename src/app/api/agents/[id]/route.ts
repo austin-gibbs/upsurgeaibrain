@@ -114,9 +114,7 @@ export async function GET(
 
   const normalizedAgent = {
     ...publicAgent(agentRow),
-    agent_call_configs: (agentRow.agent_call_configs ?? []).map((config) =>
-      normalizeCallConfigTimes(config as Record<string, unknown>)
-    ),
+    agent_call_configs: normalizeCallConfigList(agentRow.agent_call_configs),
   };
 
   return NextResponse.json({
@@ -127,6 +125,17 @@ export async function GET(
     calls: calls ?? [],
     pipelineStageMap: pipelineStageMap ?? [],
   });
+}
+
+// Supabase returns `agent_call_configs` as a single object (to-one relation
+// via the agent_id PK) or, in some schema-cache states, as an array. The
+// client expects an array, so coerce both shapes and normalize each config's
+// HH:MM time fields.
+function normalizeCallConfigList(raw: unknown) {
+  const list = Array.isArray(raw) ? raw : raw ? [raw] : [];
+  return list.map((config) =>
+    normalizeCallConfigTimes(config as Record<string, unknown>)
+  );
 }
 
 function normalizeCallConfigTimes(config: Record<string, unknown> | null | undefined) {
@@ -374,9 +383,7 @@ export async function PATCH(
     ok: true,
     agent: {
       ...agent,
-      agent_call_configs: (updated.agent_call_configs ?? []).map((config) =>
-        normalizeCallConfigTimes(config as Record<string, unknown>)
-      ),
+      agent_call_configs: normalizeCallConfigList(updated.agent_call_configs),
     },
     queueRescheduled,
   });
