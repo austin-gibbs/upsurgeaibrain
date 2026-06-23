@@ -162,44 +162,67 @@ export async function GET(
   const retellCallIds = retellItems.map((i) => i.call_id).filter(Boolean);
   let dbRows: DbCallJoinRow[] = [];
 
-  type CallJoinQuery = DbCallJoinRow & { contact_id: string | null };
-
   if (retellCallIds.length > 0) {
-    const { data: calls } = await db
+    const { data: calls, error: callsErr } = await db
       .from("calls")
       .select(
-        "retell_call_id, agent_id, contact_id, crm_contact_id, contact_name, contact_email, to_number, outcome, completed_at, direction"
+        "retell_call_id, agent_id, contact_id, to_number, outcome, completed_at, direction"
       )
       .eq("workspace_id", params.id)
       .in("retell_call_id", retellCallIds.slice(0, 500))
-      .returns<CallJoinQuery[]>();
+      .returns<
+        {
+          retell_call_id: string | null;
+          agent_id: string;
+          contact_id: string | null;
+          to_number: string;
+          outcome: string | null;
+          completed_at: string | null;
+          direction: string;
+        }[]
+      >();
 
-    dbRows = (calls ?? []).map(({ contact_id: _cid, ...row }) => row);
+    if (callsErr) {
+      console.error("calls join fetch failed", callsErr.message);
+    }
 
-    const missingContactIds = (calls ?? [])
-      .filter((c) => !c.crm_contact_id && c.contact_id)
+    const callRows = calls ?? [];
+
+    dbRows = callRows.map((call) => ({
+      retell_call_id: call.retell_call_id,
+      agent_id: call.agent_id,
+      crm_contact_id: null,
+      contact_name: null,
+      contact_email: null,
+      to_number: call.to_number,
+      outcome: call.outcome,
+      completed_at: call.completed_at,
+      direction: call.direction,
+    }));
+
+    const missingContactIds = callRows
+      .filter((c) => c.contact_id)
       .map((c) => c.contact_id as string);
 
     if (missingContactIds.length > 0) {
       const { data: contacts } = await db
         .from("contacts")
-        .select("id, crm_contact_id, full_name, email")
+        .select("id, crm_contact_id, full_name")
         .in("id", missingContactIds.slice(0, 500))
-        .returns<
-          { id: string; crm_contact_id: string; full_name: string | null; email: string | null }[]
-        >();
+        .returns<{ id: string; crm_contact_id: string; full_name: string | null }[]>();
 
       const contactMap = new Map((contacts ?? []).map((c) => [c.id, c]));
       dbRows = dbRows.map((row) => {
-        const call = (calls ?? []).find((c) => c.retell_call_id === row.retell_call_id);
-        if (row.crm_contact_id || !call?.contact_id) return row;
+        if (row.crm_contact_id) return row;
+        const call = callRows.find((c) => c.retell_call_id === row.retell_call_id);
+        if (!call?.contact_id) return row;
         const contact = contactMap.get(call.contact_id);
         if (!contact) return row;
         return {
           ...row,
           crm_contact_id: contact.crm_contact_id,
           contact_name: contact.full_name,
-          contact_email: contact.email,
+          contact_email: null,
         };
       });
     }

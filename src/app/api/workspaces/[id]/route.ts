@@ -21,11 +21,20 @@ export async function GET(
 
   const { data: workspace, error: wsErr } = await db
     .from("workspaces")
-    .select("id, name, timezone, crm_provider, crm_account_url, enroll_tag, is_active, created_at")
+    .select("id, name, timezone, crm_provider, enroll_tag, is_active, created_at")
     .eq("id", params.id)
-    .single();
+    .single<{
+      id: string;
+      name: string;
+      timezone: string;
+      crm_provider: "followupboss" | "highlevel";
+      enroll_tag: string;
+      is_active: boolean;
+      created_at: string;
+    }>();
 
   if (wsErr || !workspace) {
+    console.error("workspace fetch failed", { id: params.id, error: wsErr?.message });
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
 
@@ -62,7 +71,7 @@ export async function GET(
     .eq("workspace_id", params.id);
 
   return NextResponse.json({
-    workspace,
+    workspace: { ...workspace, crm_account_url: null },
     agents: agents ?? [],
     contactCount: contactCount ?? 0,
     contacts: contacts ?? [],
