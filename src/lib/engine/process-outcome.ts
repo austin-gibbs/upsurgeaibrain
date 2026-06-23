@@ -17,6 +17,7 @@ import { reconcileTags } from "./tags";
 import { nextEligibleDate, todayInTz } from "./cadence";
 import { updateMemoryAfterCall } from "./memory";
 import { processInboundCall } from "./process-inbound";
+import { dispatchPostCallWebhook } from "@/lib/webhooks/post-call";
 import type {
   Agent, AgentCallConfig, AgentMemory, AgentTaskConfig,
   Contact, OutcomeTag, Workspace,
@@ -122,6 +123,28 @@ export async function processRetellWebhook(body: any): Promise<{ ok: boolean; re
     }
   }
 
+  // 4b. HighLevel post-call workflow webhook (best-effort).
+  if (
+    workspace.crm_provider === "highlevel" &&
+    taskConfig?.post_call_webhook_enabled &&
+    taskConfig.post_call_webhook_url &&
+    shouldDispatchWebhook(taskConfig, outcome)
+  ) {
+    try {
+      await dispatchPostCallWebhook({
+        webhookUrl: taskConfig.post_call_webhook_url,
+        workspace,
+        agent,
+        contact,
+        call,
+        outcome,
+        parsed,
+        appliedTag: reconciled.appliedTag,
+        callDate: today,
+      });
+    } catch { /* non-fatal */ }
+  }
+
   // 5. Cadence state.
   const { data: config } = await supabase
     .from("agent_call_configs").select("*").eq("agent_id", agent.id).single<AgentCallConfig>();
@@ -177,6 +200,13 @@ export async function processRetellWebhook(body: any): Promise<{ ok: boolean; re
 function shouldCreateTask(cfg: AgentTaskConfig, outcome: string): boolean {
   if (!cfg.only_outcomes || cfg.only_outcomes.length === 0) return true;
   return cfg.only_outcomes.includes(outcome as any);
+}
+
+function shouldDispatchWebhook(cfg: AgentTaskConfig, outcome: string): boolean {
+  if (!cfg.post_call_webhook_only_outcomes || cfg.post_call_webhook_only_outcomes.length === 0) {
+    return true;
+  }
+  return cfg.post_call_webhook_only_outcomes.includes(outcome as any);
 }
 
 // assignee_crm_id may hold a single CRM user id ("17") or several

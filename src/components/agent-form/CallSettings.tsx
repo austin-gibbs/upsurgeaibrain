@@ -1,6 +1,7 @@
 "use client";
 
 import { Input, Label } from "@/components/ui";
+import { CadenceDayGapsEditor } from "./CadenceDayGapsEditor";
 import type { CallConfig } from "./types";
 
 function NumField({
@@ -87,22 +88,10 @@ export function CallSettings({
           onChange={(e) => onChange({ daily_run_at: e.target.value })}
         />
       </div>
-      <div className="space-y-1.5 sm:col-span-2">
-        <Label hint="days after each attempt before the next; comma-separated">
-          Cadence day-gaps
-        </Label>
-        <Input
-          value={cfg.cadence_day_gaps.join(", ")}
-          onChange={(e) =>
-            onChange({
-              cadence_day_gaps: e.target.value
-                .split(",")
-                .map((s) => parseInt(s.trim(), 10))
-                .filter((n) => !Number.isNaN(n)),
-            })
-          }
-        />
-      </div>
+      <CadenceDayGapsEditor
+        gaps={cfg.cadence_day_gaps}
+        onChange={(cadence_day_gaps) => onChange({ cadence_day_gaps })}
+      />
     </div>
   );
 }

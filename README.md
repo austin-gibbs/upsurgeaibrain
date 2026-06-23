@@ -63,6 +63,17 @@ cp .env.example .env.local
 #      supabase/migrations/0001_initial_schema.sql
 #      supabase/migrations/0002_rls_policies.sql
 #      supabase/migrations/0003_defaults_and_helpers.sql
+#      supabase/migrations/0004_agent_enroll_tag.sql
+#      supabase/migrations/0005_inbound_calls.sql
+#      supabase/migrations/0006_agent_direction_and_creds.sql
+#      supabase/migrations/0007_reporting_fields.sql
+#      supabase/migrations/0008_agent_post_call_webhook.sql
+#
+#    Or apply 0004–0008 in one shot (requires SUPABASE_ACCESS_TOKEN in .env.local):
+#      set -a && source .env.local && set +a && npm run db:apply-pending
+#
+#    Verify all required columns exist:
+#      set -a && source .env.local && set +a && npm run db:verify-schema
 
 # 4. Redis (local)
 #    docker run -p 6379:6379 redis   # or use Upstash and set rediss:// URL

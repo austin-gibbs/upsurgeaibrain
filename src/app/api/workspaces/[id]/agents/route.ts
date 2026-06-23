@@ -75,12 +75,22 @@ export async function POST(
   }
 
   // Encrypt the per-agent credentials at rest (mirrors workspace CRM creds).
-  const crmCredsEncrypted = input.crm_credentials
-    ? encryptJson(input.crm_credentials)
-    : null;
-  const retellCredsEncrypted = input.retell_credentials
-    ? encryptJson(input.retell_credentials)
-    : null;
+  let crmCredsEncrypted: string | null = null;
+  let retellCredsEncrypted: string | null = null;
+  try {
+    crmCredsEncrypted = input.crm_credentials
+      ? encryptJson(input.crm_credentials)
+      : null;
+    retellCredsEncrypted = input.retell_credentials
+      ? encryptJson(input.retell_credentials)
+      : null;
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : "encryption failed";
+    return NextResponse.json(
+      { error: "encryption misconfigured", detail: message },
+      { status: 500 }
+    );
+  }
 
   const { data: agent, error: agErr } = await db
     .from("agents")
@@ -106,8 +116,24 @@ export async function POST(
     );
   }
 
-  await db.from("agent_call_configs").insert({ agent_id: agent.id, ...input.callConfig });
-  await db.from("agent_task_configs").insert({ agent_id: agent.id, ...input.taskConfig });
+  const { error: callCfgErr } = await db
+    .from("agent_call_configs")
+    .insert({ agent_id: agent.id, ...input.callConfig });
+  if (callCfgErr) {
+    return NextResponse.json(
+      { error: "failed to create agent call config", detail: callCfgErr.message },
+      { status: 500 }
+    );
+  }
+  const { error: taskCfgErr } = await db
+    .from("agent_task_configs")
+    .insert({ agent_id: agent.id, ...input.taskConfig });
+  if (taskCfgErr) {
+    return NextResponse.json(
+      { error: "failed to create agent task config", detail: taskCfgErr.message },
+      { status: 500 }
+    );
+  }
 
   return NextResponse.json({ ok: true, agentId: agent.id });
 }

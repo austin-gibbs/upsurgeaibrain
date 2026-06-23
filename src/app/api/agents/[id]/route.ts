@@ -11,6 +11,7 @@ import {
   callConfigSchema,
   crmCredentialsSchema,
   retellCredentialsSchema,
+  taskConfigSchema,
 } from "@/lib/validation";
 import type { AgentDirection } from "@/types";
 import type { Database } from "@/types/database";
@@ -103,6 +104,7 @@ const patchSchema = z.object({
   crm_credentials: crmCredentialsSchema.nullable().optional(),
   retell_credentials: retellCredentialsSchema.nullable().optional(),
   call_config: callConfigSchema.optional(),
+  task_config: taskConfigSchema.optional(),
 });
 
 export async function PATCH(
@@ -240,6 +242,20 @@ export async function PATCH(
     );
     if (configError) {
       return NextResponse.json({ error: configError.message }, { status: 500 });
+    }
+  }
+
+  if (input.task_config) {
+    const { error: taskError } = await db.from("agent_task_configs").upsert(
+      {
+        agent_id: params.id,
+        ...input.task_config,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "agent_id" }
+    );
+    if (taskError) {
+      return NextResponse.json({ error: taskError.message }, { status: 500 });
     }
   }
 

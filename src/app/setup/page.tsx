@@ -16,6 +16,7 @@ import {
 } from "@/components/ui";
 import { CallSettings } from "@/components/agent-form/CallSettings";
 import { TaskSettings } from "@/components/agent-form/TaskSettings";
+import { PostCallWebhookSettings } from "@/components/agent-form/PostCallWebhookSettings";
 import {
   defaultCallConfig,
   defaultTaskConfig,
@@ -200,7 +201,18 @@ export default function SetupWizard() {
       });
       const data = await res.json();
       if (!res.ok || data.error) {
-        throw new Error(data.error ?? "Provisioning failed");
+        const issues =
+          Array.isArray(data.issues) && data.issues.length
+            ? data.issues
+                .map((i: { path?: (string | number)[]; message?: string }) =>
+                  [i.path?.join("."), i.message].filter(Boolean).join(": ")
+                )
+                .join("; ")
+            : null;
+        throw new Error(
+          [data.error, data.detail, issues].filter(Boolean).join(" — ") ||
+            "Provisioning failed"
+        );
       }
       router.push(`/workspaces/${data.workspaceId}`);
     } catch (e: any) {
@@ -545,6 +557,12 @@ export default function SetupWizard() {
               users={crmUsers}
               onChange={(patch) => updateTask(activeAgent, patch)}
             />
+            {crmProvider === "highlevel" && (
+              <PostCallWebhookSettings
+                cfg={agents[activeAgent].taskConfig}
+                onChange={(patch) => updateTask(activeAgent, patch)}
+              />
+            )}
           </Card>
         )}
 

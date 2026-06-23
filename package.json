@@ -14,6 +14,8 @@
     "typecheck": "tsc --noEmit",
     "test": "tsx --test src/lib/**/*.test.ts",
     "db:apply-pending": "node scripts/apply-migrations-api.mjs",
+    "db:apply-0007": "node scripts/apply-0007.mjs",
+    "db:verify-schema": "node scripts/verify-schema.mjs",
     "worker": "tsx watch worker/index.ts",
     "worker:prod": "tsx worker/index.ts"
   },

@@ -86,6 +86,7 @@ export async function pollAgent(
       workspace_id: workspace.id,
       crm_contact_id: c.id,
       full_name: c.fullName,
+      email: c.email,
       phones: c.phones,
       tags: c.tags,
       // Preserve engine-owned cadence fields if the row exists.

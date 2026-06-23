@@ -30,6 +30,11 @@ dev-server.log
 
 # vercel
 .vercel
+.env.vercel*
+
+# local deploy / migration artifacts
+.deploy-log.txt
+/supabase/.temp/
 
 # typescript
 *.tsbuildinfo

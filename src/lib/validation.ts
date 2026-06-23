@@ -41,18 +41,37 @@ export const callConfigSchema = z.object({
   call_window_end: z.string().regex(/^\d{2}:\d{2}$/).default("18:00"),
   daily_run_at: z.string().regex(/^\d{2}:\d{2}$/).default("09:00"),
   drip_seconds: z.number().int().min(1).default(60),
-  cadence_day_gaps: z.array(z.number().int().min(0)).default([0, 1, 2, 3, 5, 7, 10, 14, 21, 30]),
+  cadence_day_gaps: z
+    .array(z.number().int().min(0))
+    .min(1)
+    .default([0, 1, 2, 3, 5, 7, 10, 14, 21, 30]),
 });
 
-export const taskConfigSchema = z.object({
-  enabled: z.boolean().default(false),
-  name_template: z.string().default("UpSurge AI Call Review for {contact_name} on {date}"),
-  task_type: z.string().default("Follow Up"),
-  assignee_crm_id: z.string().nullable().default(null),
-  assignee_label: z.string().nullable().default(null),
-  due_offset_minutes: z.number().int().default(0),
-  only_outcomes: z.array(callOutcomeSchema).nullable().default(null),
-});
+export const taskConfigSchema = z
+  .object({
+    enabled: z.boolean().default(false),
+    name_template: z.string().default("UpSurge AI Call Review for {contact_name} on {date}"),
+    task_type: z.string().default("Follow Up"),
+    assignee_crm_id: z.string().nullable().default(null),
+    assignee_label: z.string().nullable().default(null),
+    due_offset_minutes: z.number().int().default(0),
+    only_outcomes: z.array(callOutcomeSchema).nullable().default(null),
+    post_call_webhook_enabled: z.boolean().default(false),
+    post_call_webhook_url: z
+      .union([z.string().url(), z.literal(""), z.null()])
+      .default(null)
+      .transform((v) => (v === "" ? null : v)),
+    post_call_webhook_only_outcomes: z.array(callOutcomeSchema).nullable().default(null),
+  })
+  .superRefine((val, ctx) => {
+    if (val.post_call_webhook_enabled && !val.post_call_webhook_url) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["post_call_webhook_url"],
+        message: "Webhook URL is required when post-call webhook is enabled.",
+      });
+    }
+  });
 
 export const agentSchema = z.object({
   name: z.string().min(1),

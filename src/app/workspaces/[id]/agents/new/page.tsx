@@ -17,6 +17,7 @@ import {
 } from "@/components/ui";
 import { CallSettings } from "@/components/agent-form/CallSettings";
 import { TaskSettings } from "@/components/agent-form/TaskSettings";
+import { PostCallWebhookSettings } from "@/components/agent-form/PostCallWebhookSettings";
 import {
   defaultCallConfig,
   defaultTaskConfig,
@@ -314,6 +315,12 @@ export default function NewAgentPage({
                 users={[]}
                 onChange={(p) => setTaskConfig((c) => ({ ...c, ...p }))}
               />
+              {crmProvider === "highlevel" && (
+                <PostCallWebhookSettings
+                  cfg={taskConfig}
+                  onChange={(p) => setTaskConfig((c) => ({ ...c, ...p }))}
+                />
+              )}
             </Card>
           </>
         )}

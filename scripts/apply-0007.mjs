@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 /**
- * Apply pending migrations (0004–0008) via Supabase Management API.
+ * Apply migration 0007 (reporting fields) via Supabase Management API.
  *
- * Requires SUPABASE_ACCESS_TOKEN in environment (or .env.local):
- *   Dashboard → Account → Access Tokens → Generate new token
+ * Requires in .env.local:
+ *   SUPABASE_ACCESS_TOKEN  — Dashboard → Account → Access Tokens
+ *   NEXT_PUBLIC_SUPABASE_URL
  *
  * Usage:
- *   set -a && source .env.local && set +a && node scripts/apply-migrations-api.mjs
+ *   set -a && source .env.local && set +a && node scripts/apply-0007.mjs
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -40,7 +41,10 @@ if (!url) {
 }
 
 const ref = new URL(url).hostname.split(".")[0];
-const sql = fs.readFileSync(path.join(ROOT, "scripts/apply-pending-migrations.sql"), "utf8");
+const sql = fs.readFileSync(
+  path.join(ROOT, "supabase/migrations/0007_reporting_fields.sql"),
+  "utf8"
+);
 
 const res = await fetch(`https://api.supabase.com/v1/projects/${ref}/database/query`, {
   method: "POST",
@@ -53,9 +57,9 @@ const res = await fetch(`https://api.supabase.com/v1/projects/${ref}/database/qu
 
 const body = await res.text();
 if (!res.ok) {
-  console.error(`Migration apply failed (${res.status}):`, body);
+  console.error(`Migration 0007 failed (${res.status}):`, body);
   process.exit(1);
 }
 
-console.log("Migrations 0004–0008 applied successfully.");
+console.log("Migration 0007 applied successfully.");
 if (body.trim()) console.log(body);

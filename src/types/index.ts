@@ -95,6 +95,9 @@ export interface AgentTaskConfig {
   assignee_label: string | null;
   due_offset_minutes: number;
   only_outcomes: CallOutcome[] | null;
+  post_call_webhook_enabled: boolean;
+  post_call_webhook_url: string | null;
+  post_call_webhook_only_outcomes: CallOutcome[] | null;
 }
 
 export interface Contact {

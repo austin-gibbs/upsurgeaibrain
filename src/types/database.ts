@@ -167,6 +167,11 @@ export type Database = {
           enabled: boolean
           name_template: string
           only_outcomes: Database["public"]["Enums"]["call_outcome"][] | null
+          post_call_webhook_enabled: boolean
+          post_call_webhook_only_outcomes:
+            | Database["public"]["Enums"]["call_outcome"][]
+            | null
+          post_call_webhook_url: string | null
           task_type: string
           updated_at: string
         }
@@ -179,6 +184,11 @@ export type Database = {
           enabled?: boolean
           name_template?: string
           only_outcomes?: Database["public"]["Enums"]["call_outcome"][] | null
+          post_call_webhook_enabled?: boolean
+          post_call_webhook_only_outcomes?:
+            | Database["public"]["Enums"]["call_outcome"][]
+            | null
+          post_call_webhook_url?: string | null
           task_type?: string
           updated_at?: string
         }
@@ -191,6 +201,11 @@ export type Database = {
           enabled?: boolean
           name_template?: string
           only_outcomes?: Database["public"]["Enums"]["call_outcome"][] | null
+          post_call_webhook_enabled?: boolean
+          post_call_webhook_only_outcomes?:
+            | Database["public"]["Enums"]["call_outcome"][]
+            | null
+          post_call_webhook_url?: string | null
           task_type?: string
           updated_at?: string
         }

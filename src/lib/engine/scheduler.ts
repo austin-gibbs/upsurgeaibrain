@@ -35,15 +35,23 @@ export async function tickScheduler(): Promise<{ enqueued: string[] }> {
       .single<Pick<Workspace, "timezone" | "is_active">>();
     if (!config || !workspace?.is_active) continue;
 
+    // Fire at the FIRST tick at or after daily_run_at, not only on an exact
+    // minute match. A single skipped minute (worker restart, GC pause, cron
+    // jitter) previously meant the agent never polled that day. The per-day
+    // jobId keeps this idempotent: once the poll is enqueued for today, every
+    // later tick that day is a no-op (BullMQ ignores the duplicate jobId).
     const now = nowHHMMInTz(workspace.timezone);
-    if (now !== config.daily_run_at) continue;
+    if (now < config.daily_run_at) continue;
 
+    // Skip if this agent's daily poll was already enqueued today. This keeps
+    // the catch-up window quiet: we enqueue once at the first tick >= run time
+    // and every later tick that day is a no-op instead of re-logging.
     const today = todayInTz(workspace.timezone);
-    await queue.add(
-      "poll",
-      { agentId: agent.id },
-      { jobId: `poll:${agent.id}:${today}` } // one poll per agent per day
-    );
+    const jobId = `poll:${agent.id}:${today}`;
+    const existing = await queue.getJob(jobId);
+    if (existing) continue;
+
+    await queue.add("poll", { agentId: agent.id }, { jobId }); // one poll per agent per day
     enqueued.push(agent.id);
   }
 

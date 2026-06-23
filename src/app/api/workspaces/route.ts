@@ -90,6 +90,17 @@ export async function POST(req: NextRequest) {
   }
 
   // 4b. Create workspace with encrypted credentials.
+  let crmCredentialsEncrypted: string;
+  try {
+    crmCredentialsEncrypted = encryptJson(input.workspace.credentials);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : "encryption failed";
+    return NextResponse.json(
+      { error: "encryption misconfigured", detail: message },
+      { status: 500 }
+    );
+  }
+
   const { data: workspace, error: wsErr } = await db
     .from("workspaces")
     .insert({
@@ -97,7 +108,7 @@ export async function POST(req: NextRequest) {
       name: input.workspace.name,
       timezone: input.workspace.timezone,
       crm_provider: input.workspace.crm_provider,
-      crm_credentials_encrypted: encryptJson(input.workspace.credentials),
+      crm_credentials_encrypted: crmCredentialsEncrypted,
       enroll_tag: input.workspace.enroll_tag,
       crm_account_url: input.workspace.crm_account_url ?? null,
       created_by: user.id,
@@ -109,7 +120,15 @@ export async function POST(req: NextRequest) {
   }
 
   // 5. Seed default outcome-tag taxonomy.
-  await db.rpc("seed_default_outcome_tags", { p_workspace_id: workspace.id });
+  const { error: seedErr } = await db.rpc("seed_default_outcome_tags", {
+    p_workspace_id: workspace.id,
+  });
+  if (seedErr) {
+    return NextResponse.json(
+      { error: "failed to seed outcome tags", detail: seedErr.message },
+      { status: 500 }
+    );
+  }
 
   // 6. Create agents + configs.
   const createdAgents: string[] = [];
@@ -130,8 +149,24 @@ export async function POST(req: NextRequest) {
     if (agErr || !agent) {
       return NextResponse.json({ error: "failed to create agent", detail: agErr?.message }, { status: 500 });
     }
-    await db.from("agent_call_configs").insert({ agent_id: agent.id, ...a.callConfig });
-    await db.from("agent_task_configs").insert({ agent_id: agent.id, ...a.taskConfig });
+    const { error: callCfgErr } = await db
+      .from("agent_call_configs")
+      .insert({ agent_id: agent.id, ...a.callConfig });
+    if (callCfgErr) {
+      return NextResponse.json(
+        { error: "failed to create agent call config", detail: callCfgErr.message },
+        { status: 500 }
+      );
+    }
+    const { error: taskCfgErr } = await db
+      .from("agent_task_configs")
+      .insert({ agent_id: agent.id, ...a.taskConfig });
+    if (taskCfgErr) {
+      return NextResponse.json(
+        { error: "failed to create agent task config", detail: taskCfgErr.message },
+        { status: 500 }
+      );
+    }
     createdAgents.push(agent.id);
   }
 

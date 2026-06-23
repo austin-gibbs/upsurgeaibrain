@@ -4,9 +4,13 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, Phone, Settings, KeyRound } from "lucide-react";
 import { CallSettings } from "@/components/agent-form/CallSettings";
+import { TaskSettings } from "@/components/agent-form/TaskSettings";
+import { PostCallWebhookSettings } from "@/components/agent-form/PostCallWebhookSettings";
 import {
   defaultCallConfig,
+  defaultTaskConfig,
   type CallConfig,
+  type TaskConfig,
 } from "@/components/agent-form/types";
 import { PageShell } from "@/components/TopNav";
 import {
@@ -80,6 +84,7 @@ export default function AgentDetailPage({
   const [retellApiKey, setRetellApiKey] = useState("");
   const [retellWebhookSecret, setRetellWebhookSecret] = useState("");
   const [callCfg, setCallCfg] = useState<CallConfig>(defaultCallConfig());
+  const [taskCfg, setTaskCfg] = useState<TaskConfig>(defaultTaskConfig());
   const [workspaceTimezone, setWorkspaceTimezone] = useState("America/New_York");
 
   function load() {
@@ -113,6 +118,23 @@ export default function AgentDetailPage({
           });
         } else {
           setCallCfg(defaultCallConfig());
+        }
+        const tc = d.agent.agent_task_configs?.[0];
+        if (tc) {
+          setTaskCfg({
+            enabled: tc.enabled ?? false,
+            name_template: tc.name_template ?? defaultTaskConfig().name_template,
+            task_type: tc.task_type ?? "Follow Up",
+            assignee_crm_id: tc.assignee_crm_id ?? null,
+            assignee_label: tc.assignee_label ?? null,
+            due_offset_minutes: tc.due_offset_minutes ?? 0,
+            only_outcomes: tc.only_outcomes ?? null,
+            post_call_webhook_enabled: tc.post_call_webhook_enabled ?? false,
+            post_call_webhook_url: tc.post_call_webhook_url ?? null,
+            post_call_webhook_only_outcomes: tc.post_call_webhook_only_outcomes ?? null,
+          });
+        } else {
+          setTaskCfg(defaultTaskConfig());
         }
         setWorkspaceTimezone(d.workspaceTimezone ?? "America/New_York");
       })
@@ -194,6 +216,10 @@ export default function AgentDetailPage({
     patch({ call_config: callCfg });
   }
 
+  function saveTaskSettings() {
+    patch({ task_config: taskCfg });
+  }
+
   if (error)
     return (
       <PageShell>
@@ -209,6 +235,7 @@ export default function AgentDetailPage({
 
   const isInbound = direction === "inbound";
   const tc = agent.agent_task_configs[0];
+  const isHighLevel = crmProvider === "highlevel";
 
   const linkageReady = isInbound
     ? Boolean(agent.retell_agent_id && agent.has_retell_credentials)
@@ -448,16 +475,29 @@ export default function AgentDetailPage({
           <Button variant="secondary" disabled={saving} onClick={saveCallSettings}>
             Save call settings
           </Button>
-          <hr className="border-ink-100" />
-          {tc?.enabled ? (
-            <p className="text-sm text-ink-600">
-              Tasks <Badge tone="green">on</Badge> — &ldquo;{tc.name_template}
-              &rdquo;
+        </Card>
+      )}
+
+      {!isInbound && (
+        <Card className="mt-6 space-y-5 p-6">
+          <SectionHeader
+            title="Tasks & automations"
+            description="Post-call CRM tasks and HighLevel workflow webhooks."
+          />
+          <TaskSettings cfg={taskCfg} users={[]} onChange={(p) => setTaskCfg((c) => ({ ...c, ...p }))} />
+          {isHighLevel && (
+            <PostCallWebhookSettings
+              cfg={taskCfg}
+              onChange={(p) => setTaskCfg((c) => ({ ...c, ...p }))}
+            />
+          )}
+          <Button variant="secondary" disabled={saving} onClick={saveTaskSettings}>
+            Save tasks & automations
+          </Button>
+          {tc?.enabled && (
+            <p className="text-xs text-ink-500">
+              Tasks currently <Badge tone="green">on</Badge>
               {tc.assignee_label ? ` → ${tc.assignee_label}` : ""}
-            </p>
-          ) : (
-            <p className="text-sm text-ink-500">
-              Tasks <Badge tone="slate">off</Badge>
             </p>
           )}
         </Card>
