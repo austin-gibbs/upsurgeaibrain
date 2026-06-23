@@ -157,6 +157,44 @@ export type Database = {
           },
         ]
       }
+      agent_pipeline_stage_map: {
+        Row: {
+          agent_id: string
+          outcome: Database["public"]["Enums"]["call_outcome"]
+          pipeline_id: string
+          pipeline_name: string | null
+          pipeline_stage_id: string
+          stage_name: string | null
+          updated_at: string
+        }
+        Insert: {
+          agent_id: string
+          outcome: Database["public"]["Enums"]["call_outcome"]
+          pipeline_id: string
+          pipeline_name?: string | null
+          pipeline_stage_id: string
+          stage_name?: string | null
+          updated_at?: string
+        }
+        Update: {
+          agent_id?: string
+          outcome?: Database["public"]["Enums"]["call_outcome"]
+          pipeline_id?: string
+          pipeline_name?: string | null
+          pipeline_stage_id?: string
+          stage_name?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agent_pipeline_stage_map_agent_id_fkey"
+            columns: ["agent_id"]
+            isOneToOne: false
+            referencedRelation: "agents"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       agent_task_configs: {
         Row: {
           agent_id: string
@@ -167,6 +205,7 @@ export type Database = {
           enabled: boolean
           name_template: string
           only_outcomes: Database["public"]["Enums"]["call_outcome"][] | null
+          pipeline_automation_enabled: boolean
           post_call_webhook_enabled: boolean
           post_call_webhook_only_outcomes:
             | Database["public"]["Enums"]["call_outcome"][]
@@ -184,6 +223,7 @@ export type Database = {
           enabled?: boolean
           name_template?: string
           only_outcomes?: Database["public"]["Enums"]["call_outcome"][] | null
+          pipeline_automation_enabled?: boolean
           post_call_webhook_enabled?: boolean
           post_call_webhook_only_outcomes?:
             | Database["public"]["Enums"]["call_outcome"][]
@@ -201,6 +241,7 @@ export type Database = {
           enabled?: boolean
           name_template?: string
           only_outcomes?: Database["public"]["Enums"]["call_outcome"][] | null
+          pipeline_automation_enabled?: boolean
           post_call_webhook_enabled?: boolean
           post_call_webhook_only_outcomes?:
             | Database["public"]["Enums"]["call_outcome"][]

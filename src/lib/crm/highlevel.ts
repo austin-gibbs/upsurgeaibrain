@@ -9,11 +9,15 @@
 import type {
   CrmAdapter,
   CrmContact,
+  CrmPipeline,
   CrmUser,
   CreateTaskInput,
   HighLevelCredentials,
+  HighLevelTokenPersistor,
   LogCallInput,
+  MoveStageInput,
 } from "./types";
+import { refreshHighLevelToken } from "./highlevel-oauth";
 
 const BASE = "https://services.leadconnectorhq.com";
 const API_VERSION = "2021-07-28";
@@ -22,13 +26,72 @@ export class HighLevelAdapter implements CrmAdapter {
   readonly provider = "highlevel" as const;
   private token: string;
   private locationId: string;
+  private refreshToken?: string;
+  private expiresAt?: number;
+  private onTokensRefreshed?: HighLevelTokenPersistor;
+  /** De-dupes concurrent refreshes within one adapter instance. */
+  private refreshing: Promise<void> | null = null;
 
-  constructor(creds: HighLevelCredentials) {
+  constructor(
+    creds: HighLevelCredentials,
+    onTokensRefreshed?: HighLevelTokenPersistor
+  ) {
     this.token = creds.accessToken;
     this.locationId = creds.locationId;
+    this.refreshToken = creds.refreshToken;
+    this.expiresAt = creds.expiresAt;
+    this.onTokensRefreshed = onTokensRefreshed;
   }
 
-  private async request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  /** Refresh the access token and persist the rotated pair. Idempotent under
+   *  concurrency — callers share one in-flight refresh. */
+  private async refreshAccessToken(): Promise<void> {
+    if (!this.refreshToken) {
+      throw new Error(
+        "HighLevel access token expired and no refresh token is stored — reconnect the location via OAuth."
+      );
+    }
+    if (this.refreshing) return this.refreshing;
+    const refreshToken = this.refreshToken;
+    this.refreshing = (async () => {
+      const tokens = await refreshHighLevelToken(refreshToken, this.locationId);
+      this.token = tokens.accessToken;
+      this.refreshToken = tokens.refreshToken || this.refreshToken;
+      this.expiresAt = tokens.expiresAt;
+      if (this.onTokensRefreshed) {
+        // Persistence is best-effort: the in-memory token is still valid for
+        // this run even if the write-back fails.
+        try {
+          await this.onTokensRefreshed({
+            accessToken: this.token,
+            locationId: this.locationId,
+            refreshToken: this.refreshToken,
+            expiresAt: this.expiresAt,
+          });
+        } catch {
+          /* non-fatal */
+        }
+      }
+    })().finally(() => {
+      this.refreshing = null;
+    });
+    return this.refreshing;
+  }
+
+  private async request<T>(
+    path: string,
+    init: RequestInit = {},
+    retried = false
+  ): Promise<T> {
+    // Proactively refresh if we know the token is at/near expiry and we can.
+    if (
+      this.refreshToken &&
+      typeof this.expiresAt === "number" &&
+      Date.now() >= this.expiresAt
+    ) {
+      await this.refreshAccessToken();
+    }
+
     const res = await fetch(`${BASE}${path}`, {
       ...init,
       headers: {
@@ -39,6 +102,13 @@ export class HighLevelAdapter implements CrmAdapter {
         ...(init.headers ?? {}),
       },
     });
+
+    // Reactive path: token rejected (expired/revoked early) — refresh once and retry.
+    if (res.status === 401 && !retried && this.refreshToken) {
+      await this.refreshAccessToken();
+      return this.request<T>(path, init, true);
+    }
+
     if (!res.ok) {
       const body = await res.text();
       throw new Error(`HighLevel ${init.method ?? "GET"} ${path} -> ${res.status}: ${body}`);
@@ -118,6 +188,71 @@ export class HighLevelAdapter implements CrmAdapter {
         dueDate: input.dueAt,
         completed: false,
         ...(input.assigneeId ? { assignedTo: input.assigneeId } : {}),
+      }),
+    });
+  }
+
+  // ----- Pipeline routing (Opportunities API) -----
+
+  async listPipelines(): Promise<CrmPipeline[]> {
+    const data = await this.request<any>(
+      `/opportunities/pipelines?locationId=${this.locationId}`
+    );
+    const pipelines: any[] = data.pipelines ?? [];
+    return pipelines.map((p) => ({
+      id: String(p.id),
+      name: p.name ?? "Pipeline",
+      stages: Array.isArray(p.stages)
+        ? p.stages.map((s: any) => ({ id: String(s.id), name: s.name ?? "Stage" }))
+        : [],
+    }));
+  }
+
+  async moveContactToStage(input: MoveStageInput): Promise<void> {
+    const { contactId, pipelineId, stageId, contactName, status } = input;
+
+    // 1. Find an existing opportunity for this contact. Prefer one already in
+    //    the target pipeline; otherwise reuse the first one we find so we move
+    //    rather than spawn duplicates.
+    let opportunityId: string | null = null;
+    try {
+      const search = await this.request<any>(
+        `/opportunities/search?location_id=${this.locationId}&contact_id=${encodeURIComponent(
+          contactId
+        )}`
+      );
+      const opps: any[] = search.opportunities ?? [];
+      const inPipeline = opps.find(
+        (o) => String(o.pipelineId ?? o.pipeline_id ?? "") === pipelineId
+      );
+      const chosen = inPipeline ?? opps[0];
+      if (chosen?.id) opportunityId = String(chosen.id);
+    } catch {
+      // Search failed (e.g. no opportunities) — fall through to create.
+    }
+
+    if (opportunityId) {
+      await this.request(`/opportunities/${opportunityId}`, {
+        method: "PUT",
+        body: JSON.stringify({
+          pipelineId,
+          pipelineStageId: stageId,
+          ...(status ? { status } : {}),
+        }),
+      });
+      return;
+    }
+
+    // 2. No opportunity yet → create one directly in the target stage.
+    await this.request(`/opportunities/`, {
+      method: "POST",
+      body: JSON.stringify({
+        pipelineId,
+        locationId: this.locationId,
+        pipelineStageId: stageId,
+        name: contactName || "UpSurge Lead",
+        status: status ?? "open",
+        contactId,
       }),
     });
   }

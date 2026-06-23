@@ -3,7 +3,14 @@ import { z } from "zod";
 
 export const crmCredentialsSchema = z.union([
   z.object({ apiKey: z.string().min(10) }), // FUB
-  z.object({ accessToken: z.string().min(10), locationId: z.string().min(1) }), // HighLevel
+  z.object({
+    // HighLevel. refreshToken/expiresAt are present when connected via OAuth
+    // (enables auto-refresh); absent for a legacy hand-pasted static token.
+    accessToken: z.string().min(10),
+    locationId: z.string().min(1),
+    refreshToken: z.string().optional(),
+    expiresAt: z.number().optional(),
+  }),
 ]);
 
 /** Base URL for CRM contact pages (e.g. https://nilpatel.followupboss.com). */
@@ -62,6 +69,7 @@ export const taskConfigSchema = z
       .default(null)
       .transform((v) => (v === "" ? null : v)),
     post_call_webhook_only_outcomes: z.array(callOutcomeSchema).nullable().default(null),
+    pipeline_automation_enabled: z.boolean().default(false),
   })
   .superRefine((val, ctx) => {
     if (val.post_call_webhook_enabled && !val.post_call_webhook_url) {
@@ -72,6 +80,21 @@ export const taskConfigSchema = z
       });
     }
   });
+
+/**
+ * One outcome -> pipeline stage routing rule. The PATCH endpoint accepts the
+ * full set for an agent and replaces the stored map. pipeline_name/stage_name
+ * are display-label caches and are optional.
+ */
+export const pipelineStageMapEntrySchema = z.object({
+  outcome: callOutcomeSchema,
+  pipeline_id: z.string().min(1),
+  pipeline_stage_id: z.string().min(1),
+  pipeline_name: z.string().nullable().default(null),
+  stage_name: z.string().nullable().default(null),
+});
+
+export const pipelineStageMapSchema = z.array(pipelineStageMapEntrySchema);
 
 export const agentSchema = z.object({
   name: z.string().min(1),
@@ -171,3 +194,26 @@ export type CreateAgentInput = z.infer<typeof createAgentSchema>;
 export const runWorkspacePollSchema = z.object({
   testMode: z.boolean().default(false),
 });
+
+/**
+ * Payload for the manual test-call trigger. A chosen outbound agent either:
+ *   - dials an existing enrolled contact now (contactId) via the call queue, or
+ *   - dials an arbitrary number now (toNumber) inline, with no contact/queue.
+ * Exactly one of contactId / toNumber must be provided.
+ */
+export const testCallSchema = z
+  .object({
+    agentId: z.string().uuid(),
+    contactId: z.string().uuid().optional(),
+    toNumber: z
+      .string()
+      .trim()
+      .regex(
+        /^\+[1-9]\d{7,14}$/,
+        "Enter a phone number in E.164 format, e.g. +15551234567"
+      )
+      .optional(),
+  })
+  .refine((v) => Boolean(v.contactId) !== Boolean(v.toNumber), {
+    message: "Provide either a contact or a phone number, not both.",
+  });

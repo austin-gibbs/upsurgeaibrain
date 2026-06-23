@@ -11,8 +11,36 @@ import { getCrmAdapterForAgent } from "@/lib/crm";
 import { getRetellClientForAgent } from "@/lib/retell/client";
 import { buildDynamicVariables } from "./memory";
 import { todayInTz } from "./cadence";
-import type { CallJob } from "@/lib/queue/queues";
+import { getCallQueue, type CallJob } from "@/lib/queue/queues";
 import type { Agent, AgentMemory, Contact, Workspace } from "@/types";
+
+/**
+ * Remove any not-yet-running dial jobs for a specific contact from the call
+ * queue. Used by the manual "Call now" test so forcing an immediate dial can't
+ * be followed by a second, scheduled dial for the same contact. Only pending
+ * states are scanned (active/locked jobs are left alone), and only jobs for
+ * this exact agent+contact are removed — the rest of the queue is untouched.
+ * Returns the number of jobs removed.
+ */
+export async function cancelPendingDials(
+  agentId: string,
+  contactId: string
+): Promise<number> {
+  const queue = getCallQueue();
+  const jobs = await queue.getJobs(["waiting", "delayed", "prioritized", "paused"]);
+  let removed = 0;
+  for (const job of jobs) {
+    if (job?.data?.contactId === contactId && job.data.agentId === agentId) {
+      try {
+        await job.remove();
+        removed++;
+      } catch {
+        // Job may have started running between the scan and removal — skip it.
+      }
+    }
+  }
+  return removed;
+}
 
 export async function placeCall(job: CallJob): Promise<{ callId: string; retellCallId: string }> {
   const supabase = createServiceClient();
@@ -95,6 +123,88 @@ export async function placeCall(job: CallJob): Promise<{ callId: string; retellC
   } catch {
     // non-fatal — the local last_called_on already guards same-day re-dials
   }
+
+  return { callId: call.id, retellCallId };
+}
+
+/**
+ * Place a one-off TEST call to an arbitrary number, synchronously and outside
+ * the BullMQ call queue.
+ *
+ * This exists so an operator can verify an outbound agent end-to-end without a
+ * CRM contact and without competing with (or disrupting) the live dial queue.
+ * It deliberately has NO side effects beyond the call itself: it does not touch
+ * the contacts table, does not write CRM tags/notes, and does not advance any
+ * cadence. The `calls` row it writes has a null contact_id; the outcome webhook
+ * recognises that and finalises the record without CRM/cadence/memory writes.
+ */
+export async function placeTestCall(params: {
+  agentId: string;
+  toNumber: string;
+}): Promise<{ callId: string; retellCallId: string }> {
+  const supabase = createServiceClient();
+
+  const { data: agent } = await supabase
+    .from("agents").select("*").eq("id", params.agentId).single<Agent>();
+  if (!agent) throw new Error(`agent ${params.agentId} not found`);
+  if (!agent.retell_agent_id || !agent.retell_from_number) {
+    throw new Error(`agent ${params.agentId} missing Retell linkage`);
+  }
+
+  const { data: workspace } = await supabase
+    .from("workspaces").select("*").eq("id", agent.workspace_id).single<Workspace>();
+  if (!workspace) throw new Error(`workspace ${agent.workspace_id} not found`);
+
+  const { data: call } = await supabase
+    .from("calls")
+    .insert({
+      workspace_id: workspace.id,
+      agent_id: agent.id,
+      contact_id: null,
+      attempt_number: 1,
+      to_number: params.toNumber,
+      status: "queued",
+      direction: "outbound",
+    })
+    .select("id")
+    .single<{ id: string }>();
+  if (!call) throw new Error("failed to create call row");
+
+  // Minimal dynamic variables — mirrors buildDynamicVariables keys so the
+  // agent prompt resolves, with a test marker and no contact identity/memory.
+  const dynamicVariables: Record<string, string> = {
+    contact_name: "there",
+    objective: agent.objective ?? "",
+    attempt_number: "1",
+    is_returning_contact: "false",
+    prior_call_count: "0",
+    memory_summary: "",
+    known_facts: "{}",
+    is_test_call: "true",
+  };
+
+  const retell = getRetellClientForAgent(agent);
+  const { callId: retellCallId } = await retell.createPhoneCall({
+    fromNumber: agent.retell_from_number,
+    toNumber: params.toNumber,
+    agentId: agent.retell_agent_id,
+    dynamicVariables,
+    metadata: {
+      call_id: call.id,
+      workspace_id: workspace.id,
+      agent_id: agent.id,
+      test_call: "true",
+    },
+  });
+
+  await supabase
+    .from("calls")
+    .update({
+      retell_call_id: retellCallId,
+      status: "dialing",
+      dialed_at: new Date().toISOString(),
+    })
+    .eq("id", call.id);
 
   return { callId: call.id, retellCallId };
 }

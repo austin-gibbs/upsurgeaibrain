@@ -98,6 +98,19 @@ export interface AgentTaskConfig {
   post_call_webhook_enabled: boolean;
   post_call_webhook_url: string | null;
   post_call_webhook_only_outcomes: CallOutcome[] | null;
+  /** HighLevel only: move the contact's opportunity to the mapped stage after each call. */
+  pipeline_automation_enabled: boolean;
+}
+
+/** One outcome -> HighLevel pipeline stage routing rule for an agent. */
+export interface AgentPipelineStageMap {
+  agent_id: string;
+  outcome: CallOutcome;
+  pipeline_id: string;
+  pipeline_stage_id: string;
+  /** Display-label caches so the UI can render the selection without a refetch. */
+  pipeline_name: string | null;
+  stage_name: string | null;
 }
 
 export interface Contact {

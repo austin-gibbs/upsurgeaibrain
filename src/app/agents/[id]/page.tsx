@@ -6,10 +6,13 @@ import { ArrowLeft, Phone, Settings, KeyRound } from "lucide-react";
 import { CallSettings } from "@/components/agent-form/CallSettings";
 import { TaskSettings } from "@/components/agent-form/TaskSettings";
 import { PostCallWebhookSettings } from "@/components/agent-form/PostCallWebhookSettings";
+import { PipelineStageSettings } from "@/components/agent-form/PipelineStageSettings";
 import {
   defaultCallConfig,
   defaultTaskConfig,
   type CallConfig,
+  type Pipeline,
+  type StageMapEntry,
   type TaskConfig,
 } from "@/components/agent-form/types";
 import { PageShell } from "@/components/TopNav";
@@ -86,6 +89,10 @@ export default function AgentDetailPage({
   const [callCfg, setCallCfg] = useState<CallConfig>(defaultCallConfig());
   const [taskCfg, setTaskCfg] = useState<TaskConfig>(defaultTaskConfig());
   const [workspaceTimezone, setWorkspaceTimezone] = useState("America/New_York");
+  const [stageMap, setStageMap] = useState<StageMapEntry[]>([]);
+  const [pipelines, setPipelines] = useState<Pipeline[]>([]);
+  const [pipelinesLoading, setPipelinesLoading] = useState(false);
+  const [pipelinesError, setPipelinesError] = useState<string | null>(null);
 
   function load() {
     fetch(`/api/agents/${params.id}`)
@@ -132,16 +139,64 @@ export default function AgentDetailPage({
             post_call_webhook_enabled: tc.post_call_webhook_enabled ?? false,
             post_call_webhook_url: tc.post_call_webhook_url ?? null,
             post_call_webhook_only_outcomes: tc.post_call_webhook_only_outcomes ?? null,
+            pipeline_automation_enabled: tc.pipeline_automation_enabled ?? false,
           });
         } else {
           setTaskCfg(defaultTaskConfig());
         }
+        setStageMap(
+          (d.pipelineStageMap ?? []).map((m: any) => ({
+            outcome: m.outcome,
+            pipeline_id: m.pipeline_id,
+            pipeline_stage_id: m.pipeline_stage_id,
+            pipeline_name: m.pipeline_name ?? null,
+            stage_name: m.stage_name ?? null,
+          }))
+        );
         setWorkspaceTimezone(d.workspaceTimezone ?? "America/New_York");
       })
       .catch((e) => setError(e.message));
   }
 
   useEffect(load, [params.id]);
+
+  // Surface the HighLevel OAuth callback result (redirects back with ?highlevel=).
+  useEffect(() => {
+    const status = new URLSearchParams(window.location.search).get("highlevel");
+    if (status === "connected") {
+      setActionMsg("HighLevel connected — token will auto-refresh.");
+    } else if (status === "error") {
+      setActionMsg("HighLevel connection was cancelled or failed.");
+    }
+  }, []);
+
+  // Load HighLevel pipelines (for the routing UI) once the agent is known to
+  // use HighLevel with stored credentials.
+  useEffect(() => {
+    if (!agent || agent.crm_provider !== "highlevel" || !agent.has_crm_credentials) {
+      setPipelines([]);
+      return;
+    }
+    let cancelled = false;
+    setPipelinesLoading(true);
+    setPipelinesError(null);
+    fetch(`/api/agents/${params.id}/pipelines`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (cancelled) return;
+        if (d.error && !d.pipelines) setPipelinesError(d.error);
+        setPipelines(d.pipelines ?? []);
+      })
+      .catch((e) => {
+        if (!cancelled) setPipelinesError(e.message);
+      })
+      .finally(() => {
+        if (!cancelled) setPipelinesLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [agent?.crm_provider, agent?.has_crm_credentials, params.id]);
 
   async function patch(body: Record<string, unknown>) {
     setSaving(true);
@@ -217,7 +272,15 @@ export default function AgentDetailPage({
   }
 
   function saveTaskSettings() {
-    patch({ task_config: taskCfg });
+    const body: Record<string, unknown> = { task_config: taskCfg };
+    // Only send the routing map for HighLevel agents; full-replace with the
+    // complete-only entries (both a pipeline and a stage chosen).
+    if (isHighLevel) {
+      body.pipeline_stage_map = stageMap.filter(
+        (m) => m.pipeline_id && m.pipeline_stage_id
+      );
+    }
+    patch(body);
   }
 
   if (error)
@@ -424,6 +487,20 @@ export default function AgentDetailPage({
           >
             Save CRM
           </Button>
+          {crmProvider === "highlevel" && (
+            <a
+              href={`/api/agents/${params.id}/highlevel/connect`}
+              className="block w-full rounded-xl border border-ink-200 px-4 py-2 text-center text-sm font-medium text-ink-700 transition-colors hover:bg-ink-50"
+            >
+              Connect via OAuth
+            </a>
+          )}
+          {crmProvider === "highlevel" && (
+            <p className="text-xs text-ink-500">
+              OAuth keeps the HighLevel token fresh automatically. Pasting an
+              access token works too, but it will expire and stop syncing.
+            </p>
+          )}
         </Card>
       </div>
 
@@ -482,13 +559,24 @@ export default function AgentDetailPage({
         <Card className="mt-6 space-y-5 p-6">
           <SectionHeader
             title="Tasks & automations"
-            description="Post-call CRM tasks and HighLevel workflow webhooks."
+            description="Post-call CRM tasks, HighLevel workflow webhooks, and pipeline routing."
           />
           <TaskSettings cfg={taskCfg} users={[]} onChange={(p) => setTaskCfg((c) => ({ ...c, ...p }))} />
           {isHighLevel && (
             <PostCallWebhookSettings
               cfg={taskCfg}
               onChange={(p) => setTaskCfg((c) => ({ ...c, ...p }))}
+            />
+          )}
+          {isHighLevel && (
+            <PipelineStageSettings
+              cfg={taskCfg}
+              pipelines={pipelines}
+              map={stageMap}
+              loading={pipelinesLoading}
+              error={pipelinesError}
+              onChange={(p) => setTaskCfg((c) => ({ ...c, ...p }))}
+              onChangeMap={setStageMap}
             />
           )}
           <Button variant="secondary" disabled={saving} onClick={saveTaskSettings}>

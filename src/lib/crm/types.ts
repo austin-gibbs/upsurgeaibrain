@@ -46,6 +46,28 @@ export interface CrmUser {
   email?: string;
 }
 
+export interface CrmPipelineStage {
+  id: string;
+  name: string;
+}
+
+export interface CrmPipeline {
+  id: string;
+  name: string;
+  stages: CrmPipelineStage[];
+}
+
+export interface MoveStageInput {
+  /** Provider-native contact id. */
+  contactId: string;
+  pipelineId: string;
+  stageId: string;
+  /** Used to name a newly-created opportunity when the contact has none. */
+  contactName?: string | null;
+  /** Optional opportunity status to set alongside the stage move. */
+  status?: "open" | "won" | "lost" | "abandoned";
+}
+
 export interface CreateContactInput {
   fullName: string | null;
   /** E.164 preferred. */
@@ -83,6 +105,18 @@ export interface CrmAdapter {
   /** Cheap call to validate stored credentials. Returns true if usable. */
   verifyCredentials(): Promise<boolean>;
 
+  // ----- Pipeline routing (optional; HighLevel implements these) -----
+
+  /** List the pipelines + their stages, to populate the mapping UI. */
+  listPipelines?(): Promise<CrmPipeline[]>;
+
+  /**
+   * Move the contact's opportunity to a pipeline stage. Finds the contact's
+   * existing opportunity (preferring one already in the target pipeline) and
+   * updates its stage; creates a new opportunity in that stage if none exists.
+   */
+  moveContactToStage?(input: MoveStageInput): Promise<void>;
+
   // ----- Inbound concierge support (optional; FUB implements these) -----
 
   /** Find an existing contact by phone number (E.164). Inbound caller match. */
@@ -102,4 +136,15 @@ export interface FubCredentials {
 export interface HighLevelCredentials {
   accessToken: string;
   locationId: string;
+  /** OAuth refresh token. Present when connected via OAuth; absent for a
+   *  legacy hand-pasted static token (which then can't be auto-refreshed). */
+  refreshToken?: string;
+  /** Epoch milliseconds when the access token expires. */
+  expiresAt?: number;
 }
+
+/** Called by the adapter after it rotates its tokens, so the caller can
+ *  persist the new encrypted credentials back to the agent/workspace row. */
+export type HighLevelTokenPersistor = (
+  creds: HighLevelCredentials
+) => Promise<void>;

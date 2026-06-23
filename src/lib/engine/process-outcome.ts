@@ -16,6 +16,7 @@ import { classifyOutcome, outcomeLabel, extractFromRetellPayload } from "./outco
 import { reconcileTags } from "./tags";
 import { nextEligibleDate, todayInTz } from "./cadence";
 import { updateMemoryAfterCall } from "./memory";
+import { applyPipelineRouting } from "./pipeline-routing";
 import { processInboundCall } from "./process-inbound";
 import { dispatchPostCallWebhook } from "@/lib/webhooks/post-call";
 import type {
@@ -47,6 +48,29 @@ export async function processRetellWebhook(body: any): Promise<{ ok: boolean; re
     .maybeSingle<any>();
   if (!call) return { ok: false, reason: "no matching call row" };
   if (call.status === "completed") return { ok: true, reason: "already processed" };
+
+  // Contact-less outbound rows are manual test calls (placed via placeTestCall).
+  // Persist the outcome/transcript for visibility but skip all CRM, cadence, and
+  // memory side effects — there is no contact to advance.
+  if (!call.contact_id) {
+    const outcome = classifyOutcome({
+      rawOutcome: parsed.rawOutcome,
+      inVoicemail: parsed.inVoicemail,
+    });
+    await supabase
+      .from("calls")
+      .update({
+        status: "completed",
+        outcome,
+        in_voicemail: parsed.inVoicemail,
+        summary: parsed.summary,
+        transcript: parsed.transcript,
+        raw_payload: body,
+        completed_at: new Date().toISOString(),
+      })
+      .eq("id", call.id);
+    return { ok: true, reason: "test call (no contact)" };
+  }
 
   const [{ data: agent }, { data: workspace }, { data: contact }] = await Promise.all([
     supabase.from("agents").select("*").eq("id", call.agent_id).single<Agent>(),
@@ -143,6 +167,24 @@ export async function processRetellWebhook(body: any): Promise<{ ok: boolean; re
         callDate: today,
       });
     } catch { /* non-fatal */ }
+  }
+
+  // 4c. HighLevel pipeline routing (best-effort, app-driven). Move the
+  // contact's opportunity to the stage mapped for this outcome — no
+  // hand-built HighLevel workflow required. No-op when disabled, when the
+  // CRM has no pipelines (FUB), or when the outcome has no mapped stage.
+  if (workspace.crm_provider === "highlevel" && taskConfig?.pipeline_automation_enabled) {
+    try {
+      await applyPipelineRouting({
+        supabase,
+        crm,
+        agentId: agent.id,
+        contact,
+        outcome,
+      });
+    } catch {
+      /* non-fatal: never block cadence advance on a pipeline move */
+    }
   }
 
   // 5. Cadence state.

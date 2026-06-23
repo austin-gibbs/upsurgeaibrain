@@ -20,6 +20,23 @@ export type TaskConfig = {
   post_call_webhook_enabled: boolean;
   post_call_webhook_url: string | null;
   post_call_webhook_only_outcomes: string[] | null;
+  pipeline_automation_enabled: boolean;
+};
+
+/** A CRM pipeline + its ordered stages, from GET /api/agents/:id/pipelines. */
+export type Pipeline = {
+  id: string;
+  name: string;
+  stages: { id: string; name: string }[];
+};
+
+/** One outcome -> pipeline stage routing rule, as edited in the form. */
+export type StageMapEntry = {
+  outcome: string;
+  pipeline_id: string;
+  pipeline_stage_id: string;
+  pipeline_name: string | null;
+  stage_name: string | null;
 };
 
 export const OUTCOMES = [
@@ -57,5 +74,6 @@ export function defaultTaskConfig(): TaskConfig {
     post_call_webhook_enabled: false,
     post_call_webhook_url: null,
     post_call_webhook_only_outcomes: null,
+    pipeline_automation_enabled: false,
   };
 }

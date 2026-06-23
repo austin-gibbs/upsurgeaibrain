@@ -2,13 +2,38 @@
 // CRM factory. Turns a workspace row into a ready-to-use CrmAdapter by
 // decrypting its credentials and instantiating the right implementation.
 // =====================================================================
-import { decryptJson } from "@/lib/crypto";
+import { decryptJson, encryptJson } from "@/lib/crypto";
+import { createServiceClient } from "@/lib/supabase/server";
 import type { Agent, Workspace } from "@/types";
-import type { CrmAdapter, FubCredentials, HighLevelCredentials } from "./types";
+import type {
+  CrmAdapter,
+  FubCredentials,
+  HighLevelCredentials,
+  HighLevelTokenPersistor,
+} from "./types";
 import { FollowUpBossAdapter } from "./followupboss";
 import { HighLevelAdapter } from "./highlevel";
 
 export * from "./types";
+
+/**
+ * Build a persistor that writes a HighLevel adapter's freshly-rotated tokens
+ * back into the encrypted `crm_credentials_encrypted` column of the row the
+ * adapter was loaded from. Without this, a refreshed token would be lost at
+ * the end of the request and every run would burn a refresh.
+ */
+function persistHighLevelTokens(
+  table: "agents" | "workspaces",
+  id: string
+): HighLevelTokenPersistor {
+  return async (creds: HighLevelCredentials) => {
+    const supabase = createServiceClient();
+    await supabase
+      .from(table)
+      .update({ crm_credentials_encrypted: encryptJson(creds) })
+      .eq("id", id);
+  };
+}
 
 /**
  * Resolve the CRM adapter for an agent. Agents may carry their own CRM
@@ -21,7 +46,11 @@ export function getCrmAdapterForAgent(agent: Agent, workspace: Workspace): CrmAd
     const creds = decryptJson<FubCredentials | HighLevelCredentials>(
       agent.crm_credentials_encrypted
     );
-    return buildAdapter(agent.crm_provider, creds);
+    const persist =
+      agent.crm_provider === "highlevel"
+        ? persistHighLevelTokens("agents", agent.id)
+        : undefined;
+    return buildAdapter(agent.crm_provider, creds, persist);
   }
   return getCrmAdapter(workspace);
 }
@@ -38,7 +67,10 @@ export function getCrmAdapter(workspace: Workspace): CrmAdapter {
     case "followupboss":
       return new FollowUpBossAdapter(creds as FubCredentials);
     case "highlevel":
-      return new HighLevelAdapter(creds as HighLevelCredentials);
+      return new HighLevelAdapter(
+        creds as HighLevelCredentials,
+        persistHighLevelTokens("workspaces", workspace.id)
+      );
     default:
       throw new Error(`Unsupported CRM provider: ${workspace.crm_provider}`);
   }
@@ -47,9 +79,10 @@ export function getCrmAdapter(workspace: Workspace): CrmAdapter {
 /** Build an adapter directly from plaintext creds (used during setup, before save). */
 export function buildAdapter(
   provider: Workspace["crm_provider"],
-  creds: FubCredentials | HighLevelCredentials
+  creds: FubCredentials | HighLevelCredentials,
+  onTokensRefreshed?: HighLevelTokenPersistor
 ): CrmAdapter {
   return provider === "followupboss"
     ? new FollowUpBossAdapter(creds as FubCredentials)
-    : new HighLevelAdapter(creds as HighLevelCredentials);
+    : new HighLevelAdapter(creds as HighLevelCredentials, onTokensRefreshed);
 }

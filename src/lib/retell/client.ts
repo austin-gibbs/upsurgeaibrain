@@ -40,6 +40,51 @@ export interface ListCallsInput {
   pagination_key?: string;
 }
 
+/**
+ * Translate our ergonomic filter shape into the v3 list-calls operator format.
+ *
+ * Retell's v3 endpoint no longer accepts plain arrays/threshold objects for
+ * filter fields. Each field is a typed operator object instead:
+ *   - enum fields:  `{ type: "enum",  op: "in", value: ["ended"] }`
+ *   - number range: `{ type: "range", op: "bt", value: [lower, upper] }`
+ *   - number bound: `{ type: "number", op: "ge" | "le", value: n }`
+ * and agents move from a top-level `agent_id` array to `agent: [{ agent_id }]`.
+ */
+function toV3FilterCriteria(
+  filter: ListCallsFilterCriteria = {}
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+
+  if (filter.agent_id && filter.agent_id.length > 0) {
+    out.agent = filter.agent_id.map((agent_id) => ({ agent_id }));
+  }
+  if (filter.call_status && filter.call_status.length > 0) {
+    out.call_status = { type: "enum", op: "in", value: filter.call_status };
+  }
+  if (filter.direction && filter.direction.length > 0) {
+    out.direction = { type: "enum", op: "in", value: filter.direction };
+  }
+  if (filter.start_timestamp) {
+    const { lower_threshold, upper_threshold } = filter.start_timestamp;
+    if (lower_threshold !== undefined && upper_threshold !== undefined) {
+      // RangeFilter: between (inclusive) over [lower, upper].
+      out.start_timestamp = {
+        type: "range",
+        op: "bt",
+        value: [lower_threshold, upper_threshold],
+      };
+    } else if (lower_threshold !== undefined) {
+      // NumberFilter: greater-than-or-equal (op "ge", not "gte").
+      out.start_timestamp = { type: "number", op: "ge", value: lower_threshold };
+    } else if (upper_threshold !== undefined) {
+      // NumberFilter: less-than-or-equal (op "le", not "lte").
+      out.start_timestamp = { type: "number", op: "le", value: upper_threshold };
+    }
+  }
+
+  return out;
+}
+
 /** Minimal call shape returned by Retell v3 list-calls. */
 export interface RetellCallListItem {
   call_id: string;
@@ -135,7 +180,7 @@ export class RetellClient {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        filter_criteria: input.filter_criteria ?? {},
+        filter_criteria: toV3FilterCriteria(input.filter_criteria),
         limit: input.limit ?? 1000,
         sort_order: input.sort_order ?? "descending",
         ...(input.pagination_key ? { pagination_key: input.pagination_key } : {}),

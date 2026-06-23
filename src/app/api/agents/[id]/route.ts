@@ -10,6 +10,7 @@ import { encryptJson } from "@/lib/crypto";
 import {
   callConfigSchema,
   crmCredentialsSchema,
+  pipelineStageMapSchema,
   retellCredentialsSchema,
   taskConfigSchema,
 } from "@/lib/validation";
@@ -86,10 +87,16 @@ export async function GET(
     .order("queued_at", { ascending: false })
     .limit(50);
 
+  const { data: pipelineStageMap } = await db
+    .from("agent_pipeline_stage_map")
+    .select("outcome, pipeline_id, pipeline_stage_id, pipeline_name, stage_name")
+    .eq("agent_id", params.id);
+
   return NextResponse.json({
     agent: publicAgent(agentRow),
     workspaceTimezone: workspaces?.timezone ?? "America/New_York",
     calls: calls ?? [],
+    pipelineStageMap: pipelineStageMap ?? [],
   });
 }
 
@@ -105,6 +112,7 @@ const patchSchema = z.object({
   retell_credentials: retellCredentialsSchema.nullable().optional(),
   call_config: callConfigSchema.optional(),
   task_config: taskConfigSchema.optional(),
+  pipeline_stage_map: pipelineStageMapSchema.optional(),
 });
 
 export async function PATCH(
@@ -256,6 +264,35 @@ export async function PATCH(
     );
     if (taskError) {
       return NextResponse.json({ error: taskError.message }, { status: 500 });
+    }
+  }
+
+  // Pipeline routing map: full replace for this agent. An empty array clears
+  // all routing rules; rows present overwrite the stored map.
+  if (input.pipeline_stage_map) {
+    const { error: deleteError } = await db
+      .from("agent_pipeline_stage_map")
+      .delete()
+      .eq("agent_id", params.id);
+    if (deleteError) {
+      return NextResponse.json({ error: deleteError.message }, { status: 500 });
+    }
+    if (input.pipeline_stage_map.length > 0) {
+      const rows = input.pipeline_stage_map.map((entry) => ({
+        agent_id: params.id,
+        outcome: entry.outcome,
+        pipeline_id: entry.pipeline_id,
+        pipeline_stage_id: entry.pipeline_stage_id,
+        pipeline_name: entry.pipeline_name,
+        stage_name: entry.stage_name,
+        updated_at: new Date().toISOString(),
+      }));
+      const { error: insertError } = await db
+        .from("agent_pipeline_stage_map")
+        .insert(rows);
+      if (insertError) {
+        return NextResponse.json({ error: insertError.message }, { status: 500 });
+      }
     }
   }
 

@@ -10,6 +10,7 @@ import {
   CalendarClock,
   Search,
   Plus,
+  Phone,
 } from "lucide-react";
 import {
   Card,
@@ -22,6 +23,7 @@ import {
   EmptyState,
   Button,
   Label,
+  Select,
 } from "@/components/ui";
 
 type ContactRow = {
@@ -197,8 +199,104 @@ export function WorkspaceOpsTab({
     type: "success" | "error";
     text: string;
   } | null>(null);
+  const [callingId, setCallingId] = useState<string | null>(null);
+  const [testNumber, setTestNumber] = useState("");
+  const [placingTest, setPlacingTest] = useState(false);
+  const [testMessage, setTestMessage] = useState<{
+    type: "success" | "error";
+    text: string;
+  } | null>(null);
 
   const { workspace, agents, contactCount, contacts, outcomeTags } = data;
+
+  // Outbound agents that are wired up to Retell can place a manual test call.
+  const callableAgents = agents.filter(
+    (a) => a.direction === "outbound" && a.retell_agent_id
+  );
+  const [testAgentId, setTestAgentId] = useState<string>("");
+  const activeTestAgentId = testAgentId || callableAgents[0]?.id || "";
+
+  async function placeAdHocTestCall() {
+    const agentId = activeTestAgentId;
+    if (!agentId) {
+      setTestMessage({
+        type: "error",
+        text: "No outbound agent with a Retell ID is available.",
+      });
+      return;
+    }
+    setPlacingTest(true);
+    setTestMessage(null);
+    try {
+      const res = await fetch(`/api/workspaces/${workspaceId}/test-call`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ agentId, toNumber: testNumber.trim() }),
+      });
+      const d = await res.json();
+      if (!res.ok) {
+        setTestMessage({
+          type: "error",
+          text:
+            d.issues?.[0]?.message ?? d.error ?? "Test call failed",
+        });
+        return;
+      }
+      setTestMessage({
+        type: "success",
+        text: `Calling ${d.toNumber} now — it should ring within a few seconds. This call is isolated from the live queue.`,
+      });
+      onRefresh();
+    } catch (e) {
+      setTestMessage({
+        type: "error",
+        text: e instanceof Error ? e.message : "Test call failed",
+      });
+    } finally {
+      setPlacingTest(false);
+    }
+  }
+
+  async function callNow(contactId: string) {
+    const agentId = activeTestAgentId;
+    if (!agentId) {
+      setRunMessage({
+        type: "error",
+        text: "No outbound agent with a Retell ID is available to place a test call.",
+      });
+      return;
+    }
+    setCallingId(contactId);
+    setRunMessage(null);
+    try {
+      const res = await fetch(`/api/workspaces/${workspaceId}/test-call`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ agentId, contactId }),
+      });
+      const d = await res.json();
+      if (!res.ok) {
+        setRunMessage({ type: "error", text: d.error ?? "Test call failed" });
+        return;
+      }
+      setRunMessage({
+        type: "success",
+        text: `Calling ${d.contactName ?? "contact"} now at ${d.toNumber} — full CRM write-back runs after the call.${
+          d.cancelledQueued > 0
+            ? ` Removed ${d.cancelledQueued} pending scheduled dial${d.cancelledQueued === 1 ? "" : "s"} for this contact to avoid a double call.`
+            : ""
+        } The rest of the call queue is untouched.`,
+      });
+      onRefresh();
+    } catch (e) {
+      setRunMessage({
+        type: "error",
+        text: e instanceof Error ? e.message : "Test call failed",
+      });
+    } finally {
+      setCallingId(null);
+    }
+  }
 
   async function runPoll() {
     setRunning(true);
@@ -331,6 +429,80 @@ export function WorkspaceOpsTab({
         />
       </div>
 
+      <div className="mb-10">
+        <SectionHeader
+          title="Test call"
+          description="Dial any phone number right now to check an outbound agent. Runs instantly, ignores call windows, and is fully isolated from the live call queue and your CRM."
+        />
+        <Card className="p-5">
+          {callableAgents.length === 0 ? (
+            <EmptyState
+              icon={Phone}
+              title="No callable agent"
+              description="Add an outbound agent with a Retell agent ID and from number to place test calls."
+            />
+          ) : (
+            <>
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
+                {callableAgents.length > 1 && (
+                  <div className="sm:w-56">
+                    <Label htmlFor="test-agent">Agent</Label>
+                    <Select
+                      id="test-agent"
+                      value={activeTestAgentId}
+                      onChange={(e) => setTestAgentId(e.target.value)}
+                    >
+                      {callableAgents.map((a) => (
+                        <option key={a.id} value={a.id}>
+                          {a.name}
+                        </option>
+                      ))}
+                    </Select>
+                  </div>
+                )}
+                <div className="flex-1">
+                  <Label htmlFor="test-number">Phone number</Label>
+                  <Input
+                    id="test-number"
+                    value={testNumber}
+                    onChange={(e) => setTestNumber(e.target.value)}
+                    placeholder="+15551234567"
+                    inputMode="tel"
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && testNumber.trim() && !placingTest) {
+                        placeAdHocTestCall();
+                      }
+                    }}
+                  />
+                  <p className="mt-1 text-xs text-ink-400">
+                    E.164 format with country code, e.g. +15551234567
+                  </p>
+                </div>
+                <Button
+                  onClick={placeAdHocTestCall}
+                  disabled={placingTest || testNumber.trim().length === 0}
+                  className="gap-1.5"
+                >
+                  <Phone className="h-4 w-4" />
+                  {placingTest ? "Calling…" : "Place test call"}
+                </Button>
+              </div>
+              {testMessage && (
+                <div
+                  className={`mt-4 rounded-xl px-4 py-3 text-sm ${
+                    testMessage.type === "success"
+                      ? "bg-accent-mint-bg text-accent-mint-fg"
+                      : "bg-accent-rose-bg text-accent-rose-fg"
+                  }`}
+                >
+                  {testMessage.text}
+                </div>
+              )}
+            </>
+          )}
+        </Card>
+      </div>
+
       <SectionHeader
         title="Agents"
         action={
@@ -388,16 +560,32 @@ export function WorkspaceOpsTab({
       <div className="mb-10">
         <SectionHeader
           title="Call schedule"
-          description={`Projected next dial times from cadence and drip settings.`}
+          description={`Projected next dial times from cadence and drip settings. Use "Call now" to dial a contact immediately for testing, ignoring call windows and cadence.`}
           action={
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-400" />
-              <Input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search name or number"
-                className="w-64 pl-9"
-              />
+            <div className="flex items-center gap-3">
+              {callableAgents.length > 1 && (
+                <Select
+                  value={activeTestAgentId}
+                  onChange={(e) => setTestAgentId(e.target.value)}
+                  className="w-44"
+                  aria-label="Agent for test calls"
+                >
+                  {callableAgents.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.name}
+                    </option>
+                  ))}
+                </Select>
+              )}
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-400" />
+                <Input
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Search name or number"
+                  className="w-64 pl-9"
+                />
+              </div>
             </div>
           }
         />
@@ -432,6 +620,7 @@ export function WorkspaceOpsTab({
                     <th className="px-5 py-3">Attempts</th>
                     <th className="px-5 py-3">Last call</th>
                     <th className="px-5 py-3">Next call</th>
+                    <th className="px-5 py-3 text-right">Test</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-ink-100">
@@ -468,6 +657,32 @@ export function WorkspaceOpsTab({
                           {s.note && (
                             <div className="mt-0.5 text-xs text-ink-400">{s.note}</div>
                           )}
+                        </td>
+                        <td className="px-5 py-3.5 text-right">
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            className="gap-1.5"
+                            disabled={
+                              c.is_terminal ||
+                              !c.phones[0] ||
+                              callableAgents.length === 0 ||
+                              callingId !== null
+                            }
+                            title={
+                              callableAgents.length === 0
+                                ? "No outbound agent with a Retell ID"
+                                : c.is_terminal
+                                  ? "Contact has completed the flow"
+                                  : !c.phones[0]
+                                    ? "Contact has no phone number"
+                                    : "Dial this contact now (ignores call windows)"
+                            }
+                            onClick={() => callNow(c.id)}
+                          >
+                            <Phone className="h-3.5 w-3.5" />
+                            {callingId === c.id ? "Calling…" : "Call now"}
+                          </Button>
                         </td>
                       </tr>
                     );
