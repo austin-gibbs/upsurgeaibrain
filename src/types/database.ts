@@ -329,17 +329,22 @@ export type Database = {
           contact_id: string | null
           contact_name: string | null
           crm_contact_id: string | null
+          crm_error: string | null
           dialed_at: string | null
           direction: string
           error_message: string | null
+          finalized_by: Database["public"]["Enums"]["call_finalized_by"] | null
           id: string
           in_voicemail: boolean | null
+          note_logged: boolean | null
           outcome: Database["public"]["Enums"]["call_outcome"] | null
           queued_at: string
           raw_payload: Json | null
+          recording_logged: boolean | null
           retell_call_id: string | null
           status: Database["public"]["Enums"]["call_status"]
           summary: string | null
+          tags_synced: boolean | null
           task_created: boolean
           to_number: string
           transcript: string | null
@@ -354,17 +359,22 @@ export type Database = {
           contact_id?: string | null
           contact_name?: string | null
           crm_contact_id?: string | null
+          crm_error?: string | null
           dialed_at?: string | null
           direction?: string
           error_message?: string | null
+          finalized_by?: Database["public"]["Enums"]["call_finalized_by"] | null
           id?: string
           in_voicemail?: boolean | null
+          note_logged?: boolean | null
           outcome?: Database["public"]["Enums"]["call_outcome"] | null
           queued_at?: string
           raw_payload?: Json | null
+          recording_logged?: boolean | null
           retell_call_id?: string | null
           status?: Database["public"]["Enums"]["call_status"]
           summary?: string | null
+          tags_synced?: boolean | null
           task_created?: boolean
           to_number: string
           transcript?: string | null
@@ -379,17 +389,22 @@ export type Database = {
           contact_id?: string | null
           contact_name?: string | null
           crm_contact_id?: string | null
+          crm_error?: string | null
           dialed_at?: string | null
           direction?: string
           error_message?: string | null
+          finalized_by?: Database["public"]["Enums"]["call_finalized_by"] | null
           id?: string
           in_voicemail?: boolean | null
+          note_logged?: boolean | null
           outcome?: Database["public"]["Enums"]["call_outcome"] | null
           queued_at?: string
           raw_payload?: Json | null
+          recording_logged?: boolean | null
           retell_call_id?: string | null
           status?: Database["public"]["Enums"]["call_status"]
           summary?: string | null
+          tags_synced?: boolean | null
           task_created?: boolean
           to_number?: string
           transcript?: string | null
@@ -667,6 +682,7 @@ export type Database = {
     }
     Enums: {
       agent_status: "draft" | "active" | "paused"
+      call_finalized_by: "webhook" | "reconcile"
       call_outcome:
         | "voicemail"
         | "no_answer"
@@ -810,6 +826,7 @@ export const Constants = {
   public: {
     Enums: {
       agent_status: ["draft", "active", "paused"],
+      call_finalized_by: ["webhook", "reconcile"],
       call_outcome: [
         "voicemail",
         "no_answer",

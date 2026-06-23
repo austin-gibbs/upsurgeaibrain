@@ -34,21 +34,21 @@ async function main() {
     }, 60_000);
   }
 
-  // Self-heal sweep: every 5 minutes, finalize any calls stuck in `dialing`
-  // whose outcome webhook never landed (e.g. a signature mismatch). Bounded
-  // and idempotent — reconciled calls leave `dialing` and won't be re-picked,
-  // so steady-state cost is ~0. This is the safety net that prevents a silent
-  // recurrence of recordings/notes never reaching the CRM.
+  // Self-heal sweep: every 2 minutes, finalize calls stuck in `dialing`
+  // whose outcome webhook never landed (e.g. a signature mismatch). Only
+  // touches calls dialed at least 2 minutes ago so in-flight calls are safe.
+  // Bounded and idempotent — reconciled calls leave `dialing` and won't be
+  // re-picked, so steady-state cost is ~0 when the webhook path is healthy.
   let reconcileTimer: NodeJS.Timeout | null = setInterval(async () => {
     try {
-      const summary = await reconcileStuckCalls({ olderThanMinutes: 10, limit: 50 });
+      const summary = await reconcileStuckCalls({ olderThanMinutes: 2, limit: 50 });
       if (summary.reconciled || summary.failed) {
         console.log("[reconcile] stuck-call sweep:", summary);
       }
     } catch (e) {
       console.error("[reconcile] sweep error:", e);
     }
-  }, 5 * 60_000);
+  }, 2 * 60_000);
 
   const shutdown = async () => {
     console.log("[worker] shutting down…");

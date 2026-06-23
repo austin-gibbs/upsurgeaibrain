@@ -229,6 +229,8 @@ export function WorkspaceOpsTab({
     type: "success" | "error";
     text: string;
   } | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [queuing, setQueuing] = useState(false);
 
   const { workspace, agents, contactCount, contacts, outcomeTags } = data;
 
@@ -277,6 +279,61 @@ export function WorkspaceOpsTab({
       });
     } finally {
       setPlacingTest(false);
+    }
+  }
+
+  async function queueSelected() {
+    const agentId = activeTestAgentId;
+    if (!agentId) {
+      setRunMessage({
+        type: "error",
+        text: "No outbound agent with a Retell ID is available to queue calls.",
+      });
+      return;
+    }
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    setQueuing(true);
+    setRunMessage(null);
+    try {
+      const res = await fetch(`/api/workspaces/${workspaceId}/queue-calls`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ agentId, contactIds: ids }),
+      });
+      const d = await res.json();
+      if (!res.ok) {
+        setRunMessage({ type: "error", text: d.error ?? "Failed to queue calls" });
+        return;
+      }
+      if (d.enqueued > 0) {
+        setRunMessage({
+          type: "success",
+          text: `Queued ${d.enqueued} call${d.enqueued === 1 ? "" : "s"} now, ${
+            d.enqueued === 1 ? "" : "60s apart, "
+          }starting immediately.${
+            d.capped > 0
+              ? ` ${d.capped} didn't fit before the call window closes and were skipped — re-queue them tomorrow.`
+              : ""
+          }`,
+        });
+        setSelectedIds(new Set());
+      } else {
+        setRunMessage({
+          type: "error",
+          text: d.skippedReason
+            ? `No calls queued — ${d.skippedReason}.`
+            : "No eligible contacts to queue (terminal or no phone number).",
+        });
+      }
+      onRefresh();
+    } catch (e) {
+      setRunMessage({
+        type: "error",
+        text: e instanceof Error ? e.message : "Failed to queue calls",
+      });
+    } finally {
+      setQueuing(false);
     }
   }
 
@@ -400,6 +457,34 @@ export function WorkspaceOpsTab({
           c.phones.some((p) => p.toLowerCase().includes(q))
       )
     : contacts;
+  const isSelectable = (c: ContactRow) => !c.is_terminal && Boolean(c.phones[0]);
+  const selectableFiltered = filteredContacts.filter(isSelectable);
+  const allFilteredSelected =
+    selectableFiltered.length > 0 &&
+    selectableFiltered.every((c) => selectedIds.has(c.id));
+
+  function toggleSelected(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleSelectAll() {
+    setSelectedIds((prev) => {
+      if (allFilteredSelected) {
+        const next = new Set(prev);
+        selectableFiltered.forEach((c) => next.delete(c.id));
+        return next;
+      }
+      const next = new Set(prev);
+      selectableFiltered.forEach((c) => next.add(c.id));
+      return next;
+    });
+  }
+
   const upcomingCount = contacts.filter(
     (c) => !c.is_terminal && !(maxAttempts != null && c.attempt_count >= maxAttempts)
   ).length;
@@ -623,6 +708,37 @@ export function WorkspaceOpsTab({
             finished
           </p>
         )}
+        {selectedIds.size > 0 && (
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-ink-200/50 bg-white px-4 py-3 shadow-card">
+            <span className="text-sm font-medium text-ink-700">
+              {selectedIds.size} contact{selectedIds.size === 1 ? "" : "s"} selected
+            </span>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setSelectedIds(new Set())}
+                disabled={queuing}
+              >
+                Clear
+              </Button>
+              <Button
+                size="sm"
+                className="gap-1.5"
+                disabled={queuing || callableAgents.length === 0}
+                title={
+                  callableAgents.length === 0
+                    ? "No outbound agent with a Retell ID"
+                    : "Queue the selected contacts into the call sequence now, 60s apart"
+                }
+                onClick={queueSelected}
+              >
+                <Phone className="h-3.5 w-3.5" />
+                {queuing ? "Queuing…" : "Queue calls now"}
+              </Button>
+            </div>
+          </div>
+        )}
         <Card className="overflow-hidden p-0">
           {filteredContacts.length === 0 ? (
             <div className="p-6">
@@ -641,6 +757,16 @@ export function WorkspaceOpsTab({
               <table className="w-full text-sm">
                 <thead className="sticky top-0 z-10 bg-white">
                   <tr className="border-b border-ink-100 text-left text-xs font-medium uppercase tracking-wide text-ink-400">
+                    <th className="w-10 px-5 py-3">
+                      <input
+                        type="checkbox"
+                        checked={allFilteredSelected}
+                        onChange={toggleSelectAll}
+                        disabled={selectableFiltered.length === 0}
+                        aria-label="Select all contacts"
+                        className="h-4 w-4 rounded border-ink-300 text-brand-600 focus:ring-brand-500"
+                      />
+                    </th>
                     <th className="px-5 py-3">Contact</th>
                     <th className="px-5 py-3">Attempts</th>
                     <th className="px-5 py-3">Last call</th>
@@ -656,6 +782,23 @@ export function WorkspaceOpsTab({
                     };
                     return (
                       <tr key={c.id} className="transition-colors hover:bg-ink-50/50">
+                        <td className="px-5 py-3.5">
+                          <input
+                            type="checkbox"
+                            checked={selectedIds.has(c.id)}
+                            onChange={() => toggleSelected(c.id)}
+                            disabled={!isSelectable(c)}
+                            aria-label={`Select ${c.full_name ?? "contact"}`}
+                            title={
+                              c.is_terminal
+                                ? "Contact has completed the flow"
+                                : !c.phones[0]
+                                  ? "Contact has no phone number"
+                                  : "Select to bulk-queue"
+                            }
+                            className="h-4 w-4 rounded border-ink-300 text-brand-600 focus:ring-brand-500 disabled:opacity-40"
+                          />
+                        </td>
                         <td className="px-5 py-3.5">
                           <div className="font-medium text-ink-900">
                             {c.full_name ?? "Unknown contact"}

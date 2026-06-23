@@ -19,12 +19,28 @@ import { updateMemoryAfterCall } from "./memory";
 import { applyPipelineRouting } from "./pipeline-routing";
 import { processInboundCall } from "./process-inbound";
 import { dispatchPostCallWebhook } from "@/lib/webhooks/post-call";
+import {
+  createTasksToCrm,
+  logCallToCrm,
+  summarizeCrmErrors,
+  syncTagsToCrm,
+  type FinalizedBy,
+} from "./crm-writeback";
 import type {
   Agent, AgentCallConfig, AgentMemory, AgentTaskConfig,
   Contact, OutcomeTag, Workspace,
 } from "@/types";
 
-export async function processRetellWebhook(body: any): Promise<{ ok: boolean; reason?: string }> {
+export interface ProcessRetellWebhookOptions {
+  /** Whether this run came from the live webhook or the stuck-call reconciler. */
+  finalizedBy?: FinalizedBy;
+}
+
+export async function processRetellWebhook(
+  body: any,
+  opts: ProcessRetellWebhookOptions = {}
+): Promise<{ ok: boolean; reason?: string }> {
+  const finalizedBy = opts.finalizedBy ?? "webhook";
   // Retell fires `call_ended` (no analysis) then `call_analyzed` (full).
   const event = body?.event;
   if (event && event !== "call_analyzed") return { ok: true, reason: `ignored event: ${event}` };
@@ -100,20 +116,17 @@ export async function processRetellWebhook(body: any): Promise<{ ok: boolean; re
     "",
     `Summary: ${parsed.summary ?? "(none)"}`,
   ].join("\n");
-  try {
-    await crm.logCall({
-      contactId: contact.crm_contact_id,
-      phone: call.to_number,
-      isIncoming: false,
-      note,
-      durationSeconds: parsed.durationSeconds || undefined,
-      fromNumber: parsed.fromNumber ?? undefined,
-      toNumber: call.to_number,
-      recordingUrl: parsed.recordingUrl ?? undefined,
-    });
-  } catch {
-    try { await crm.addNote(contact.crm_contact_id, note); } catch { /* non-fatal */ }
-  }
+
+  const crmFlags = await logCallToCrm({
+    crm,
+    contactId: contact.crm_contact_id,
+    phone: call.to_number,
+    note,
+    recordingUrl: parsed.recordingUrl,
+    durationSeconds: parsed.durationSeconds || undefined,
+    fromNumber: parsed.fromNumber,
+    toNumber: call.to_number,
+  });
 
   // 3. Tags.
   const reconciled = reconcileTags({
@@ -122,7 +135,7 @@ export async function processRetellWebhook(body: any): Promise<{ ok: boolean; re
     outcome,
     enrollTag: agent.enroll_tag ?? workspace.enroll_tag,
   });
-  try { await crm.setTags(contact.crm_contact_id, reconciled.tags); } catch { /* non-fatal */ }
+  await syncTagsToCrm(crm, contact.crm_contact_id, reconciled.tags, crmFlags);
 
   // 4. Task(s). assignee_crm_id may hold several comma-separated CRM user
   // ids ("1,17"); in that case we create one task per assignee so each team
@@ -136,20 +149,18 @@ export async function processRetellWebhook(body: any): Promise<{ ok: boolean; re
       .replace("{date}", today);
     const dueAt = new Date(Date.now() + taskConfig.due_offset_minutes * 60_000).toISOString();
     const assignees = parseAssignees(taskConfig.assignee_crm_id);
-    // No assignee configured → one unassigned task (prior behavior).
     const targets = assignees.length ? assignees : [null];
-    for (const assigneeId of targets) {
-      try {
-        await crm.createTask({
-          contactId: contact.crm_contact_id,
-          name,
-          type: taskConfig.task_type,
-          dueAt,
-          assigneeId,
-        });
-        taskCreated = true;
-      } catch { /* non-fatal */ }
-    }
+    taskCreated = await createTasksToCrm(
+      crm,
+      contact.crm_contact_id,
+      targets.map((assigneeId) => ({
+        name,
+        type: taskConfig.task_type,
+        dueAt,
+        assigneeId,
+      })),
+      crmFlags
+    );
   }
 
   // 4b. HighLevel post-call workflow webhook (best-effort).
@@ -222,6 +233,11 @@ export async function processRetellWebhook(body: any): Promise<{ ok: boolean; re
       crm_contact_id: contact.crm_contact_id,
       contact_name: contact.full_name,
       contact_email: contact.email,
+      finalized_by: finalizedBy,
+      note_logged: crmFlags.noteLogged,
+      recording_logged: crmFlags.recordingLogged,
+      tags_synced: crmFlags.tagsSynced,
+      crm_error: summarizeCrmErrors(crmFlags.crmErrors),
     })
     .eq("id", call.id);
 

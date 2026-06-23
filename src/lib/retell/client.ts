@@ -262,6 +262,19 @@ export function getRetellClientForAgent(
   return new RetellClient();
 }
 
+/** Collect all candidate webhook signing secrets (per-agent + env). */
+export function listWebhookSecretCandidates(extraSecrets?: string[]): string[] {
+  const candidates: string[] = [];
+  if (extraSecrets) {
+    for (const s of extraSecrets) {
+      if (s?.trim()) candidates.push(s.trim());
+    }
+  }
+  const envSecret = process.env.RETELL_WEBHOOK_SECRET?.trim();
+  if (envSecret) candidates.push(envSecret);
+  return [...new Set(candidates)];
+}
+
 /**
  * Verify a Retell webhook signature against one or more candidate secrets.
  * Evaluates every secret (per-agent first, then env) without short-circuiting
@@ -274,16 +287,7 @@ export function verifyRetellSignature(
 ): boolean {
   if (!signature) return false;
 
-  const candidates: string[] = [];
-  if (extraSecrets) {
-    for (const s of extraSecrets) {
-      if (s?.trim()) candidates.push(s.trim());
-    }
-  }
-  const envSecret = process.env.RETELL_WEBHOOK_SECRET?.trim();
-  if (envSecret) candidates.push(envSecret);
-
-  const unique = [...new Set(candidates)];
+  const unique = listWebhookSecretCandidates(extraSecrets);
   if (unique.length === 0) return false;
 
   let matched = false;

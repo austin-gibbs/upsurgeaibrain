@@ -9,7 +9,10 @@ async function main() {
   if (!retellCallId) throw new Error("usage: tsx scripts/process-call.ts <retellCallId>");
   const retell = new RetellClient();
   const call = await retell.getCall(retellCallId);
-  const result = await processRetellWebhook({ event: "call_analyzed", call });
+  const result = await processRetellWebhook(
+    { event: "call_analyzed", call },
+    { finalizedBy: "reconcile" }
+  );
   console.log("[process-call]", result);
   process.exit(0);
 }

@@ -54,6 +54,11 @@ const CHECKS = [
     column: "post_call_webhook_url",
     migration: "0008",
   },
+  { table: "calls", column: "finalized_by", migration: "0011" },
+  { table: "calls", column: "note_logged", migration: "0011" },
+  { table: "calls", column: "recording_logged", migration: "0011" },
+  { table: "calls", column: "tags_synced", migration: "0011" },
+  { table: "calls", column: "crm_error", migration: "0011" },
 ];
 
 async function verifyViaManagementApi() {

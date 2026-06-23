@@ -19,6 +19,7 @@
 import { createServiceClient } from "@/lib/supabase/server";
 import { getRetellClientForAgent } from "@/lib/retell/client";
 import { processRetellWebhook } from "./process-outcome";
+import { logReconcileHealthWarning } from "./reconcile-health";
 import type { Agent } from "@/types";
 
 export interface ReconcileOptions {
@@ -112,7 +113,10 @@ export async function reconcileStuckCalls(
         continue;
       }
 
-      const result = await processRetellWebhook({ event: "call_analyzed", call: retellCall });
+      const result = await processRetellWebhook(
+        { event: "call_analyzed", call: retellCall },
+        { finalizedBy: "reconcile" }
+      );
       if (result.ok) {
         summary.reconciled++;
       } else {
@@ -126,6 +130,10 @@ export async function reconcileStuckCalls(
         reason: e instanceof Error ? e.message : String(e),
       });
     }
+  }
+
+  if (!dryRun && summary.reconciled > 0) {
+    await logReconcileHealthWarning(supabase, summary.reconciled);
   }
 
   return summary;

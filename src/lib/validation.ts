@@ -202,6 +202,15 @@ export const runWorkspacePollSchema = z.object({
 });
 
 /**
+ * Payload for the bulk "Queue calls now" Ops action: enqueue a hand-picked set
+ * of enrolled contacts into the live call queue immediately, drip-spaced.
+ */
+export const queueCallsSchema = z.object({
+  agentId: z.string().uuid(),
+  contactIds: z.array(z.string().uuid()).min(1).max(1000),
+});
+
+/**
  * Payload for the manual test-call trigger. A chosen outbound agent either:
  *   - dials an existing enrolled contact now (contactId) via the call queue, or
  *   - dials an arbitrary number now (toNumber) inline, with no contact/queue.

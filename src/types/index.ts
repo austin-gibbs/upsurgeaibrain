@@ -23,6 +23,8 @@ export type CallOutcome =
 
 export type CallStatus = "queued" | "dialing" | "completed" | "failed";
 
+export type CallFinalizedBy = "webhook" | "reconcile";
+
 /** Outcomes that remove a contact from the call flow entirely. */
 export const TERMINAL_OUTCOMES: CallOutcome[] = [
   "appointment",
@@ -148,6 +150,11 @@ export interface Call {
   applied_tag: string | null;
   task_created: boolean;
   error_message: string | null;
+  finalized_by: CallFinalizedBy | null;
+  note_logged: boolean | null;
+  recording_logged: boolean | null;
+  tags_synced: boolean | null;
+  crm_error: string | null;
   queued_at: string;
   dialed_at: string | null;
   completed_at: string | null;
