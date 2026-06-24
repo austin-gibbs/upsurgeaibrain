@@ -212,7 +212,7 @@ export function aggregateReporting(
   // Outcome breakdown
   const outcomeMap = new Map<string, number>();
   for (const c of calls) {
-    const key = c.outcome ?? (c.inVoicemail ? "voicemail" : "unknown");
+    const key = c.outcome ?? (c.inVoicemail ? "no_answer_voicemail" : "unknown");
     outcomeMap.set(key, (outcomeMap.get(key) ?? 0) + 1);
   }
   const outcomeBreakdown: OutcomeBreakdown[] = [...outcomeMap.entries()]
