@@ -37,7 +37,7 @@ function extractOutcome(item: RetellCallListItem): string | null {
   return (
     str(custom.call_outcome) ??
     str(analysis.call_outcome) ??
-    (analysis.in_voicemail ? "voicemail" : null)
+    (analysis.in_voicemail ? "no_answer_voicemail" : null)
   );
 }
 

@@ -12,8 +12,7 @@ export type AgentStatus = "draft" | "active" | "paused";
 export type AgentDirection = "inbound" | "outbound";
 
 export type CallOutcome =
-  | "voicemail"
-  | "no_answer"
+  | "no_answer_voicemail"
   | "appointment"
   | "not_interested"
   | "dnd"

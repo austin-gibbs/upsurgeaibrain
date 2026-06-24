@@ -1,13 +1,9 @@
 "use client";
 
 import { Plus, RefreshCw, Trash2 } from "lucide-react";
+import { outcomeLabel } from "@/lib/engine/outcome";
 import { Button, Input, Label, Select } from "@/components/ui";
-import {
-  OUTCOMES,
-  type Pipeline,
-  type StageMapEntry,
-  type TaskConfig,
-} from "./types";
+import { OUTCOMES, type Pipeline, type StageMapEntry, type TaskConfig } from "./types";
 
 function ruleKey(rule: StageMapEntry, index: number): string {
   return `${rule.outcome}:${rule.call_attempt ?? "any"}:${index}`;
@@ -45,7 +41,7 @@ export function PipelineStageSettings({
     onChangeMap([
       ...map,
       {
-        outcome: "no_answer",
+        outcome: "no_answer_voicemail",
         call_attempt: null,
         pipeline_id: "",
         pipeline_stage_id: "",
@@ -118,7 +114,7 @@ export function PipelineStageSettings({
               {map.length === 0 && (
                 <p className="text-xs text-ink-500">
                   No routing rules yet. Add a rule to map outcomes (and optionally
-                  call attempts) to pipeline stages — e.g. no_answer + attempt 1 →
+                  call attempts) to pipeline stages — e.g. No Answer/Voicemail + attempt 1 →
                   Day 1.
                 </p>
               )}
@@ -141,7 +137,7 @@ export function PipelineStageSettings({
                         >
                           {OUTCOMES.map((o) => (
                             <option key={o} value={o}>
-                              {o}
+                              {outcomeLabel(o)}
                             </option>
                           ))}
                         </Select>

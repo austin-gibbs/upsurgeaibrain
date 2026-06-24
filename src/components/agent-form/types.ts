@@ -41,8 +41,7 @@ export type StageMapEntry = {
 };
 
 export const OUTCOMES = [
-  "voicemail",
-  "no_answer",
+  "no_answer_voicemail",
   "appointment",
   "not_interested",
   "dnd",

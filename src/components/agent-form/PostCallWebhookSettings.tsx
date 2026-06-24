@@ -2,6 +2,7 @@
 
 import { Input, Label, Pill } from "@/components/ui";
 import { OUTCOMES, type TaskConfig } from "./types";
+import { outcomeLabel } from "@/lib/engine/outcome";
 
 export function PostCallWebhookSettings({
   cfg,
@@ -75,7 +76,7 @@ export function PostCallWebhookSettings({
                       });
                     }}
                   >
-                    {o}
+                    {outcomeLabel(o)}
                   </Pill>
                 );
               })}

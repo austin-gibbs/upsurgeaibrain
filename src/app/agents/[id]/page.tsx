@@ -16,6 +16,8 @@ import {
   type TaskConfig,
 } from "@/components/agent-form/types";
 import { normalizeHHMM } from "@/lib/hhmm";
+import { outcomeLabel } from "@/lib/engine/outcome";
+import type { CallOutcome } from "@/types";
 import { PageShell } from "@/components/TopNav";
 import {
   Button,
@@ -676,10 +678,7 @@ export default function AgentDetailPage({
                       <StatusBadge status={c.status} />
                     </td>
                     <td className="px-5 py-3.5 text-ink-700">
-                      {c.outcome ?? "—"}
-                      {c.in_voicemail && (
-                        <span className="ml-1 text-xs text-ink-400">(vm)</span>
-                      )}
+                      {c.outcome ? outcomeLabel(c.outcome as CallOutcome) : "—"}
                     </td>
                     {!isInbound && (
                       <td className="px-5 py-3.5">

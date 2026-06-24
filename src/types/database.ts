@@ -774,8 +774,7 @@ export type Database = {
       call_finalized_by: "webhook" | "reconcile"
       call_queue_status: "pending" | "dialing" | "completed" | "failed" | "cancelled"
       call_outcome:
-        | "voicemail"
-        | "no_answer"
+        | "no_answer_voicemail"
         | "appointment"
         | "not_interested"
         | "dnd"
@@ -919,8 +918,7 @@ export const Constants = {
       call_finalized_by: ["webhook", "reconcile"],
       call_queue_status: ["pending", "dialing", "completed", "failed", "cancelled"],
       call_outcome: [
-        "voicemail",
-        "no_answer",
+        "no_answer_voicemail",
         "appointment",
         "not_interested",
         "dnd",

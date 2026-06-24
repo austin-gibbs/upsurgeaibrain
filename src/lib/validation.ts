@@ -36,8 +36,7 @@ export const retellCredentialsSchema = z.object({
 // Matches the call_outcome enum in the database so task-config outcome
 // filters are typed correctly when inserted.
 export const callOutcomeSchema = z.enum([
-  "voicemail",
-  "no_answer",
+  "no_answer_voicemail",
   "appointment",
   "not_interested",
   "dnd",

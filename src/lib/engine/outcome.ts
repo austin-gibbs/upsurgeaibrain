@@ -3,16 +3,17 @@
 //
 // Ports the production n8n "Extract Call Data" logic (verified end-to-end
 // against 20 cases) into typed code: normalize Retell's free-text outcome
-// through an alias map, apply the voicemail override, and resolve to one
-// of the 7 canonical outcomes.
+// through an alias map and resolve to one of the canonical outcomes.
+// No Answer and Voicemail are a single outcome (no_answer_voicemail).
 // =====================================================================
 import type { CallOutcome } from "@/types";
 
 const ALIAS: Record<string, CallOutcome> = {
-  noanswer: "no_answer",
-  no_answer: "no_answer",
-  voicemail: "voicemail",
-  vm: "voicemail",
+  noanswer: "no_answer_voicemail",
+  no_answer: "no_answer_voicemail",
+  no_answer_voicemail: "no_answer_voicemail",
+  voicemail: "no_answer_voicemail",
+  vm: "no_answer_voicemail",
   appointment: "appointment",
   appointment_set: "appointment",
   booked: "appointment",
@@ -39,15 +40,18 @@ export function classifyOutcome({ rawOutcome, inVoicemail }: ClassifyInput): Cal
   const co = String(rawOutcome ?? "no_answer").toLowerCase().trim();
   const norm = co.split(" ").join("_").split("-").join("_");
   let eff: CallOutcome | undefined = ALIAS[norm];
-  // Unknown free-text outcomes fall back to no_answer (safe: keeps calling).
-  if (!eff) eff = "no_answer";
-  // Voicemail override: an unanswered call detected as voicemail.
-  if (inVoicemail && (eff === "no_answer")) eff = "voicemail";
+  // Unknown free-text outcomes fall back to no_answer_voicemail (safe: keeps calling).
+  if (!eff) eff = "no_answer_voicemail";
   return eff;
 }
 
-/** Human-readable label, e.g. "interested_no_appointment" -> "Interested No Appointment". */
+const DISPLAY_LABELS: Partial<Record<CallOutcome, string>> = {
+  no_answer_voicemail: "No Answer/Voicemail",
+};
+
+/** Human-readable label for UI and CRM notes. */
 export function outcomeLabel(outcome: CallOutcome): string {
+  if (DISPLAY_LABELS[outcome]) return DISPLAY_LABELS[outcome]!;
   return outcome
     .split("_")
     .map((w) => w.charAt(0).toUpperCase() + w.slice(1))

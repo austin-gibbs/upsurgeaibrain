@@ -61,8 +61,7 @@ function contact(overrides: Partial<Contact> = {}): Contact {
 }
 
 const TAXONOMY: OutcomeTag[] = [
-  { workspace_id: "ws_1", outcome: "voicemail", tag: "upsurge-voicemail-ai", is_terminal: false },
-  { workspace_id: "ws_1", outcome: "no_answer", tag: "upsurge-noanswer-ai", is_terminal: false },
+  { workspace_id: "ws_1", outcome: "no_answer_voicemail", tag: "upsurge-noanswer-voicemail-ai", is_terminal: false },
   { workspace_id: "ws_1", outcome: "appointment", tag: "upsurge-appointment-ai", is_terminal: true },
   { workspace_id: "ws_1", outcome: "not_interested", tag: "upsurge-notinterested-ai", is_terminal: true },
   { workspace_id: "ws_1", outcome: "dnd", tag: "upsurge-dnd-ai", is_terminal: true },
@@ -84,20 +83,18 @@ describe("classifyOutcome", () => {
   });
 
   it("normalizes spaces and hyphens to underscores", () => {
-    assert.equal(classifyOutcome({ rawOutcome: "No Answer", inVoicemail: false }), "no_answer");
-    assert.equal(classifyOutcome({ rawOutcome: "  VoiceMail  ", inVoicemail: false }), "voicemail");
+    assert.equal(classifyOutcome({ rawOutcome: "No Answer", inVoicemail: false }), "no_answer_voicemail");
+    assert.equal(classifyOutcome({ rawOutcome: "  VoiceMail  ", inVoicemail: false }), "no_answer_voicemail");
   });
 
-  it("falls back to no_answer for unknown / empty outcomes (safe: keeps calling)", () => {
-    assert.equal(classifyOutcome({ rawOutcome: "gibberish", inVoicemail: false }), "no_answer");
-    assert.equal(classifyOutcome({ rawOutcome: null, inVoicemail: false }), "no_answer");
-    assert.equal(classifyOutcome({ rawOutcome: undefined, inVoicemail: false }), "no_answer");
+  it("falls back to no_answer_voicemail for unknown / empty outcomes (safe: keeps calling)", () => {
+    assert.equal(classifyOutcome({ rawOutcome: "gibberish", inVoicemail: false }), "no_answer_voicemail");
+    assert.equal(classifyOutcome({ rawOutcome: null, inVoicemail: false }), "no_answer_voicemail");
+    assert.equal(classifyOutcome({ rawOutcome: undefined, inVoicemail: false }), "no_answer_voicemail");
+    assert.equal(classifyOutcome({ rawOutcome: "gibberish", inVoicemail: true }), "no_answer_voicemail");
   });
 
-  it("applies the voicemail override only to an unanswered call", () => {
-    assert.equal(classifyOutcome({ rawOutcome: "no_answer", inVoicemail: true }), "voicemail");
-    assert.equal(classifyOutcome({ rawOutcome: "gibberish", inVoicemail: true }), "voicemail");
-    // A real positive outcome must NOT be downgraded to voicemail.
+  it("does not downgrade a real positive outcome when Retell flags voicemail", () => {
     assert.equal(classifyOutcome({ rawOutcome: "booked", inVoicemail: true }), "appointment");
   });
 });
@@ -171,24 +168,24 @@ describe("reconcileTags", () => {
     const r = reconcileTags({
       currentTags: ["VIP", enrollTag],
       taxonomy: TAXONOMY,
-      outcome: "voicemail",
+      outcome: "no_answer_voicemail",
       enrollTag,
     });
     assert.ok(r.tags.includes("VIP"));
     assert.ok(r.tags.includes(enrollTag)); // non-terminal keeps enrollment
-    assert.ok(r.tags.includes("upsurge-voicemail-ai"));
+    assert.ok(r.tags.includes("upsurge-noanswer-voicemail-ai"));
     assert.equal(r.isTerminal, false);
   });
 
   it("strips any prior AI outcome tag (no stacking)", () => {
     const r = reconcileTags({
-      currentTags: ["upsurge-noanswer-ai", enrollTag],
+      currentTags: ["upsurge-voicemail-ai", enrollTag],
       taxonomy: TAXONOMY,
-      outcome: "voicemail",
+      outcome: "no_answer_voicemail",
       enrollTag,
     });
-    assert.ok(!r.tags.includes("upsurge-noanswer-ai"));
-    assert.ok(r.tags.includes("upsurge-voicemail-ai"));
+    assert.ok(!r.tags.includes("upsurge-voicemail-ai"));
+    assert.ok(r.tags.includes("upsurge-noanswer-voicemail-ai"));
   });
 
   it("drops the enroll tag on a terminal outcome (leaves the flow)", () => {
@@ -205,8 +202,8 @@ describe("reconcileTags", () => {
   });
 
   it("is idempotent — re-running the same outcome is a no-op", () => {
-    const first = reconcileTags({ currentTags: [enrollTag], taxonomy: TAXONOMY, outcome: "voicemail", enrollTag });
-    const second = reconcileTags({ currentTags: first.tags, taxonomy: TAXONOMY, outcome: "voicemail", enrollTag });
+    const first = reconcileTags({ currentTags: [enrollTag], taxonomy: TAXONOMY, outcome: "no_answer_voicemail", enrollTag });
+    const second = reconcileTags({ currentTags: first.tags, taxonomy: TAXONOMY, outcome: "no_answer_voicemail", enrollTag });
     assert.deepEqual([...second.tags].sort(), [...first.tags].sort());
   });
 });

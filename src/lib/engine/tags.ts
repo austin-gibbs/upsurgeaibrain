@@ -22,18 +22,27 @@ export interface TagReconcileResult {
   isTerminal: boolean;
 }
 
+/** Legacy CRM tags from before voicemail + no_answer were merged. */
+const LEGACY_NO_ANSWER_VOICEMAIL_TAGS = new Set([
+  "upsurge-voicemail-ai",
+  "upsurge-noanswer-ai",
+]);
+
 export function reconcileTags(input: TagReconcileInput): TagReconcileResult {
   const { currentTags, taxonomy, outcome, enrollTag } = input;
 
   const allOutcomeTags = new Set(taxonomy.map((t) => t.tag));
   const match = taxonomy.find((t) => t.outcome === outcome);
-  const appliedTag = match?.tag ?? "upsurge-noanswer-ai";
+  const appliedTag = match?.tag ?? "upsurge-noanswer-voicemail-ai";
   const isTerminal = match?.is_terminal ?? false;
 
   // Keep everything that isn't an AI outcome tag. Drop the enroll marker only
   // when the outcome is terminal (so terminal contacts leave the flow).
   const kept = currentTags.filter((t) => {
     if (allOutcomeTags.has(t)) return false;
+    if (outcome === "no_answer_voicemail" && LEGACY_NO_ANSWER_VOICEMAIL_TAGS.has(t)) {
+      return false;
+    }
     if (isTerminal && t === enrollTag) return false;
     return true;
   });

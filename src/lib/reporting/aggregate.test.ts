@@ -41,7 +41,7 @@ describe("aggregateReporting", () => {
         direction: "inbound",
         callSuccessful: false,
         inVoicemail: true,
-        outcome: "voicemail",
+        outcome: "no_answer_voicemail",
         userSentiment: "Negative",
         cost: 0.18,
       }),

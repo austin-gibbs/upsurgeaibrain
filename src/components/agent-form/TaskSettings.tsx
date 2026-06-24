@@ -2,6 +2,7 @@
 
 import { Input, Label, Pill, Select } from "@/components/ui";
 import { OUTCOMES, type TaskConfig } from "./types";
+import { outcomeLabel } from "@/lib/engine/outcome";
 
 function NumField({
   label,
@@ -126,7 +127,7 @@ export function TaskSettings({
                       onChange({ only_outcomes: arr.length ? arr : null });
                     }}
                   >
-                    {o}
+                    {outcomeLabel(o)}
                   </Pill>
                 );
               })}
