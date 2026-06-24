@@ -91,6 +91,25 @@ export async function POST(req: NextRequest) {
       /* body not JSON — nothing more to log */
     }
     console.error(`[retell webhook] 401 invalid signature.${ctx}`);
+    // TEMP DIAGNOSTIC — safe (no secret values; only boolean digest match).
+    try {
+      const crypto = await import("crypto");
+      const m = /v=(\d+),d=(.*)/.exec(signature ?? "");
+      if (m) {
+        const poststamp = Number(m[1]);
+        const postDigest = m[2];
+        const diag = candidates.map((s, i) => {
+          const plain = crypto.createHmac("sha256", s).update(rawBody + poststamp).digest("hex");
+          const noTs = crypto.createHmac("sha256", s).update(rawBody).digest("hex");
+          return `c${i}[len${s.length}]:plain=${plain === postDigest},noTs=${noTs === postDigest}`;
+        });
+        console.error(
+          `[retell webhook DIAG] vLen=${m[1].length} tsDiffMs=${Math.abs(Date.now() - poststamp)} bodyLen=${rawBody.length} ${diag.join(" ")}`
+        );
+      }
+    } catch {
+      /* diagnostic only */
+    }
     return NextResponse.json({ error: "invalid signature" }, { status: 401 });
   }
 
