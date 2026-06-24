@@ -5,7 +5,7 @@
 // =====================================================================
 import { NextRequest, NextResponse } from "next/server";
 import {
-  getRetellWebhookSecretForAgent,
+  getRetellSignatureCandidatesForAgent,
   listWebhookSecretCandidates,
   verifyRetellSignature,
 } from "@/lib/retell/client";
@@ -30,8 +30,11 @@ async function perAgentWebhookSecrets(rawBody: string): Promise<string[]> {
       row: { retell_credentials_encrypted: string | null } | null
     ): Promise<void> {
       if (!row) return;
-      const secret = getRetellWebhookSecretForAgent(row);
-      if (secret) secrets.push(secret);
+      // Include the per-agent API key AND any dedicated webhook secret: Retell
+      // signs with the API key, so it must be a candidate or every signature 401s.
+      for (const secret of getRetellSignatureCandidatesForAgent(row)) {
+        secrets.push(secret);
+      }
     }
 
     if (retellAgentId) {

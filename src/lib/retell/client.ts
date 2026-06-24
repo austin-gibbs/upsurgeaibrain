@@ -261,6 +261,29 @@ export function getRetellWebhookSecretForAgent(
 }
 
 /**
+ * All per-agent secrets Retell might have signed a webhook with.
+ *
+ * Retell signs webhook payloads with your **API key** (`Retell.verify(body,
+ * apiKey, signature)`), so the per-agent API key is itself a valid signing
+ * secret — not just the optional `webhookSecret`. Returning both lets a single
+ * agent be verified regardless of which value Retell used.
+ */
+export function getRetellSignatureCandidatesForAgent(
+  agent: Pick<Agent, "retell_credentials_encrypted">
+): string[] {
+  if (!agent.retell_credentials_encrypted) return [];
+  try {
+    const creds = decryptJson<RetellCredentials>(agent.retell_credentials_encrypted);
+    const out: string[] = [];
+    if (creds.apiKey?.trim()) out.push(creds.apiKey.trim());
+    if (creds.webhookSecret?.trim()) out.push(creds.webhookSecret.trim());
+    return out;
+  } catch {
+    return [];
+  }
+}
+
+/**
  * Resolve a RetellClient for an agent. Uses the agent's encrypted Retell
  * API key when present; otherwise falls back to RETELL_API_KEY.
  */
@@ -288,6 +311,11 @@ export function listWebhookSecretCandidates(extraSecrets?: string[]): string[] {
   }
   const envSecret = process.env.RETELL_WEBHOOK_SECRET?.trim();
   if (envSecret) candidates.push(envSecret);
+  // Retell signs webhooks with your API key (Retell.verify(body, apiKey, sig)),
+  // so the account API key is itself a valid signing secret. Including it here
+  // means verification succeeds even when no dedicated webhook secret is set.
+  const envApiKey = process.env.RETELL_API_KEY?.trim();
+  if (envApiKey) candidates.push(envApiKey);
   return [...new Set(candidates)];
 }
 
