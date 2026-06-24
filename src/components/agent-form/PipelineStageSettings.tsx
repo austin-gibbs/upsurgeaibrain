@@ -1,5 +1,6 @@
 "use client";
 
+import { RefreshCw } from "lucide-react";
 import { Label, Select } from "@/components/ui";
 import {
   OUTCOMES,
@@ -16,6 +17,7 @@ export function PipelineStageSettings({
   error,
   onChange,
   onChangeMap,
+  onRefresh,
 }: {
   cfg: TaskConfig;
   pipelines: Pipeline[];
@@ -24,6 +26,8 @@ export function PipelineStageSettings({
   error: string | null;
   onChange: (patch: Partial<TaskConfig>) => void;
   onChangeMap: (map: StageMapEntry[]) => void;
+  /** Re-pull pipelines + stages from HighLevel (used by the Refresh button). */
+  onRefresh?: () => void;
 }) {
   function entryFor(outcome: string): StageMapEntry | undefined {
     return map.find((m) => m.outcome === outcome);
@@ -50,15 +54,29 @@ export function PipelineStageSettings({
 
   return (
     <div className="space-y-5 border-t border-ink-100 pt-5">
-      <div>
-        <h3 className="text-sm font-semibold text-ink-900">
-          Pipeline routing
-        </h3>
-        <p className="mt-1 text-xs text-ink-500">
-          Move the contact&apos;s HighLevel opportunity to a pipeline stage based
-          on the call outcome — automatically, with no HighLevel workflow to
-          build. Leave an outcome on &ldquo;No move&rdquo; to skip it.
-        </p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h3 className="text-sm font-semibold text-ink-900">
+            Pipeline routing
+          </h3>
+          <p className="mt-1 text-xs text-ink-500">
+            Move the contact&apos;s HighLevel opportunity to a pipeline stage based
+            on the call outcome — automatically, with no HighLevel workflow to
+            build. Leave an outcome on &ldquo;No move&rdquo; to skip it.
+          </p>
+        </div>
+        {onRefresh && (
+          <button
+            type="button"
+            onClick={onRefresh}
+            disabled={loading}
+            title="Re-pull pipelines & stages from HighLevel"
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-ink-200 px-3 py-1.5 text-xs font-medium text-ink-600 transition-colors hover:bg-ink-50 disabled:opacity-50"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} strokeWidth={1.75} />
+            {loading ? "Refreshing…" : "Refresh"}
+          </button>
+        )}
       </div>
 
       <label className="flex cursor-pointer items-center gap-3">

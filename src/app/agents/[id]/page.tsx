@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, Phone, Settings, KeyRound } from "lucide-react";
 import { CallSettings } from "@/components/agent-form/CallSettings";
@@ -186,33 +186,30 @@ export default function AgentDetailPage({
     }
   }, []);
 
-  // Load HighLevel pipelines (for the routing UI) once the effective CRM
-  // (agent's own or inherited from the workspace) is HighLevel with creds.
-  useEffect(() => {
+  // Pull HighLevel pipelines + stages for the routing UI. Callable on demand
+  // (the "Refresh" button) so a user can re-sync after editing pipelines or
+  // stages in HighLevel, without reloading the page. No-op unless the effective
+  // CRM (agent's own or inherited from the workspace) is HighLevel with creds.
+  const loadPipelines = useCallback(() => {
     if (effectiveCrmProvider !== "highlevel" || !hasEffectiveCrmCredentials) {
       setPipelines([]);
       return;
     }
-    let cancelled = false;
     setPipelinesLoading(true);
     setPipelinesError(null);
     fetch(`/api/agents/${params.id}/pipelines`)
       .then((r) => r.json())
       .then((d) => {
-        if (cancelled) return;
         if (d.error && !d.pipelines) setPipelinesError(d.error);
         setPipelines(d.pipelines ?? []);
       })
-      .catch((e) => {
-        if (!cancelled) setPipelinesError(e.message);
-      })
-      .finally(() => {
-        if (!cancelled) setPipelinesLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
+      .catch((e) => setPipelinesError(e.message))
+      .finally(() => setPipelinesLoading(false));
   }, [effectiveCrmProvider, hasEffectiveCrmCredentials, params.id]);
+
+  useEffect(() => {
+    loadPipelines();
+  }, [loadPipelines]);
 
   async function patch(body: Record<string, unknown>) {
     setSaving(true);
@@ -616,6 +613,7 @@ export default function AgentDetailPage({
               error={pipelinesError}
               onChange={(p) => setTaskCfg((c) => ({ ...c, ...p }))}
               onChangeMap={setStageMap}
+              onRefresh={loadPipelines}
             />
           )}
           <Button variant="secondary" disabled={saving} onClick={saveTaskSettings}>
