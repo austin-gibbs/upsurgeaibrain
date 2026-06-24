@@ -94,22 +94,39 @@ export async function POST(req: NextRequest) {
       /* body not JSON — nothing more to log */
     }
     console.error(`[retell webhook] 401 invalid signature.${ctx}`);
-    // TEMP DIAGNOSTIC — safe (no secret values; only boolean digest match).
+    // TEMP DIAGNOSTIC — store real signature + per-candidate digest comparison
+    // to a debug table (Vercel CLI logs are unreliable). Removed after fix.
     try {
       const crypto = await import("crypto");
       const m = /v=(\d+),d=(.*)/.exec(signature ?? "");
+      const parsed = JSON.parse(rawBody) as {
+        event?: string;
+        call?: { call_id?: string };
+      };
+      let tsDiff: number | null = null;
+      let candidateResults: unknown = null;
       if (m) {
         const poststamp = Number(m[1]);
         const postDigest = m[2];
-        const diag = candidates.map((s, i) => {
-          const plain = crypto.createHmac("sha256", s).update(rawBody + poststamp).digest("hex");
-          const noTs = crypto.createHmac("sha256", s).update(rawBody).digest("hex");
-          return `c${i}[len${s.length}]:plain=${plain === postDigest},noTs=${noTs === postDigest}`;
-        });
-        console.error(
-          `[retell webhook DIAG] vLen=${m[1].length} tsDiffMs=${Math.abs(Date.now() - poststamp)} bodyLen=${rawBody.length} ${diag.join(" ")}`
-        );
+        tsDiff = Math.abs(Date.now() - poststamp);
+        candidateResults = candidates.map((s, i) => ({
+          idx: i,
+          secretLen: s.length,
+          plainMatch:
+            crypto.createHmac("sha256", s).update(rawBody + poststamp).digest("hex") === postDigest,
+          noTsMatch: crypto.createHmac("sha256", s).update(rawBody).digest("hex") === postDigest,
+        }));
       }
+      const supabase = createServiceClient() as any;
+      await supabase.from("webhook_debug").insert({
+        event: parsed?.event ?? null,
+        retell_call_id: parsed?.call?.call_id ?? null,
+        signature,
+        raw_body: rawBody,
+        ts_diff_ms: tsDiff,
+        body_len: rawBody.length,
+        candidate_results: candidateResults,
+      });
     } catch {
       /* diagnostic only */
     }
