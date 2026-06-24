@@ -22,6 +22,13 @@ export interface CreatePhoneCallInput {
   dynamicVariables?: Record<string, string>;
   /** Echoed back on the webhook so we can correlate to our call row. */
   metadata?: Record<string, string>;
+  /**
+   * Per-call webhook URL. Bound to THIS call so call_started/ended/analyzed
+   * are delivered here regardless of agent/account-level config. Required for
+   * override_agent_id calls, which otherwise inherit no webhook URL and so
+   * never push call_analyzed (outcomes would only land via the reconcile sweep).
+   */
+  webhookUrl?: string;
 }
 
 export interface CreatePhoneCallResult {
@@ -152,6 +159,7 @@ export class RetellClient {
         override_agent_id: input.agentId,
         retell_llm_dynamic_variables: input.dynamicVariables ?? {},
         metadata: input.metadata ?? {},
+        ...(input.webhookUrl ? { webhook_url: input.webhookUrl } : {}),
       }),
       timeoutMs: CREATE_CALL_TIMEOUT_MS,
     });

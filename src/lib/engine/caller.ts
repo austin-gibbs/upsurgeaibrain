@@ -22,6 +22,17 @@ import type { Agent, AgentMemory, Contact, Workspace } from "@/types";
  * and BEFORE any Retell call is created, a dial can never be placed outside the
  * window regardless of which caller invoked placeCall (worker, script, manual).
  */
+/**
+ * Public URL Retell should POST call events to. Bound per-call so dials placed
+ * with override_agent_id (which carry no agent webhook) still deliver
+ * call_analyzed in real time. Falls back to the production domain so a worker
+ * missing NEXT_PUBLIC_APP_URL still points somewhere reachable.
+ */
+function appRetellWebhookUrl(): string {
+  const base = (process.env.NEXT_PUBLIC_APP_URL || "").trim() || "https://upsurgeprosai.com";
+  return `${base.replace(/\/+$/, "")}/api/webhooks/retell`;
+}
+
 export class OutsideCallWindowError extends Error {
   readonly deferMs: number;
   readonly reason: string;
@@ -192,6 +203,7 @@ export async function placeCall(job: CallJob): Promise<{ callId: string; retellC
     agentId: agent.retell_agent_id,
     dynamicVariables,
     metadata: { call_id: call.id, workspace_id: workspace.id, agent_id: agent.id },
+    webhookUrl: appRetellWebhookUrl(),
   });
 
   const today = todayInTz(workspace.timezone);
@@ -296,6 +308,7 @@ export async function placeTestCall(params: {
       agent_id: agent.id,
       test_call: "true",
     },
+    webhookUrl: appRetellWebhookUrl(),
   });
 
   await supabase
