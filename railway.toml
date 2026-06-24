@@ -1,0 +1,19 @@
+# Railway worker service — runs the UpSurge engine 24/7, separate from Vercel.
+#
+# Vercel continues to host the Next.js app (UI + API + Retell webhook).
+# This service runs worker/index.ts: poll worker, call worker, scheduler,
+# reconcile + queue self-heal sweeps, and a /health endpoint.
+#
+# Setup: Railway -> New Service -> deploy from the GitHub repo, then add the
+# env vars listed in docs/DEPLOY_WORKER.md. Keep USE_EXTERNAL_CRON unset/false
+# so the worker runs its own 60s scheduler tick.
+
+[build]
+builder = "NIXPACKS"
+
+[deploy]
+startCommand = "npm run worker:prod"
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10
+healthcheckPath = "/health"
+healthcheckTimeout = 30

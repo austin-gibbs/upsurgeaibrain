@@ -13,14 +13,30 @@ import type {
   CrmUser,
   CreateTaskInput,
   HighLevelCredentials,
+  HighLevelReauthFlagger,
   HighLevelTokenPersistor,
   LogCallInput,
   MoveStageInput,
 } from "./types";
-import { refreshHighLevelToken } from "./highlevel-oauth";
+import {
+  refreshHighLevelToken,
+  HighLevelReauthRequiredError,
+  type HighLevelTokens,
+} from "./highlevel-oauth";
+import { fetchWithTimeout, parseJsonResponse, retryAfterMs, sleep } from "@/lib/http";
 
 const BASE = "https://services.leadconnectorhq.com";
 const API_VERSION = "2021-07-28";
+const MAX_429_RETRIES = 2;
+
+// Cross-instance refresh serialization. A NEW adapter is constructed per job
+// (getCrmAdapterForAgent), so per-instance dedupe is not enough: under worker
+// concurrency many jobs for the same location would refresh simultaneously,
+// and HighLevel ROTATES the refresh token — the first refresh invalidates the
+// token the others are about to use, silently de-authing the location. Keyed by
+// locationId, this shares one in-flight refresh across every adapter instance
+// in the process.
+const refreshLocks = new Map<string, Promise<HighLevelTokens>>();
 
 export class HighLevelAdapter implements CrmAdapter {
   readonly provider = "highlevel" as const;
@@ -29,53 +45,86 @@ export class HighLevelAdapter implements CrmAdapter {
   private refreshToken?: string;
   private expiresAt?: number;
   private onTokensRefreshed?: HighLevelTokenPersistor;
-  /** De-dupes concurrent refreshes within one adapter instance. */
-  private refreshing: Promise<void> | null = null;
+  private onReauthRequired?: HighLevelReauthFlagger;
 
   constructor(
     creds: HighLevelCredentials,
-    onTokensRefreshed?: HighLevelTokenPersistor
+    onTokensRefreshed?: HighLevelTokenPersistor,
+    onReauthRequired?: HighLevelReauthFlagger
   ) {
     this.token = creds.accessToken;
     this.locationId = creds.locationId;
     this.refreshToken = creds.refreshToken;
     this.expiresAt = creds.expiresAt;
     this.onTokensRefreshed = onTokensRefreshed;
+    this.onReauthRequired = onReauthRequired;
   }
 
-  /** Refresh the access token and persist the rotated pair. Idempotent under
-   *  concurrency — callers share one in-flight refresh. */
+  /** Refresh the access token and persist the rotated pair. Serialized across
+   *  ALL adapter instances in the process via a locationId-keyed lock, so the
+   *  rotating refresh token is never used concurrently (which would de-auth). */
   private async refreshAccessToken(): Promise<void> {
     if (!this.refreshToken) {
       throw new Error(
         "HighLevel access token expired and no refresh token is stored — reconnect the location via OAuth."
       );
     }
-    if (this.refreshing) return this.refreshing;
+
+    // If another adapter instance is already refreshing this location, await it
+    // and adopt its result rather than firing a second (token-invalidating) call.
+    const inflight = refreshLocks.get(this.locationId);
+    if (inflight) {
+      this.adoptTokens(await this.awaitRefresh(inflight));
+      return;
+    }
+
     const refreshToken = this.refreshToken;
-    this.refreshing = (async () => {
-      const tokens = await refreshHighLevelToken(refreshToken, this.locationId);
-      this.token = tokens.accessToken;
-      this.refreshToken = tokens.refreshToken || this.refreshToken;
-      this.expiresAt = tokens.expiresAt;
-      if (this.onTokensRefreshed) {
-        // Persistence is best-effort: the in-memory token is still valid for
-        // this run even if the write-back fails.
+    const locationId = this.locationId;
+    const promise = refreshHighLevelToken(refreshToken, locationId).finally(() => {
+      refreshLocks.delete(locationId);
+    });
+    refreshLocks.set(locationId, promise);
+
+    const tokens = await this.awaitRefresh(promise);
+    this.adoptTokens(tokens);
+
+    if (this.onTokensRefreshed) {
+      // Persistence is best-effort: the in-memory token is still valid for this
+      // run even if the write-back fails.
+      try {
+        await this.onTokensRefreshed({
+          accessToken: this.token,
+          locationId: this.locationId,
+          refreshToken: this.refreshToken,
+          expiresAt: this.expiresAt,
+        });
+      } catch {
+        /* non-fatal */
+      }
+    }
+  }
+
+  private adoptTokens(tokens: HighLevelTokens): void {
+    this.token = tokens.accessToken;
+    this.refreshToken = tokens.refreshToken || this.refreshToken;
+    this.expiresAt = tokens.expiresAt;
+  }
+
+  /** Await a refresh and, if the refresh token is dead, fire the reauth flag
+   *  (best-effort) before rethrowing so the caller can stop retrying blindly. */
+  private async awaitRefresh(p: Promise<HighLevelTokens>): Promise<HighLevelTokens> {
+    try {
+      return await p;
+    } catch (e) {
+      if (e instanceof HighLevelReauthRequiredError && this.onReauthRequired) {
         try {
-          await this.onTokensRefreshed({
-            accessToken: this.token,
-            locationId: this.locationId,
-            refreshToken: this.refreshToken,
-            expiresAt: this.expiresAt,
-          });
+          await this.onReauthRequired(e.message);
         } catch {
-          /* non-fatal */
+          /* best-effort */
         }
       }
-    })().finally(() => {
-      this.refreshing = null;
-    });
-    return this.refreshing;
+      throw e;
+    }
   }
 
   private async request<T>(
@@ -92,7 +141,7 @@ export class HighLevelAdapter implements CrmAdapter {
       await this.refreshAccessToken();
     }
 
-    const res = await fetch(`${BASE}${path}`, {
+    let res = await fetchWithTimeout(`${BASE}${path}`, {
       ...init,
       headers: {
         Authorization: `Bearer ${this.token}`,
@@ -109,11 +158,26 @@ export class HighLevelAdapter implements CrmAdapter {
       return this.request<T>(path, init, true);
     }
 
+    // Honor rate limiting with a bounded Retry-After wait, then retry once.
+    if (res.status === 429 && !retried) {
+      await sleep(retryAfterMs(res.headers.get("retry-after")));
+      res = await fetchWithTimeout(`${BASE}${path}`, {
+        ...init,
+        headers: {
+          Authorization: `Bearer ${this.token}`,
+          Version: API_VERSION,
+          "Content-Type": "application/json",
+          Accept: "application/json",
+          ...(init.headers ?? {}),
+        },
+      });
+    }
+
     if (!res.ok) {
       const body = await res.text();
       throw new Error(`HighLevel ${init.method ?? "GET"} ${path} -> ${res.status}: ${body}`);
     }
-    return (res.status === 204 ? (undefined as T) : ((await res.json()) as T));
+    return parseJsonResponse<T>(res, `HighLevel ${init.method ?? "GET"} ${path}`);
   }
 
   private mapContact(c: any): CrmContact {

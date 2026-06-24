@@ -171,6 +171,78 @@ effectively never runs. **Fix:** commit an ESLint config and a CI workflow
 
 ---
 
+## Remediation status — applied 2026-06-23 (code + DB)
+
+Implemented in this pass (IDE language-server clean on every changed file; run
+`npm run typecheck` + `npm test` locally to confirm — the in-session shell was
+unavailable).
+
+**Critical — all fixed**
+- **C1 done.** Atomic outcome-processing claim. New `calls.outcome_claimed_at`
+  lease column (migration `0015`, applied to prod DB). `process-outcome.ts` now
+  does a leased compare-and-set (`UPDATE … WHERE id=? AND status<>'completed'
+  AND (outcome_claimed_at IS NULL OR < now-5m)`) and bails if it didn't win the
+  claim. Self-heals after 5 min if a processor dies. This also resolves **M4**
+  (duplicate note/task on re-fire) since a second run can't pass the claim.
+- **C2 done.** New `src/lib/http.ts` (`fetchWithTimeout` + `parseJsonResponse`).
+  Every CRM/Retell/OAuth fetch now has a hard timeout (15s reads, 30s
+  create-call) so stalled sockets can't exhaust worker slots. Also closes **M8**
+  (loud status+snippet on non-JSON 200s).
+- **C3 done.** HighLevel refresh is now serialized **across the process** via a
+  `locationId`-keyed lock map (not just per-instance), so concurrent jobs can't
+  each spend the rotating refresh token and de-auth the location.
+
+**High**
+- **H1** already satisfied — `evaluateDialWindow` is the authoritative guard
+  inside `placeCall` (the audit text was stale).
+- **H2 done.** `placeCall` reuses a leftover `queued` row for the same
+  (agent, contact, attempt) instead of inserting a new one.
+- **H3 done (safe variant).** On a terminal outcome we always stop calling
+  locally (prevents re-dialing a DND/declined contact even if the CRM write
+  failed) and now log + persist a loud divergence warning when the tag sync
+  failed, for manual CRM reconcile. (The literal "don't mark terminal" fix was
+  rejected — it would re-dial DND contacts.)
+- **H4 partial.** `HighLevelReauthRequiredError` is now thrown on `invalid_grant`
+  so the engine can distinguish a dead refresh token from a transient error.
+  Surfacing `crm_status='needs_reauth'` in the UI is still TODO (needs a column +
+  UI badge).
+- **H5 done.** FUB + HighLevel adapters honor `Retry-After` on 429 with bounded
+  backoff before surfacing to BullMQ.
+- **H6 done.** OAuth `state` now binds `userId`; the callback rejects a state
+  minted for a different user.
+- **H7 partial.** `.github/workflows/ci.yml` runs typecheck + test + build on
+  push/PR to `main`. ESLint config intentionally deferred — adding the deps would
+  desync `package-lock.json` (can't regenerate it in-session); add locally with
+  `npm i -D eslint eslint-config-next && echo '{"extends":"next/core-web-vitals"}' > .eslintrc.json`.
+
+**Medium / Low**
+- **M1 done.** Deleted `api/cron/apply-migration-0007/route.ts`.
+- **M2** — money-logic tests already exist (`engine.test.ts`); added cases for the
+  L4 safety net and a new `http.test.ts` for `retryAfterMs`.
+- **M3 done.** FUB pagination now driven by `_metadata.next` / `total`.
+- **M5 done.** Unknown Retell outcomes log a warning before the safe fallback.
+- **M6** — verified correct by existing `nextEligibleDate` tests; no change.
+- **L1 done** (real-dial idempotency in `placeCall`). **L2 done** (timing-safe
+  `bearerMatches` in `src/lib/secure.ts`, used by the cron auth). **L4 done**
+  (intrinsic-terminal net for dnd/not_interested/appointment when taxonomy is
+  missing). **L5 done** (`.nvmrc` = 22).
+
+**Database (Supabase, applied to prod)**
+- Migration `0016`: pinned `search_path` on `seed_default_outcome_tags` +
+  `set_updated_at` (clears advisor 0011); revoked PUBLIC/anon/authenticated
+  EXECUTE on `handle_new_user()` (clears advisors 0028/0029 for it).
+- Left executable for `authenticated`: `user_org_ids` / `user_workspace_ids` —
+  the RLS policies call them; they return only the caller's own ids. Accepted WARN.
+
+**Still open (not code — needs you / ops)**
+- Enable Auth "leaked password protection" in the Supabase dashboard (advisor).
+- H4 UI reconnect badge; M7 `assertCanAccess()` helper refactor; L3 confirm
+  Retell concurrent-call cap vs worker `concurrency`.
+- **Phase 2 ops** (unchanged): provision Redis, set `REDIS_URL` on Vercel +
+  Railway, deploy worker, parallel cutover. See `docs/DEPLOY_WORKER.md`.
+
+---
+
 ## Recommended pre-cutover order
 1. **C1** — atomically claim the call row (stops live-CRM double-writes).
 2. **C2** — add fetch timeouts everywhere (stops worker wedging).

@@ -37,6 +37,11 @@ export interface ProcessRetellWebhookOptions {
   finalizedBy?: FinalizedBy;
 }
 
+// How long a processing claim is held before another run may re-claim a call
+// whose previous processor apparently died mid-flight. Long enough to cover the
+// slowest CRM writeback, short enough that a real crash recovers quickly.
+const CLAIM_LEASE_MS = 5 * 60_000;
+
 export async function processRetellWebhook(
   body: any,
   opts: ProcessRetellWebhookOptions = {}
@@ -65,6 +70,24 @@ export async function processRetellWebhook(
     .maybeSingle<any>();
   if (!call) return { ok: false, reason: "no matching call row" };
   if (call.status === "completed") return { ok: true, reason: "already processed" };
+
+  // Atomically CLAIM this call before doing any side effects. Retell re-sends
+  // `call_analyzed`, and the stuck-call reconciler is a second caller — without
+  // this, two concurrent runs both pass the check above and double-write to the
+  // client's CRM (duplicate note/tag/task, cadence advanced twice). The claim is
+  // a time-leased compare-and-set: succeed only if unclaimed or the prior claim
+  // is older than the lease (so a crash mid-processing self-heals on retry).
+  const claimThreshold = new Date(Date.now() - CLAIM_LEASE_MS).toISOString();
+  const { data: claimed } = await supabase
+    .from("calls")
+    .update({ outcome_claimed_at: new Date().toISOString() })
+    .eq("id", call.id)
+    .neq("status", "completed")
+    .or(`outcome_claimed_at.is.null,outcome_claimed_at.lt.${claimThreshold}`)
+    .select("id");
+  if (!claimed || claimed.length === 0) {
+    return { ok: true, reason: "already being processed" };
+  }
 
   // Contact-less outbound rows are manual test calls (placed via placeTestCall).
   // Persist the outcome/transcript for visibility but skip all CRM, cadence, and
@@ -137,6 +160,19 @@ export async function processRetellWebhook(
     enrollTag: agent.enroll_tag ?? workspace.enroll_tag,
   });
   await syncTagsToCrm(crm, contact.crm_contact_id, reconciled.tags, crmFlags);
+
+  // Parity guard: on a TERMINAL outcome we always stop calling locally (below),
+  // which is the safe direction — it prevents re-dialing someone who asked for
+  // DND / declined even if the CRM write failed. But if the tag sync failed, the
+  // enroll tag was NOT removed in the CRM, so the CRM and our state have
+  // diverged. Make that loud and durable so an operator can reconcile the CRM
+  // rather than it failing silently. (crm_error is also persisted on the row.)
+  if (reconciled.isTerminal && !crmFlags.tagsSynced) {
+    console.error(
+      `[process-outcome] TERMINAL outcome ${outcome} for contact ${contact.id} ` +
+        `(crm ${contact.crm_contact_id}) but tag sync FAILED — enroll tag may remain in CRM; manual reconcile needed.`
+    );
+  }
 
   // 4. Task(s). assignee_crm_id may hold several comma-separated CRM user
   // ids ("1,17"); in that case we create one task per assignee so each team

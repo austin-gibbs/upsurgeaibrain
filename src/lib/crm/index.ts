@@ -9,6 +9,7 @@ import type {
   CrmAdapter,
   FubCredentials,
   HighLevelCredentials,
+  HighLevelReauthFlagger,
   HighLevelTokenPersistor,
 } from "./types";
 import { FollowUpBossAdapter } from "./followupboss";
@@ -20,7 +21,8 @@ export * from "./types";
  * Build a persistor that writes a HighLevel adapter's freshly-rotated tokens
  * back into the encrypted `crm_credentials_encrypted` column of the row the
  * adapter was loaded from. Without this, a refreshed token would be lost at
- * the end of the request and every run would burn a refresh.
+ * the end of the request and every run would burn a refresh. A successful
+ * refresh also clears any stale needs_reauth flag.
  */
 function persistHighLevelTokens(
   table: "agents" | "workspaces",
@@ -30,7 +32,29 @@ function persistHighLevelTokens(
     const supabase = createServiceClient();
     await supabase
       .from(table)
-      .update({ crm_credentials_encrypted: encryptJson(creds) })
+      .update({
+        crm_credentials_encrypted: encryptJson(creds),
+        crm_status: "connected",
+        crm_status_detail: null,
+      })
+      .eq("id", id);
+  };
+}
+
+/**
+ * Flag a connection as needing re-authorization. Called when the refresh token
+ * is dead, so the UI can prompt the operator to reconnect instead of the engine
+ * failing every call for that location silently.
+ */
+function flagHighLevelReauth(
+  table: "agents" | "workspaces",
+  id: string
+): HighLevelReauthFlagger {
+  return async (detail: string) => {
+    const supabase = createServiceClient();
+    await supabase
+      .from(table)
+      .update({ crm_status: "needs_reauth", crm_status_detail: detail.slice(0, 500) })
       .eq("id", id);
   };
 }
@@ -46,11 +70,10 @@ export function getCrmAdapterForAgent(agent: Agent, workspace: Workspace): CrmAd
     const creds = decryptJson<FubCredentials | HighLevelCredentials>(
       agent.crm_credentials_encrypted
     );
-    const persist =
-      agent.crm_provider === "highlevel"
-        ? persistHighLevelTokens("agents", agent.id)
-        : undefined;
-    return buildAdapter(agent.crm_provider, creds, persist);
+    const isHighLevel = agent.crm_provider === "highlevel";
+    const persist = isHighLevel ? persistHighLevelTokens("agents", agent.id) : undefined;
+    const flagReauth = isHighLevel ? flagHighLevelReauth("agents", agent.id) : undefined;
+    return buildAdapter(agent.crm_provider, creds, persist, flagReauth);
   }
   return getCrmAdapter(workspace);
 }
@@ -69,7 +92,8 @@ export function getCrmAdapter(workspace: Workspace): CrmAdapter {
     case "highlevel":
       return new HighLevelAdapter(
         creds as HighLevelCredentials,
-        persistHighLevelTokens("workspaces", workspace.id)
+        persistHighLevelTokens("workspaces", workspace.id),
+        flagHighLevelReauth("workspaces", workspace.id)
       );
     default:
       throw new Error(`Unsupported CRM provider: ${workspace.crm_provider}`);
@@ -80,9 +104,10 @@ export function getCrmAdapter(workspace: Workspace): CrmAdapter {
 export function buildAdapter(
   provider: Workspace["crm_provider"],
   creds: FubCredentials | HighLevelCredentials,
-  onTokensRefreshed?: HighLevelTokenPersistor
+  onTokensRefreshed?: HighLevelTokenPersistor,
+  onReauthRequired?: HighLevelReauthFlagger
 ): CrmAdapter {
   return provider === "followupboss"
     ? new FollowUpBossAdapter(creds as FubCredentials)
-    : new HighLevelAdapter(creds as HighLevelCredentials, onTokensRefreshed);
+    : new HighLevelAdapter(creds as HighLevelCredentials, onTokensRefreshed, onReauthRequired);
 }

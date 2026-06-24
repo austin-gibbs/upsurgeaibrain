@@ -28,13 +28,32 @@ const LEGACY_NO_ANSWER_VOICEMAIL_TAGS = new Set([
   "upsurge-noanswer-ai",
 ]);
 
+/**
+ * Outcomes that are terminal by definition (the contact leaves the flow).
+ * Used as a safety net when the workspace taxonomy is missing a row: a `dnd` or
+ * `not_interested` must NEVER keep getting dialed just because someone forgot to
+ * seed a tag — that's a compliance hazard.
+ */
+const INTRINSIC_TERMINAL: ReadonlySet<CallOutcome> = new Set([
+  "appointment",
+  "not_interested",
+  "dnd",
+]);
+
 export function reconcileTags(input: TagReconcileInput): TagReconcileResult {
   const { currentTags, taxonomy, outcome, enrollTag } = input;
 
   const allOutcomeTags = new Set(taxonomy.map((t) => t.tag));
   const match = taxonomy.find((t) => t.outcome === outcome);
+  if (!match) {
+    // Don't silently mislabel: a missing taxonomy row means the wrong tag (and,
+    // without the intrinsic-terminal net below, the wrong terminal decision).
+    console.warn(
+      `[tags] no workspace taxonomy tag for outcome "${outcome}" — using fallback. Seed a workspace_outcome_tags row for this outcome.`
+    );
+  }
   const appliedTag = match?.tag ?? "upsurge-noanswer-voicemail-ai";
-  const isTerminal = match?.is_terminal ?? false;
+  const isTerminal = match?.is_terminal ?? INTRINSIC_TERMINAL.has(outcome);
 
   // Keep everything that isn't an AI outcome tag. Drop the enroll marker only
   // when the outcome is terminal (so terminal contacts leave the flow).

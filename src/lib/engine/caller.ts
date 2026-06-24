@@ -86,8 +86,16 @@ export async function placeCall(job: CallJob): Promise<{ callId: string; retellC
   const { data: contact } = await supabase
     .from("contacts").select("*").eq("id", job.contactId).single<Contact>();
   if (!contact) throw new Error(`contact ${job.contactId} not found`);
+  if (contact.workspace_id !== agent.workspace_id) {
+    throw new Error(
+      `contact ${job.contactId} belongs to workspace ${contact.workspace_id}, not agent workspace ${agent.workspace_id}`
+    );
+  }
   if (contact.is_terminal) {
     throw new Error(`contact ${job.contactId} is terminal — skipping`);
+  }
+  if (!job.toNumber?.trim()) {
+    throw new Error(`contact ${job.contactId} has no dial number`);
   }
 
   const { data: workspace } = await supabase
@@ -116,24 +124,57 @@ export async function placeCall(job: CallJob): Promise<{ callId: string; retellC
     }
   }
 
+  // Idempotency: a BullMQ retry (attempts: 3) re-runs placeCall with the same
+  // attempt number. If this (agent, contact, attempt) already placed a real
+  // Retell call, do NOT place another — that would dial the person twice and
+  // cost real money. Return the existing dial instead.
+  const { data: alreadyDialed } = await supabase
+    .from("calls")
+    .select("id, retell_call_id")
+    .eq("agent_id", agent.id)
+    .eq("contact_id", contact.id)
+    .eq("attempt_number", job.attemptNumber)
+    .in("status", ["dialing", "completed"])
+    .not("retell_call_id", "is", null)
+    .maybeSingle<{ id: string; retell_call_id: string | null }>();
+  if (alreadyDialed?.retell_call_id) {
+    return { callId: alreadyDialed.id, retellCallId: alreadyDialed.retell_call_id };
+  }
+
   const { data: memory } = await supabase
     .from("agent_memory").select("*")
     .eq("agent_id", job.agentId).eq("contact_id", job.contactId)
     .maybeSingle<AgentMemory>();
 
   // Record the call row first so the webhook can correlate even on a race.
-  const { data: call } = await supabase
+  // Reuse a leftover `queued` row from a prior failed attempt (same agent +
+  // contact + attempt) instead of inserting a new one, so retries don't leave
+  // orphan `queued` rows behind.
+  const { data: orphanQueued } = await supabase
     .from("calls")
-    .insert({
-      workspace_id: workspace.id,
-      agent_id: agent.id,
-      contact_id: contact.id,
-      attempt_number: job.attemptNumber,
-      to_number: job.toNumber,
-      status: "queued",
-    })
     .select("id")
-    .single<{ id: string }>();
+    .eq("agent_id", agent.id)
+    .eq("contact_id", contact.id)
+    .eq("attempt_number", job.attemptNumber)
+    .eq("status", "queued")
+    .maybeSingle<{ id: string }>();
+
+  let call: { id: string } | null = orphanQueued ?? null;
+  if (!call) {
+    const inserted = await supabase
+      .from("calls")
+      .insert({
+        workspace_id: workspace.id,
+        agent_id: agent.id,
+        contact_id: contact.id,
+        attempt_number: job.attemptNumber,
+        to_number: job.toNumber,
+        status: "queued",
+      })
+      .select("id")
+      .single<{ id: string }>();
+    call = inserted.data;
+  }
   if (!call) throw new Error("failed to create call row");
 
   // Inject V2 memory + identity into the Retell prompt.

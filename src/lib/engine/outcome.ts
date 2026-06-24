@@ -40,8 +40,18 @@ export function classifyOutcome({ rawOutcome, inVoicemail }: ClassifyInput): Cal
   const co = String(rawOutcome ?? "no_answer").toLowerCase().trim();
   const norm = co.split(" ").join("_").split("-").join("_");
   let eff: CallOutcome | undefined = ALIAS[norm];
-  // Unknown free-text outcomes fall back to no_answer_voicemail (safe: keeps calling).
-  if (!eff) eff = "no_answer_voicemail";
+  // Unknown free-text outcomes fall back to no_answer_voicemail (safe: keeps
+  // calling). Log the fallthrough so a NEW Retell outcome string isn't silently
+  // swallowed — otherwise a real "appointment"-class result could be miscounted
+  // as no-answer and the contact would keep getting dialed.
+  if (!eff) {
+    if (norm && norm !== "no_answer") {
+      console.warn(
+        `[outcome] unrecognized Retell outcome "${rawOutcome}" (normalized "${norm}") — defaulting to no_answer_voicemail. Add it to the ALIAS map if it's a real outcome.`
+      );
+    }
+    eff = "no_answer_voicemail";
+  }
   return eff;
 }
 

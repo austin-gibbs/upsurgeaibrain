@@ -57,6 +57,9 @@ export interface Workspace {
   timezone: string;
   crm_provider: CrmProvider;
   crm_credentials_encrypted: string | null;
+  /** CRM connection health. null/"connected" = ok; "needs_reauth" = reconnect. */
+  crm_status: string | null;
+  crm_status_detail: string | null;
   /** Base URL for CRM contact pages, e.g. https://nilpatel.followupboss.com */
   crm_account_url: string | null;
   enroll_tag: string;
@@ -87,6 +90,9 @@ export interface Agent {
   /** Per-agent CRM. When null the agent inherits the workspace CRM. */
   crm_provider: CrmProvider | null;
   crm_credentials_encrypted: string | null;
+  /** CRM connection health. null/"connected" = ok; "needs_reauth" = reconnect. */
+  crm_status: string | null;
+  crm_status_detail: string | null;
   /** Encrypted Retell creds ({ apiKey, webhookSecret? }); set for inbound agents. */
   retell_credentials_encrypted: string | null;
   status: AgentStatus;

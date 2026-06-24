@@ -206,6 +206,22 @@ describe("reconcileTags", () => {
     const second = reconcileTags({ currentTags: first.tags, taxonomy: TAXONOMY, outcome: "no_answer_voicemail", enrollTag });
     assert.deepEqual([...second.tags].sort(), [...first.tags].sort());
   });
+
+  it("treats dnd/not_interested/appointment as terminal even with NO taxonomy row (safety net)", () => {
+    // Missing taxonomy must never leave a DND/declined contact in the flow.
+    for (const outcome of ["dnd", "not_interested", "appointment"] as const) {
+      const r = reconcileTags({ currentTags: [enrollTag, "VIP"], taxonomy: [], outcome, enrollTag });
+      assert.equal(r.isTerminal, true, `${outcome} should be terminal without taxonomy`);
+      assert.ok(!r.tags.includes(enrollTag), `${outcome} should drop the enroll tag`);
+      assert.ok(r.tags.includes("VIP"));
+    }
+  });
+
+  it("keeps a non-terminal outcome non-terminal when taxonomy is missing", () => {
+    const r = reconcileTags({ currentTags: [enrollTag], taxonomy: [], outcome: "no_answer_voicemail", enrollTag });
+    assert.equal(r.isTerminal, false);
+    assert.ok(r.tags.includes(enrollTag));
+  });
 });
 
 // ---------------------------------------------------------------------

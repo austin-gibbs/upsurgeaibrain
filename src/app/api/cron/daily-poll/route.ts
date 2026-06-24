@@ -6,15 +6,14 @@
 // =====================================================================
 import { NextRequest, NextResponse } from "next/server";
 import { tickScheduler } from "@/lib/engine/scheduler";
+import { bearerMatches } from "@/lib/secure";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 function authorized(req: NextRequest): boolean {
-  const secret = process.env.CRON_SECRET;
-  if (!secret) return false;
-  const header = req.headers.get("authorization");
-  return header === `Bearer ${secret}`;
+  // Constant-time compare so timing can't be used to recover CRON_SECRET.
+  return bearerMatches(req.headers.get("authorization"), process.env.CRON_SECRET);
 }
 
 async function handle(req: NextRequest) {

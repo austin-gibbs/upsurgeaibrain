@@ -35,6 +35,7 @@ type AgentRow = {
   retell_agent_id: string | null;
   retell_from_number: string | null;
   crm_provider: "followupboss" | "highlevel" | null;
+  crm_status: string | null;
   crm_credentials_encrypted: string | null;
   retell_credentials_encrypted: string | null;
   created_at: string;
@@ -65,10 +66,10 @@ export async function GET(
     .from("agents")
     .select(
       "id, workspace_id, name, status, direction, objective, enroll_tag, " +
-        "retell_agent_id, retell_from_number, crm_provider, " +
+        "retell_agent_id, retell_from_number, crm_provider, crm_status, " +
         "crm_credentials_encrypted, retell_credentials_encrypted, created_at, " +
         "agent_call_configs(*), agent_task_configs(*), " +
-        "workspaces(timezone, crm_provider, crm_credentials_encrypted)"
+        "workspaces(timezone, crm_provider, crm_status, crm_credentials_encrypted)"
     )
     .eq("id", params.id)
     .single<
@@ -76,6 +77,7 @@ export async function GET(
         workspaces: {
           timezone: string;
           crm_provider: "followupboss" | "highlevel" | null;
+          crm_status: string | null;
           crm_credentials_encrypted: string | null;
         } | null;
       }
@@ -96,6 +98,9 @@ export async function GET(
   const hasEffectiveCrmCredentials =
     Boolean(agentRow.crm_credentials_encrypted) ||
     Boolean(workspaces?.crm_credentials_encrypted);
+  // CRM connection health for the connection the engine will actually use.
+  const effectiveCrmStatus =
+    agentRow.crm_status ?? workspaces?.crm_status ?? null;
 
   const { data: calls } = await db
     .from("calls")
@@ -124,6 +129,7 @@ export async function GET(
     workspaceTimezone: workspaces?.timezone ?? "America/New_York",
     effectiveCrmProvider,
     hasEffectiveCrmCredentials,
+    effectiveCrmStatus,
     calls: calls ?? [],
     pipelineStageMap: pipelineStageMap ?? [],
   });

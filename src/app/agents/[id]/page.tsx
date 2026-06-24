@@ -99,6 +99,7 @@ export default function AgentDetailPage({
     useState<CrmProvider | null>(null);
   const [hasEffectiveCrmCredentials, setHasEffectiveCrmCredentials] =
     useState(false);
+  const [crmStatus, setCrmStatus] = useState<string | null>(null);
   const [stageMap, setStageMap] = useState<StageMapEntry[]>([]);
   const [pipelines, setPipelines] = useState<Pipeline[]>([]);
   const [pipelinesLoading, setPipelinesLoading] = useState(false);
@@ -167,6 +168,7 @@ export default function AgentDetailPage({
         setWorkspaceTimezone(d.workspaceTimezone ?? "America/New_York");
         setEffectiveCrmProvider(d.effectiveCrmProvider ?? null);
         setHasEffectiveCrmCredentials(Boolean(d.hasEffectiveCrmCredentials));
+        setCrmStatus(d.effectiveCrmStatus ?? null);
       })
       .catch((e) => setError(e.message));
   }
@@ -470,10 +472,21 @@ export default function AgentDetailPage({
         </Card>
 
         <Card className="space-y-5 p-6 lg:col-span-1">
-          <div className="flex items-center gap-2">
-            <KeyRound className="h-4 w-4 text-ink-400" />
-            <h2 className="text-sm font-semibold text-ink-900">CRM</h2>
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <KeyRound className="h-4 w-4 text-ink-400" />
+              <h2 className="text-sm font-semibold text-ink-900">CRM</h2>
+            </div>
+            {crmStatus === "needs_reauth" && (
+              <Badge tone="red">Reconnect needed</Badge>
+            )}
           </div>
+          {crmStatus === "needs_reauth" && (
+            <p className="rounded-xl bg-accent-rose-bg px-3 py-2 text-xs text-accent-rose-fg">
+              The HighLevel connection expired and calls for this agent will fail
+              until you reconnect. Click “Connect via OAuth” below to restore it.
+            </p>
+          )}
           <div className="space-y-1.5">
             <Label>Provider</Label>
             <Select

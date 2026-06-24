@@ -18,6 +18,20 @@ type AgentWindowRow = {
   workspaces: { timezone: string } | null;
 };
 
+/** Positive integer env override with a safe fallback. */
+function intEnv(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : fallback;
+}
+
+// Tunable against the Retell plan's concurrent-call + create-rate caps without a
+// code change. Defaults match the previously hard-coded values.
+const CALL_CONCURRENCY = intEnv("CALL_WORKER_CONCURRENCY", 20);
+const CALL_RATE_MAX = intEnv("CALL_WORKER_RATE_MAX", 20);
+const CALL_RATE_DURATION_MS = intEnv("CALL_WORKER_RATE_DURATION_MS", 1000);
+
 async function deferDial(job: CallJob, delayMs: number, reason: string) {
   const delay = Math.max(delayMs, 60_000);
   const scheduledFor = new Date(Date.now() + delay).toISOString();
@@ -89,11 +103,12 @@ export function startCallWorker(): Worker<CallJob> {
     },
     {
       connection: getRedis(),
-      concurrency: 20,
-      // Retell create-phone-call cap: never exceed 20 dials per second across
-      // the whole queue. Excess jobs wait (Redis-backed limiter) until a slot
-      // frees — even if many triggers arrive at once.
-      limiter: { max: 20, duration: 1000 },
+      concurrency: CALL_CONCURRENCY,
+      // Retell create-phone-call cap: never exceed CALL_RATE_MAX dials per
+      // CALL_RATE_DURATION_MS across the whole queue. Excess jobs wait
+      // (Redis-backed limiter) until a slot frees — even if many triggers
+      // arrive at once. Tune via env to match the Retell account's caps.
+      limiter: { max: CALL_RATE_MAX, duration: CALL_RATE_DURATION_MS },
     }
   );
 
@@ -105,6 +120,7 @@ export function startCallWorker(): Worker<CallJob> {
       await supabase
         .from("calls")
         .update({ status: "failed", error_message: err.message })
+        .eq("agent_id", job.data.agentId)
         .eq("contact_id", job.data.contactId)
         .eq("status", "queued");
       await failQueueEntry(supabase, {

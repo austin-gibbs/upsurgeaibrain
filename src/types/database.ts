@@ -271,6 +271,8 @@ export type Database = {
           created_at: string
           crm_credentials_encrypted: string | null
           crm_provider: Database["public"]["Enums"]["crm_provider"] | null
+          crm_status: string | null
+          crm_status_detail: string | null
           direction: string
           enroll_tag: string | null
           id: string
@@ -287,6 +289,8 @@ export type Database = {
           created_at?: string
           crm_credentials_encrypted?: string | null
           crm_provider?: Database["public"]["Enums"]["crm_provider"] | null
+          crm_status?: string | null
+          crm_status_detail?: string | null
           direction?: string
           enroll_tag?: string | null
           id?: string
@@ -303,6 +307,8 @@ export type Database = {
           created_at?: string
           crm_credentials_encrypted?: string | null
           crm_provider?: Database["public"]["Enums"]["crm_provider"] | null
+          crm_status?: string | null
+          crm_status_detail?: string | null
           direction?: string
           enroll_tag?: string | null
           id?: string
@@ -704,6 +710,8 @@ export type Database = {
           crm_account_url: string | null
           crm_credentials_encrypted: string | null
           crm_provider: Database["public"]["Enums"]["crm_provider"]
+          crm_status: string | null
+          crm_status_detail: string | null
           enroll_tag: string
           id: string
           is_active: boolean
@@ -718,6 +726,8 @@ export type Database = {
           crm_account_url?: string | null
           crm_credentials_encrypted?: string | null
           crm_provider: Database["public"]["Enums"]["crm_provider"]
+          crm_status?: string | null
+          crm_status_detail?: string | null
           enroll_tag?: string
           id?: string
           is_active?: boolean
@@ -732,6 +742,8 @@ export type Database = {
           crm_account_url?: string | null
           crm_credentials_encrypted?: string | null
           crm_provider?: Database["public"]["Enums"]["crm_provider"]
+          crm_status?: string | null
+          crm_status_detail?: string | null
           enroll_tag?: string
           id?: string
           is_active?: boolean

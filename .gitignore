@@ -31,6 +31,8 @@ dev-server.log
 # vercel
 .vercel
 .env.vercel*
+.vercel.prod.env
+*.prod.env
 
 # local deploy / migration artifacts
 .deploy-log.txt

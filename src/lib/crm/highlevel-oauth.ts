@@ -9,8 +9,22 @@
 //   HIGHLEVEL_CLIENT_ID / HIGHLEVEL_CLIENT_SECRET   (server-only)
 // Docs: https://highlevel.stoplight.io/docs/integrations (OAuth 2.0)
 // =====================================================================
+import { fetchWithTimeout } from "@/lib/http";
+
 const TOKEN_URL = "https://services.leadconnectorhq.com/oauth/token";
 const AUTHORIZE_URL = "https://marketplace.gohighlevel.com/oauth/chooselocation";
+
+/**
+ * Thrown when HighLevel rejects the refresh token (revoked/expired/rotated out
+ * from under us). Distinct type so callers can flag the agent for reconnect
+ * instead of blindly retrying a grant that will never succeed.
+ */
+export class HighLevelReauthRequiredError extends Error {
+  constructor(detail: string) {
+    super(`HighLevel reconnect required: ${detail}`);
+    this.name = "HighLevelReauthRequiredError";
+  }
+}
 
 /** Redirect URI registered in the Marketplace app (no vendor name in the path). */
 export function crmOAuthCallbackUrl(): string {
@@ -63,16 +77,22 @@ function toTokens(
 }
 
 async function postToken(body: URLSearchParams): Promise<RawTokenResponse> {
-  const res = await fetch(TOKEN_URL, {
+  const res = await fetchWithTimeout(TOKEN_URL, {
     method: "POST",
     headers: {
       "Content-Type": "application/x-www-form-urlencoded",
       Accept: "application/json",
     },
     body: body.toString(),
+    timeoutMs: 15_000,
   });
   if (!res.ok) {
     const text = await res.text();
+    // A 400 invalid_grant means the refresh token is dead — surface a typed
+    // error so the engine can flag the agent for reconnect instead of retrying.
+    if (res.status === 400 && /invalid_grant/i.test(text)) {
+      throw new HighLevelReauthRequiredError(text.slice(0, 200));
+    }
     throw new Error(`HighLevel token endpoint -> ${res.status}: ${text}`);
   }
   return (await res.json()) as RawTokenResponse;

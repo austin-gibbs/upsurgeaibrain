@@ -7,7 +7,12 @@
 // prompt as {{variable}} at call time.
 // =====================================================================
 
+import { fetchWithTimeout, parseJsonResponse } from "@/lib/http";
+
 const RETELL_BASE = "https://api.retellai.com";
+// Placing a call can take a little longer than a metadata read.
+const CREATE_CALL_TIMEOUT_MS = 30_000;
+const READ_TIMEOUT_MS = 15_000;
 
 export interface CreatePhoneCallInput {
   fromNumber: string; // E.164
@@ -135,7 +140,7 @@ export class RetellClient {
   }
 
   async createPhoneCall(input: CreatePhoneCallInput): Promise<CreatePhoneCallResult> {
-    const res = await fetch(`${RETELL_BASE}/v2/create-phone-call`, {
+    const res = await fetchWithTimeout(`${RETELL_BASE}/v2/create-phone-call`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${this.apiKey}`,
@@ -148,20 +153,22 @@ export class RetellClient {
         retell_llm_dynamic_variables: input.dynamicVariables ?? {},
         metadata: input.metadata ?? {},
       }),
+      timeoutMs: CREATE_CALL_TIMEOUT_MS,
     });
     if (!res.ok) {
       throw new Error(`Retell create-phone-call ${res.status}: ${await res.text()}`);
     }
-    const data = (await res.json()) as { call_id: string };
+    const data = await parseJsonResponse<{ call_id: string }>(res, "Retell create-phone-call");
     return { callId: data.call_id };
   }
 
   async getCall(callId: string): Promise<any> {
-    const res = await fetch(`${RETELL_BASE}/v2/get-call/${callId}`, {
+    const res = await fetchWithTimeout(`${RETELL_BASE}/v2/get-call/${callId}`, {
       headers: { Authorization: `Bearer ${this.apiKey}` },
+      timeoutMs: READ_TIMEOUT_MS,
     });
     if (!res.ok) throw new Error(`Retell get-call ${res.status}: ${await res.text()}`);
-    return res.json();
+    return parseJsonResponse<any>(res, "Retell get-call");
   }
 
   /**
@@ -173,7 +180,7 @@ export class RetellClient {
     pagination_key: string | null;
     has_more: boolean;
   }> {
-    const res = await fetch(`${RETELL_BASE}/v3/list-calls`, {
+    const res = await fetchWithTimeout(`${RETELL_BASE}/v3/list-calls`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${this.apiKey}`,
@@ -185,15 +192,16 @@ export class RetellClient {
         sort_order: input.sort_order ?? "descending",
         ...(input.pagination_key ? { pagination_key: input.pagination_key } : {}),
       }),
+      timeoutMs: READ_TIMEOUT_MS,
     });
     if (!res.ok) {
       throw new Error(`Retell list-calls ${res.status}: ${await res.text()}`);
     }
-    const data = (await res.json()) as {
+    const data = await parseJsonResponse<{
       items?: RetellCallListItem[];
       pagination_key?: string | null;
       has_more?: boolean;
-    };
+    }>(res, "Retell list-calls");
     return {
       items: data.items ?? [],
       pagination_key: data.pagination_key ?? null,

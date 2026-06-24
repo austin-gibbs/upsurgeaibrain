@@ -9,6 +9,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase/server";
 import { encryptJson } from "@/lib/crypto";
+import { assertCanAccess } from "@/lib/authz";
 import {
   crmOAuthCallbackUrl,
   highLevelAuthorizeUrl,
@@ -27,16 +28,15 @@ export async function GET(
   if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   // RLS check: the user must be able to see this agent.
-  const { data: visible } = await userClient
-    .from("agents")
-    .select("id")
-    .eq("id", params.id)
-    .single<{ id: string }>();
-  if (!visible) return NextResponse.json({ error: "not found" }, { status: 404 });
+  if (!(await assertCanAccess(userClient, "agents", params.id))) {
+    return NextResponse.json({ error: "not found" }, { status: 404 });
+  }
 
   try {
     // State is AES-GCM encrypted (authenticated) so it can't be tampered with.
-    const state = encryptJson({ agentId: params.id, ts: Date.now() });
+    // Bind it to BOTH the agent and the initiating user so a leaked/replayed
+    // state can't be completed by a different session within its TTL.
+    const state = encryptJson({ agentId: params.id, userId: user.id, ts: Date.now() });
     const url = highLevelAuthorizeUrl({
       redirectUri: crmOAuthCallbackUrl(),
       state,

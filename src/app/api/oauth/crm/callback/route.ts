@@ -9,6 +9,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient, createServiceClient } from "@/lib/supabase/server";
 import { decryptJson, encryptJson } from "@/lib/crypto";
+import { assertCanAccess } from "@/lib/authz";
 import {
   crmOAuthCallbackUrl,
   exchangeHighLevelCode,
@@ -40,12 +41,14 @@ export async function GET(req: NextRequest) {
 
   // Verify + decode the signed state.
   let agentId: string;
+  let stateUserId: string | undefined;
   try {
-    const decoded = decryptJson<{ agentId: string; ts: number }>(state);
+    const decoded = decryptJson<{ agentId: string; userId?: string; ts: number }>(state);
     if (!decoded.agentId || Date.now() - decoded.ts > STATE_MAX_AGE_MS) {
       throw new Error("state expired");
     }
     agentId = decoded.agentId;
+    stateUserId = decoded.userId;
   } catch {
     return NextResponse.json({ error: "invalid state" }, { status: 400 });
   }
@@ -57,12 +60,16 @@ export async function GET(req: NextRequest) {
     data: { user },
   } = await userClient.auth.getUser();
   if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  const { data: visible } = await userClient
-    .from("agents")
-    .select("id")
-    .eq("id", agentId)
-    .single<{ id: string }>();
-  if (!visible) return NextResponse.json({ error: "not found" }, { status: 404 });
+
+  // The state must have been minted for THIS user (defense against a replayed or
+  // cross-user state). Older states without a bound userId still pass the RLS
+  // check below; new ones are strictly bound.
+  if (stateUserId && stateUserId !== user.id) {
+    return NextResponse.json({ error: "invalid state" }, { status: 400 });
+  }
+  if (!(await assertCanAccess(userClient, "agents", agentId))) {
+    return NextResponse.json({ error: "not found" }, { status: 404 });
+  }
 
   // Send the user back to the agent with a human-readable reason on failure,
   // so a broken connect doesn't dead-end on a raw JSON error (and so we never
@@ -95,6 +102,8 @@ export async function GET(req: NextRequest) {
       .update({
         crm_provider: "highlevel",
         crm_credentials_encrypted: encryptJson(creds),
+        crm_status: "connected",
+        crm_status_detail: null,
       })
       .eq("id", agentId)
       .select("id");

@@ -16,8 +16,12 @@ import type {
   FubCredentials,
   LogCallInput,
 } from "./types";
+import { fetchWithTimeout, parseJsonResponse, retryAfterMs, sleep } from "@/lib/http";
 
 const BASE = "https://api.followupboss.com/v1";
+// FUB allows ~250 requests / 10s. On a 429 we honor Retry-After once before
+// surfacing the error to BullMQ (which then retries with its own backoff).
+const MAX_429_RETRIES = 2;
 
 /**
  * Coerce a CRM-stored phone into E.164 (the contract `CrmContact.phones`
@@ -46,20 +50,29 @@ export class FollowUpBossAdapter implements CrmAdapter {
     path: string,
     init: RequestInit = {}
   ): Promise<T> {
-    const res = await fetch(`${BASE}${path}`, {
-      ...init,
-      headers: {
-        Authorization: this.authHeader,
-        "Content-Type": "application/json",
-        Accept: "application/json",
-        ...(init.headers ?? {}),
-      },
-    });
-    if (!res.ok) {
-      const body = await res.text();
-      throw new Error(`FUB ${init.method ?? "GET"} ${path} -> ${res.status}: ${body}`);
+    for (let attempt = 0; ; attempt++) {
+      const res = await fetchWithTimeout(`${BASE}${path}`, {
+        ...init,
+        headers: {
+          Authorization: this.authHeader,
+          "Content-Type": "application/json",
+          Accept: "application/json",
+          ...(init.headers ?? {}),
+        },
+      });
+
+      // Honor rate limiting: wait Retry-After then retry a bounded number of times.
+      if (res.status === 429 && attempt < MAX_429_RETRIES) {
+        await sleep(retryAfterMs(res.headers.get("retry-after")));
+        continue;
+      }
+
+      if (!res.ok) {
+        const body = await res.text();
+        throw new Error(`FUB ${init.method ?? "GET"} ${path} -> ${res.status}: ${body}`);
+      }
+      return parseJsonResponse<T>(res, `FUB ${init.method ?? "GET"} ${path}`);
     }
-    return (res.status === 204 ? (undefined as T) : ((await res.json()) as T));
   }
 
   private mapContact(p: any): CrmContact {
@@ -85,14 +98,21 @@ export class FollowUpBossAdapter implements CrmAdapter {
     const out: CrmContact[] = [];
     let offset = 0;
     const limit = 100;
-    // FUB paginates with limit/offset and returns _metadata.next.
-    for (;;) {
+    // FUB paginates with limit/offset and returns `_metadata.next` (a full URL,
+    // null on the last page) plus `_metadata.total`. Drive pagination off
+    // `_metadata` rather than a page-length heuristic: a short non-final page
+    // would otherwise silently drop enrolled contacts that never get called.
+    // Hard cap on pages as a safety belt against an unexpected non-null `next`.
+    for (let page = 0; page < 1000; page++) {
       const data = await this.request<any>(
         `/people?tags=${encodeURIComponent(tag)}&limit=${limit}&offset=${offset}&sort=updated&direction=asc`
       );
       const people: any[] = data.people ?? [];
       out.push(...people.map((p) => this.mapContact(p)));
-      if (people.length < limit) break;
+
+      const meta = data._metadata ?? {};
+      const hasNext = Boolean(meta.next) || (typeof meta.total === "number" && offset + people.length < meta.total);
+      if (!hasNext || people.length === 0) break;
       offset += limit;
     }
     return out;

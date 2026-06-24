@@ -9,15 +9,53 @@
 // =====================================================================
 import { config as loadEnv } from "dotenv";
 loadEnv({ path: ".env.local" });
+import { createServer, type Server } from "node:http";
 import { startPollWorker } from "@/lib/queue/workers/poll.worker";
 import { startCallWorker } from "@/lib/queue/workers/call.worker";
 import { tickScheduler } from "@/lib/engine/scheduler";
 import { reconcileStuckCalls } from "@/lib/engine/reconcile";
 import { resyncCallQueue } from "@/lib/queue/sweeper";
+import { getRedis } from "@/lib/queue/connection";
+
+const BOOTED_AT = Date.now();
+
+// Lightweight health endpoint so the hosting platform (Railway/Render/Fly) can
+// detect a dead worker and restart it. Pings Redis so "up" means the engine can
+// actually consume jobs, not just that the process is alive.
+function startHealthServer(): Server {
+  const port = Number(process.env.PORT) || 8080;
+  const server = createServer(async (req, res) => {
+    if (req.url !== "/health" && req.url !== "/") {
+      res.writeHead(404).end();
+      return;
+    }
+    let redisOk = false;
+    try {
+      const pong = await getRedis().ping();
+      redisOk = pong === "PONG";
+    } catch {
+      redisOk = false;
+    }
+    const body = JSON.stringify({
+      ok: redisOk,
+      redis: redisOk ? "up" : "down",
+      uptimeSec: Math.round((Date.now() - BOOTED_AT) / 1000),
+    });
+    res.writeHead(redisOk ? 200 : 503, { "content-type": "application/json" });
+    res.end(body);
+  });
+  server.listen(port, () => console.log(`[worker] health server on :${port}/health`));
+  return server;
+}
 
 async function main() {
   console.log("[worker] starting Upsurge engine…");
 
+  if (!process.env.REDIS_URL && process.env.NODE_ENV === "production") {
+    throw new Error("REDIS_URL is required in production — the worker cannot consume jobs without it");
+  }
+
+  const healthServer = startHealthServer();
   const pollWorker = startPollWorker();
   const callWorker = startCallWorker();
 
@@ -74,6 +112,7 @@ async function main() {
     reconcileTimer = null;
     if (sweepTimer) clearInterval(sweepTimer);
     sweepTimer = null;
+    healthServer.close();
     await Promise.all([pollWorker.close(), callWorker.close()]);
     process.exit(0);
   };

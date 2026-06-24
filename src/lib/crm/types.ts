@@ -148,3 +148,7 @@ export interface HighLevelCredentials {
 export type HighLevelTokenPersistor = (
   creds: HighLevelCredentials
 ) => Promise<void>;
+
+/** Called when the refresh token is dead (invalid_grant) so the caller can flag
+ *  the connection as needing re-authorization in the UI. Best-effort. */
+export type HighLevelReauthFlagger = (detail: string) => Promise<void>;
