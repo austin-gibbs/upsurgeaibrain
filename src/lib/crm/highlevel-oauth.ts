@@ -149,6 +149,12 @@ export function highLevelAuthorizeUrl(opts: {
     "opportunities.write",
     "locations.readonly",
     "users.readonly",
+    // Conversations scopes — required to log a playable external call entry
+    // (search/create conversation + add outbound call log with recording).
+    "conversations.readonly",
+    "conversations.write",
+    "conversations/message.readonly",
+    "conversations/message.write",
   ];
   const params = new URLSearchParams({
     response_type: "code",

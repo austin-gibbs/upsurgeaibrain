@@ -32,6 +32,10 @@ export interface LogCallToCrmInput {
   durationSeconds: number | undefined;
   fromNumber: string | null | undefined;
   toNumber: string;
+  /** Classified outcome — lets HighLevel render the right call status label. */
+  outcome?: string;
+  /** Whether the call reached voicemail. */
+  inVoicemail?: boolean;
 }
 
 /** Primary logCall with addNote(+recording) fallback. Never throws. */
@@ -49,6 +53,8 @@ export async function logCallToCrm(input: LogCallToCrmInput): Promise<CrmWriteFl
       phone: input.phone,
       isIncoming: false,
       note: input.note,
+      outcome: input.outcome,
+      inVoicemail: input.inVoicemail,
       durationSeconds: input.durationSeconds || undefined,
       fromNumber: input.fromNumber ?? undefined,
       toNumber: input.toNumber,

@@ -150,6 +150,8 @@ export async function processRetellWebhook(
     durationSeconds: parsed.durationSeconds || undefined,
     fromNumber: parsed.fromNumber,
     toNumber: call.to_number,
+    outcome,
+    inVoicemail: parsed.inVoicemail,
   });
 
   // 3. Tags.

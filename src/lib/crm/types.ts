@@ -34,6 +34,8 @@ export interface LogCallInput {
   isIncoming?: boolean;
   note?: string;
   outcome?: string;
+  /** True when the call reached voicemail — drives the CRM call status label. */
+  inVoicemail?: boolean;
   durationSeconds?: number;
   fromNumber?: string;
   toNumber?: string;

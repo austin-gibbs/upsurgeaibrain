@@ -27,7 +27,27 @@ import { fetchWithTimeout, parseJsonResponse, retryAfterMs, sleep } from "@/lib/
 
 const BASE = "https://services.leadconnectorhq.com";
 const API_VERSION = "2021-07-28";
+// The Conversations endpoints (search/create conversation, log external call)
+// are versioned separately from contacts/opportunities and reject 2021-07-28.
+const CONVERSATIONS_API_VERSION = "2021-04-15";
 const MAX_429_RETRIES = 2;
+
+// Map our internal outcome → a HighLevel call status so the logged call card
+// reads correctly (Answered / Voicemail / No-answer, etc). Defaults to
+// "completed" for connected conversations.
+function mapCallStatus(input: LogCallInput): string {
+  if (input.inVoicemail) return "voicemail";
+  switch (input.outcome) {
+    case "no_answer_voicemail":
+      return "voicemail";
+    case "no_answer":
+      return "no-answer";
+    case "failed":
+      return "failed";
+    default:
+      return "completed";
+  }
+}
 
 // Cross-instance refresh serialization. A NEW adapter is constructed per job
 // (getCrmAdapterForAgent), so per-instance dedupe is not enough: under worker
@@ -244,11 +264,89 @@ export class HighLevelAdapter implements CrmAdapter {
     });
   }
 
-  // HighLevel has no FUB-style call activity with a recording play button.
+  /**
+   * Log a completed call to HighLevel.
+   *
+   * Two layers, both best-effort but the NOTE is guaranteed (it's the back-compat
+   * path that has always worked):
+   *   1. A timeline NOTE with the AI summary + recording link (Notes tab).
+   *   2. A PLAYABLE call entry in the Conversations/Call log, when a Call-type
+   *      Conversation Provider is configured (HIGHLEVEL_CALL_PROVIDER_ID). This is
+   *      the only way HighLevel renders a real call card with a recording player.
+   *
+   * The playable step is wrapped so it can never fail the call log: the note
+   * already carries the recording link, and throwing here would make the caller
+   * (logCallToCrm) write a duplicate fallback note.
+   */
   async logCall(input: LogCallInput): Promise<void> {
+    const recording = input.recordingUrl?.trim();
+
     const parts = [input.note ?? ""];
-    if (input.recordingUrl) parts.push(`Recording: ${input.recordingUrl}`);
+    if (recording) parts.push(`Recording: ${recording}`);
     await this.addNote(input.contactId, parts.filter(Boolean).join("\n\n"));
+
+    const providerId = process.env.HIGHLEVEL_CALL_PROVIDER_ID?.trim();
+    if (!providerId) return; // note-only mode (no Call conversation provider yet)
+
+    try {
+      await this.logPlayableCall(input, providerId, recording);
+    } catch (e) {
+      console.error(
+        `[highlevel] playable call log failed for contact ${input.contactId} ` +
+          `(note still logged): ${e instanceof Error ? e.message : String(e)}`
+      );
+    }
+  }
+
+  /** Create the playable Call entry in the contact's conversation. */
+  private async logPlayableCall(
+    input: LogCallInput,
+    providerId: string,
+    recording: string | undefined
+  ): Promise<void> {
+    const conversationId = await this.getOrCreateConversationId(input.contactId);
+    await this.request(
+      `/conversations/messages/outbound`,
+      {
+        method: "POST",
+        headers: { Version: CONVERSATIONS_API_VERSION },
+        body: JSON.stringify({
+          type: "Call",
+          conversationId,
+          conversationProviderId: providerId,
+          date: new Date().toISOString(),
+          call: {
+            to: input.toNumber ?? input.phone,
+            from: input.fromNumber ?? "",
+            status: mapCallStatus(input),
+          },
+          // The recording URL is accepted as an attachment when LOGGING a call
+          // (it renders the play button); reads later use the recording endpoint.
+          ...(recording ? { attachments: [recording] } : {}),
+        }),
+      }
+    );
+  }
+
+  /** Find the contact's conversation, creating one if none exists. */
+  private async getOrCreateConversationId(contactId: string): Promise<string> {
+    const search = await this.request<any>(
+      `/conversations/search?locationId=${this.locationId}&contactId=${encodeURIComponent(
+        contactId
+      )}`,
+      { headers: { Version: CONVERSATIONS_API_VERSION } }
+    );
+    const existing = (search?.conversations ?? [])[0];
+    if (existing?.id) return String(existing.id);
+
+    const created = await this.request<any>(`/conversations/`, {
+      method: "POST",
+      headers: { Version: CONVERSATIONS_API_VERSION },
+      body: JSON.stringify({ locationId: this.locationId, contactId }),
+    });
+    const id = created?.conversation?.id ?? created?.id;
+    if (!id) throw new Error("HighLevel returned no conversation id");
+    return String(id);
   }
 
   async createTask(input: CreateTaskInput): Promise<void> {
