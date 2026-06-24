@@ -155,6 +155,7 @@ export default function AgentDetailPage({
         setStageMap(
           (d.pipelineStageMap ?? []).map((m: any) => ({
             outcome: m.outcome,
+            call_attempt: m.call_attempt ?? null,
             pipeline_id: m.pipeline_id,
             pipeline_stage_id: m.pipeline_stage_id,
             pipeline_name: m.pipeline_name ?? null,

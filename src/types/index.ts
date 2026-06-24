@@ -123,10 +123,13 @@ export interface AgentTaskConfig {
   pipeline_automation_enabled: boolean;
 }
 
-/** One outcome -> HighLevel pipeline stage routing rule for an agent. */
+/** One outcome (+ optional call attempt) -> HighLevel pipeline stage routing rule. */
 export interface AgentPipelineStageMap {
+  id?: string;
   agent_id: string;
   outcome: CallOutcome;
+  /** When set, rule applies only to this attempt. NULL = any attempt (fallback). */
+  call_attempt: number | null;
   pipeline_id: string;
   pipeline_stage_id: string;
   /** Display-label caches so the UI can render the selection without a refetch. */

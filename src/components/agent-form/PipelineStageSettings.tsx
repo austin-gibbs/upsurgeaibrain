@@ -1,13 +1,17 @@
 "use client";
 
-import { RefreshCw } from "lucide-react";
-import { Label, Select } from "@/components/ui";
+import { Plus, RefreshCw, Trash2 } from "lucide-react";
+import { Button, Input, Label, Select } from "@/components/ui";
 import {
   OUTCOMES,
   type Pipeline,
   type StageMapEntry,
   type TaskConfig,
 } from "./types";
+
+function ruleKey(rule: StageMapEntry, index: number): string {
+  return `${rule.outcome}:${rule.call_attempt ?? "any"}:${index}`;
+}
 
 export function PipelineStageSettings({
   cfg,
@@ -29,27 +33,26 @@ export function PipelineStageSettings({
   /** Re-pull pipelines + stages from HighLevel (used by the Refresh button). */
   onRefresh?: () => void;
 }) {
-  function entryFor(outcome: string): StageMapEntry | undefined {
-    return map.find((m) => m.outcome === outcome);
+  function updateRule(index: number, patch: Partial<StageMapEntry>) {
+    onChangeMap(map.map((r, i) => (i === index ? { ...r, ...patch } : r)));
   }
 
-  function upsert(outcome: string, patch: Partial<StageMapEntry>) {
-    const others = map.filter((m) => m.outcome !== outcome);
-    const cur = entryFor(outcome);
-    const next: StageMapEntry = {
-      outcome,
-      pipeline_id: "",
-      pipeline_stage_id: "",
-      pipeline_name: null,
-      stage_name: null,
-      ...cur,
-      ...patch,
-    };
-    onChangeMap([...others, next]);
+  function removeRule(index: number) {
+    onChangeMap(map.filter((_, i) => i !== index));
   }
 
-  function remove(outcome: string) {
-    onChangeMap(map.filter((m) => m.outcome !== outcome));
+  function addRule() {
+    onChangeMap([
+      ...map,
+      {
+        outcome: "no_answer",
+        call_attempt: null,
+        pipeline_id: "",
+        pipeline_stage_id: "",
+        pipeline_name: null,
+        stage_name: null,
+      },
+    ]);
   }
 
   return (
@@ -61,8 +64,9 @@ export function PipelineStageSettings({
           </h3>
           <p className="mt-1 text-xs text-ink-500">
             Move the contact&apos;s HighLevel opportunity to a pipeline stage based
-            on the call outcome — automatically, with no HighLevel workflow to
-            build. Leave an outcome on &ldquo;No move&rdquo; to skip it.
+            on call outcome — and optionally the call attempt number. Leave
+            &ldquo;Call attempt&rdquo; blank for a catch-all rule (e.g. appointment
+            on any attempt). More specific attempt rules win over catch-alls.
           </p>
         </div>
         {onRefresh && (
@@ -73,7 +77,10 @@ export function PipelineStageSettings({
             title="Re-pull pipelines & stages from HighLevel"
             className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-ink-200 px-3 py-1.5 text-xs font-medium text-ink-600 transition-colors hover:bg-ink-50 disabled:opacity-50"
           >
-            <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} strokeWidth={1.75} />
+            <RefreshCw
+              className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`}
+              strokeWidth={1.75}
+            />
             {loading ? "Refreshing…" : "Refresh"}
           </button>
         )}
@@ -108,67 +115,121 @@ export function PipelineStageSettings({
 
           {pipelines.length > 0 && (
             <div className="space-y-3">
-              {OUTCOMES.map((outcome) => {
-                const cur = entryFor(outcome);
-                const pipeline = pipelines.find(
-                  (p) => p.id === cur?.pipeline_id
-                );
+              {map.length === 0 && (
+                <p className="text-xs text-ink-500">
+                  No routing rules yet. Add a rule to map outcomes (and optionally
+                  call attempts) to pipeline stages — e.g. no_answer + attempt 1 →
+                  Day 1.
+                </p>
+              )}
+
+              {map.map((rule, index) => {
+                const pipeline = pipelines.find((p) => p.id === rule.pipeline_id);
                 return (
                   <div
-                    key={outcome}
-                    className="grid items-end gap-3 sm:grid-cols-[1fr_1fr_1fr]"
+                    key={ruleKey(rule, index)}
+                    className="rounded-2xl border border-ink-200/50 bg-ink-50/30 p-4"
                   >
-                    <div className="space-y-1.5">
-                      <Label>{outcome}</Label>
-                      <Select
-                        value={cur?.pipeline_id ?? ""}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          if (!val) return remove(outcome);
-                          const p = pipelines.find((p) => p.id === val);
-                          upsert(outcome, {
-                            pipeline_id: val,
-                            pipeline_name: p?.name ?? null,
-                            pipeline_stage_id: "",
-                            stage_name: null,
-                          });
-                        }}
-                      >
-                        <option value="">— No move —</option>
-                        {pipelines.map((p) => (
-                          <option key={p.id} value={p.id}>
-                            {p.name}
+                    <div className="grid items-end gap-3 sm:grid-cols-[1fr_100px_1fr_1fr_auto]">
+                      <div className="space-y-1.5">
+                        <Label>Outcome</Label>
+                        <Select
+                          value={rule.outcome}
+                          onChange={(e) =>
+                            updateRule(index, { outcome: e.target.value })
+                          }
+                        >
+                          {OUTCOMES.map((o) => (
+                            <option key={o} value={o}>
+                              {o}
+                            </option>
+                          ))}
+                        </Select>
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label hint="blank = any">Call attempt</Label>
+                        <Input
+                          type="number"
+                          min={1}
+                          placeholder="Any"
+                          value={rule.call_attempt ?? ""}
+                          onChange={(e) => {
+                            const raw = e.target.value.trim();
+                            updateRule(index, {
+                              call_attempt: raw ? Number(raw) : null,
+                            });
+                          }}
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label>Pipeline</Label>
+                        <Select
+                          value={rule.pipeline_id}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            const p = pipelines.find((p) => p.id === val);
+                            updateRule(index, {
+                              pipeline_id: val,
+                              pipeline_name: p?.name ?? null,
+                              pipeline_stage_id: "",
+                              stage_name: null,
+                            });
+                          }}
+                        >
+                          <option value="">— Select —</option>
+                          {pipelines.map((p) => (
+                            <option key={p.id} value={p.id}>
+                              {p.name}
+                            </option>
+                          ))}
+                        </Select>
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label>Stage</Label>
+                        <Select
+                          value={rule.pipeline_stage_id}
+                          disabled={!pipeline}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            const s = pipeline?.stages.find((s) => s.id === val);
+                            updateRule(index, {
+                              pipeline_stage_id: val,
+                              stage_name: s?.name ?? null,
+                            });
+                          }}
+                        >
+                          <option value="">
+                            {pipeline ? "— Select —" : "—"}
                           </option>
-                        ))}
-                      </Select>
-                    </div>
-                    <div className="space-y-1.5 sm:col-span-2">
-                      <Label hint="target stage">Stage</Label>
-                      <Select
-                        value={cur?.pipeline_stage_id ?? ""}
-                        disabled={!pipeline}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          const s = pipeline?.stages.find((s) => s.id === val);
-                          upsert(outcome, {
-                            pipeline_stage_id: val,
-                            stage_name: s?.name ?? null,
-                          });
-                        }}
+                          {pipeline?.stages.map((s) => (
+                            <option key={s.id} value={s.id}>
+                              {s.name}
+                            </option>
+                          ))}
+                        </Select>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => removeRule(index)}
+                        className="mb-0.5 inline-flex h-10 w-10 items-center justify-center rounded-xl text-ink-400 transition-colors hover:bg-accent-rose-bg hover:text-accent-rose-fg"
+                        title="Remove rule"
                       >
-                        <option value="">
-                          {pipeline ? "— Select a stage —" : "—"}
-                        </option>
-                        {pipeline?.stages.map((s) => (
-                          <option key={s.id} value={s.id}>
-                            {s.name}
-                          </option>
-                        ))}
-                      </Select>
+                        <Trash2 className="h-4 w-4" strokeWidth={1.75} />
+                      </button>
                     </div>
                   </div>
                 );
               })}
+
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={addRule}
+              >
+                <Plus className="h-4 w-4" strokeWidth={1.75} />
+                Add routing rule
+              </Button>
             </div>
           )}
         </>

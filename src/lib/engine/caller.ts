@@ -10,10 +10,28 @@ import { createServiceClient } from "@/lib/supabase/server";
 import { getCrmAdapterForAgent } from "@/lib/crm";
 import { getRetellClientForAgent } from "@/lib/retell/client";
 import { buildDynamicVariables } from "./memory";
-import { todayInTz } from "./cadence";
+import { todayInTz, evaluateDialWindow } from "./cadence";
 import { cancelQueueEntries, markQueueDialing } from "./call-queue";
 import { getCallQueue, type CallJob } from "@/lib/queue/queues";
 import type { Agent, AgentMemory, Contact, Workspace } from "@/types";
+
+/**
+ * Thrown by placeCall when it is asked to dial outside the calling window.
+ * The worker catches this and DEFERS the job to the next window open instead of
+ * marking it failed. Because the throw happens BEFORE the `calls` row is written
+ * and BEFORE any Retell call is created, a dial can never be placed outside the
+ * window regardless of which caller invoked placeCall (worker, script, manual).
+ */
+export class OutsideCallWindowError extends Error {
+  readonly deferMs: number;
+  readonly reason: string;
+  constructor(reason: string, deferMs: number) {
+    super(reason);
+    this.name = "OutsideCallWindowError";
+    this.deferMs = deferMs;
+    this.reason = reason;
+  }
+}
 
 /**
  * Remove any not-yet-running dial jobs for a specific contact from the call
@@ -75,6 +93,28 @@ export async function placeCall(job: CallJob): Promise<{ callId: string; retellC
   const { data: workspace } = await supabase
     .from("workspaces").select("*").eq("id", agent.workspace_id).single<Workspace>();
   if (!workspace) throw new Error(`workspace ${agent.workspace_id} not found`);
+
+  // ── Authoritative call-window guard ────────────────────────────────────────
+  // This is the LAST line of defense before a dial, and it runs BEFORE the
+  // `calls` row is inserted and BEFORE the Retell call is created. Even if the
+  // worker's pre-check passed and the clock then crossed the window boundary, or
+  // a script/manual path calls placeCall directly, we refuse here. Test-mode
+  // dials bypass by design (they're operator-initiated end-to-end checks).
+  if (!job.testMode) {
+    const { data: callConfig } = await supabase
+      .from("agent_call_configs")
+      .select("call_window_start, call_window_end")
+      .eq("agent_id", agent.id)
+      .maybeSingle<{ call_window_start: string; call_window_end: string }>();
+    const decision = evaluateDialWindow(
+      workspace.timezone,
+      callConfig?.call_window_start,
+      callConfig?.call_window_end
+    );
+    if (!decision.allowed) {
+      throw new OutsideCallWindowError(decision.reason, decision.deferMs);
+    }
+  }
 
   const { data: memory } = await supabase
     .from("agent_memory").select("*")

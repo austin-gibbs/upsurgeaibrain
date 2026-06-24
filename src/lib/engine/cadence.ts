@@ -227,6 +227,41 @@ export function msUntilEasternWindowOpens(): number {
   return deltaSec * 1000;
 }
 
+export interface CallWindowDecision {
+  /** True when a dial may be placed right now. */
+  allowed: boolean;
+  /** If not allowed, ms to wait until the window next opens (min 60s). */
+  deferMs: number;
+  /** Human-readable reason, used for deferral logs. */
+  reason: string;
+}
+
+/**
+ * Single source of truth for "may we dial right now?". Uses the agent's
+ * configured call window in the workspace timezone. When start/end are
+ * missing, falls back to 09:00–19:00 in that timezone so unconfigured
+ * agents still have a safe default — each workspace/agent is independent.
+ *
+ * Both the call worker (fast pre-check) and placeCall (authoritative backstop)
+ * call this, so the window is enforced identically everywhere.
+ */
+export function evaluateDialWindow(
+  timezone: string,
+  start?: string | null,
+  end?: string | null
+): CallWindowDecision {
+  const windowStart = normalizeHHMM(start ?? "09:00");
+  const windowEnd = normalizeHHMM(end ?? "19:00");
+  if (!withinCallWindow(timezone, windowStart, windowEnd)) {
+    return {
+      allowed: false,
+      deferMs: Math.max(msUntilCallWindowOpens(timezone, windowStart, windowEnd), 60_000),
+      reason: `outside agent window ${windowStart}-${windowEnd} ${timezone}`,
+    };
+  }
+  return { allowed: true, deferMs: 0, reason: "within window" };
+}
+
 /**
  * Is this contact eligible to be dialed today?
  * Mirrors the WF1 "Filter Eligible Contacts" gates, now typed:

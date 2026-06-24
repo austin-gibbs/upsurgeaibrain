@@ -198,6 +198,7 @@ export async function processRetellWebhook(
         agentId: agent.id,
         contact,
         outcome,
+        attemptNumber: call.attempt_number,
       });
     } catch {
       /* non-fatal: never block cadence advance on a pipeline move */

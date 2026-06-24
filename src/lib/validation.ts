@@ -94,6 +94,7 @@ export const taskConfigSchema = z
  */
 export const pipelineStageMapEntrySchema = z.object({
   outcome: callOutcomeSchema,
+  call_attempt: z.number().int().positive().nullable().default(null),
   pipeline_id: z.string().min(1),
   pipeline_stage_id: z.string().min(1),
   pipeline_name: z.string().nullable().default(null),

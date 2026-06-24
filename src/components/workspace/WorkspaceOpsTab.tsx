@@ -504,15 +504,43 @@ export function WorkspaceOpsTab({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ testMode: runTest }),
       });
-      const d = await res.json();
-      if (!res.ok) {
-        setRunMessage({ type: "error", text: d.error ?? "Run failed" });
+      const raw = await res.text();
+      let d: Record<string, unknown> = {};
+      if (raw.trim()) {
+        try {
+          d = JSON.parse(raw) as Record<string, unknown>;
+        } catch {
+          setRunMessage({
+            type: "error",
+            text: res.ok
+              ? "Poll returned an invalid response."
+              : `Poll failed (${res.status}): server returned non-JSON.`,
+          });
+          return;
+        }
+      } else if (!res.ok) {
+        setRunMessage({
+          type: "error",
+          text: `Poll failed (${res.status}): empty response from server.`,
+        });
         return;
       }
-      const { totals, results } = d as {
-        totals: { scanned: number; eligible: number; enqueued: number };
-        results: { agentName: string; skippedReason: string | null }[];
+      if (!res.ok) {
+        setRunMessage({
+          type: "error",
+          text: String(d.error ?? "Run failed"),
+        });
+        return;
+      }
+      const totals = d.totals as {
+        scanned: number;
+        eligible: number;
+        enqueued: number;
       };
+      const results = d.results as {
+        agentName: string;
+        skippedReason: string | null;
+      }[];
       const agentCount = results.length;
       if (totals.enqueued > 0) {
         setRunMessage({

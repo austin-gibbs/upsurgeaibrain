@@ -1,7 +1,7 @@
 // =====================================================================
 // POST /api/workspaces/:id/run — manually poll all active outbound agents
 // in a workspace (CRM enroll-tag scan → eligible contacts → dial queue).
-// Optional testMode bypasses per-agent call windows and the Eastern guard.
+// Optional testMode bypasses per-agent call windows at poll time.
 // =====================================================================
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase/server";
@@ -64,27 +64,34 @@ export async function POST(
   }
 
   const agentNames = new Map(agents.map((a) => [a.id, a.name]));
-  const results = await pollWorkspace(params.id, { testMode: parsed.data.testMode });
 
-  const enriched = results.map((r) => ({
-    ...r,
-    agentName: agentNames.get(r.agentId) ?? r.agentId,
-    skippedReason: r.skippedReason ?? null,
-  }));
+  try {
+    const results = await pollWorkspace(params.id, { testMode: parsed.data.testMode });
 
-  const totals = enriched.reduce(
-    (acc, r) => ({
-      scanned: acc.scanned + r.scanned,
-      eligible: acc.eligible + r.eligible,
-      enqueued: acc.enqueued + r.enqueued,
-    }),
-    { scanned: 0, eligible: 0, enqueued: 0 }
-  );
+    const enriched = results.map((r) => ({
+      ...r,
+      agentName: agentNames.get(r.agentId) ?? r.agentId,
+      skippedReason: r.skippedReason ?? null,
+    }));
 
-  return NextResponse.json({
-    ok: true,
-    testMode: parsed.data.testMode,
-    results: enriched,
-    totals,
-  });
+    const totals = enriched.reduce(
+      (acc, r) => ({
+        scanned: acc.scanned + r.scanned,
+        eligible: acc.eligible + r.eligible,
+        enqueued: acc.enqueued + r.enqueued,
+      }),
+      { scanned: 0, eligible: 0, enqueued: 0 }
+    );
+
+    return NextResponse.json({
+      ok: true,
+      testMode: parsed.data.testMode,
+      results: enriched,
+      totals,
+    });
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : "poll failed";
+    console.error(`[workspaces/${params.id}/run] poll failed:`, e);
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
 }

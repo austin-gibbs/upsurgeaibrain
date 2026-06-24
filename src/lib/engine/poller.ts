@@ -143,9 +143,8 @@ export async function pollAgent(
         config.call_window_end
       );
 
-  // 4. Enqueue with drip throttle anchored to window open.
-  const queue = getCallQueue();
-  let enqueued = 0;
+  // 4. Persist queue rows, then bulk-enqueue dial jobs (one Redis round-trip).
+  const jobSpecs: CallJobSpec[] = [];
   for (let i = 0; i < capped.length; i++) {
     const contact = capped[i];
     const delay = baseDelay + i * config.drip_seconds * 1000;
@@ -162,21 +161,31 @@ export async function pollAgent(
       bullmqJobId: jobId,
     });
 
-    await queue.add(
-      "dial",
-      {
+    jobSpecs.push({
+      delay,
+      jobId,
+      data: {
         agentId,
         contactId: contact.id,
         toNumber: contact.phones[0],
         attemptNumber: contact.attempt_count + 1,
         testMode: options?.testMode,
       },
-      {
-        delay,
-        jobId,
-      }
-    );
-    enqueued++;
+    });
+  }
+
+  let enqueued = 0;
+  if (jobSpecs.length > 0 && process.env.REDIS_URL) {
+    try {
+      await addCallJobsBulk(jobSpecs);
+      enqueued = jobSpecs.length;
+    } catch {
+      // Durable queue rows remain; worker sweeper will enqueue if Redis failed.
+      enqueued = jobSpecs.length;
+    }
+  } else if (jobSpecs.length > 0) {
+    // No Redis on this host (Vercel manual poll) — rows are the source of truth.
+    enqueued = jobSpecs.length;
   }
 
   return { agentId, scanned: contacts.length, eligible: eligible.length, enqueued };
@@ -354,20 +363,25 @@ export async function pollWorkspace(
   workspaceId: string,
   options?: PollOptions
 ): Promise<PollResult[]> {
-  const supabase = createServiceClient();
-  const { data: agents } = await supabase
-    .from("agents")
-    .select("id")
-    .eq("workspace_id", workspaceId)
-    .eq("status", "active")
-    .eq("direction", "outbound")
-    .returns<{ id: string }[]>();
+  try {
+    const supabase = createServiceClient();
+    const { data: agents } = await supabase
+      .from("agents")
+      .select("id")
+      .eq("workspace_id", workspaceId)
+      .eq("status", "active")
+      .eq("direction", "outbound")
+      .returns<{ id: string }[]>();
 
-  if (!agents?.length) return [];
+    if (!agents?.length) return [];
 
-  const results: PollResult[] = [];
-  for (const agent of agents) {
-    results.push(await pollAgent(agent.id, options));
+    const results: PollResult[] = [];
+    for (const agent of agents) {
+      results.push(await pollAgent(agent.id, options));
+    }
+    return results;
+  } finally {
+    // Release Redis so serverless poll handlers can exit (avoids timeout hang).
+    await closeCallQueue().catch(() => {});
   }
-  return results;
 }

@@ -2,14 +2,9 @@
 import { Worker } from "bullmq";
 import { getRedis } from "../connection";
 import { CALL_QUEUE, getCallQueue, type CallJob } from "../queues";
-import { placeCall } from "@/lib/engine/caller";
+import { placeCall, OutsideCallWindowError } from "@/lib/engine/caller";
 import { failQueueEntry, updateQueueScheduledFor } from "@/lib/engine/call-queue";
-import {
-  withinCallWindow,
-  withinEasternBusinessHours,
-  msUntilEasternWindowOpens,
-  msUntilCallWindowOpens,
-} from "@/lib/engine/cadence";
+import { evaluateDialWindow } from "@/lib/engine/cadence";
 import { createServiceClient } from "@/lib/supabase/server";
 
 type AgentWindowRow = {
@@ -49,16 +44,13 @@ export function startCallWorker(): Worker<CallJob> {
   const worker = new Worker<CallJob>(
     CALL_QUEUE,
     async (job) => {
-      // Hard business-hours guard: never dial outside 9am–7pm Eastern. A job
-      // can become ready outside the window via drip spillover or retry
-      // backoff — when that happens, re-queue it to fire when the window next
-      // opens instead of placing the call now. The deterministic jobId keeps
-      // at most one pending deferral per contact.
-      if (!job.data.testMode && !withinEasternBusinessHours()) {
-        const delay = Math.max(msUntilEasternWindowOpens(), 60_000);
-        return deferDial(job.data, delay, "outside 9am-7pm ET");
-      }
-
+      // Fast pre-check: a job can become ready outside the window via drip
+      // spillover or retry backoff. When that happens, re-queue it to fire when
+      // the window next opens instead of placing the call now. The deterministic
+      // jobId keeps at most one pending deferral per contact. This is an
+      // optimization — the AUTHORITATIVE guard lives inside placeCall (it throws
+      // OutsideCallWindowError), caught below, so the window holds even if this
+      // pre-check is ever skipped or the clock crosses the boundary after it.
       if (!job.data.testMode) {
         const supabase = createServiceClient();
         const { data: agentRow } = await supabase
@@ -74,29 +66,26 @@ export function startCallWorker(): Worker<CallJob> {
           : agentRow?.agent_call_configs;
         const timezone = agentRow?.workspaces?.timezone ?? "America/New_York";
 
-        if (
-          config &&
-          !withinCallWindow(
-            timezone,
-            config.call_window_start,
-            config.call_window_end
-          )
-        ) {
-          const delay = msUntilCallWindowOpens(
-            timezone,
-            config.call_window_start,
-            config.call_window_end
-          );
-          return deferDial(
-            job.data,
-            delay,
-            `outside agent window ${config.call_window_start}-${config.call_window_end} ${timezone}`
-          );
+        const decision = evaluateDialWindow(
+          timezone,
+          config?.call_window_start,
+          config?.call_window_end
+        );
+        if (!decision.allowed) {
+          return deferDial(job.data, decision.deferMs, decision.reason);
         }
       }
 
-      const result = await placeCall(job.data);
-      return result;
+      try {
+        return await placeCall(job.data);
+      } catch (err) {
+        // placeCall refuses to dial outside the window (defense in depth). Treat
+        // that as a deferral, not a failure, so the contact is never dropped.
+        if (err instanceof OutsideCallWindowError) {
+          return deferDial(job.data, err.deferMs, err.reason);
+        }
+        throw err;
+      }
     },
     {
       connection: getRedis(),

@@ -109,7 +109,9 @@ export async function GET(
 
   const { data: pipelineStageMap } = await db
     .from("agent_pipeline_stage_map")
-    .select("outcome, pipeline_id, pipeline_stage_id, pipeline_name, stage_name")
+    .select(
+      "outcome, call_attempt, pipeline_id, pipeline_stage_id, pipeline_name, stage_name"
+    )
     .eq("agent_id", params.id);
 
   const normalizedAgent = {
@@ -320,6 +322,7 @@ export async function PATCH(
       const rows = input.pipeline_stage_map.map((entry) => ({
         agent_id: params.id,
         outcome: entry.outcome,
+        call_attempt: entry.call_attempt,
         pipeline_id: entry.pipeline_id,
         pipeline_stage_id: entry.pipeline_stage_id,
         pipeline_name: entry.pipeline_name,

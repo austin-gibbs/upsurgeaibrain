@@ -160,6 +160,8 @@ export type Database = {
       agent_pipeline_stage_map: {
         Row: {
           agent_id: string
+          call_attempt: number | null
+          id: string
           outcome: Database["public"]["Enums"]["call_outcome"]
           pipeline_id: string
           pipeline_name: string | null
@@ -169,6 +171,8 @@ export type Database = {
         }
         Insert: {
           agent_id: string
+          call_attempt?: number | null
+          id?: string
           outcome: Database["public"]["Enums"]["call_outcome"]
           pipeline_id: string
           pipeline_name?: string | null
@@ -178,6 +182,8 @@ export type Database = {
         }
         Update: {
           agent_id?: string
+          call_attempt?: number | null
+          id?: string
           outcome?: Database["public"]["Enums"]["call_outcome"]
           pipeline_id?: string
           pipeline_name?: string | null
@@ -338,6 +344,7 @@ export type Database = {
           in_voicemail: boolean | null
           note_logged: boolean | null
           outcome: Database["public"]["Enums"]["call_outcome"] | null
+          outcome_claimed_at: string | null
           queued_at: string
           raw_payload: Json | null
           recording_logged: boolean | null
@@ -368,6 +375,7 @@ export type Database = {
           in_voicemail?: boolean | null
           note_logged?: boolean | null
           outcome?: Database["public"]["Enums"]["call_outcome"] | null
+          outcome_claimed_at?: string | null
           queued_at?: string
           raw_payload?: Json | null
           recording_logged?: boolean | null
@@ -398,6 +406,7 @@ export type Database = {
           in_voicemail?: boolean | null
           note_logged?: boolean | null
           outcome?: Database["public"]["Enums"]["call_outcome"] | null
+          outcome_claimed_at?: string | null
           queued_at?: string
           raw_payload?: Json | null
           recording_logged?: boolean | null

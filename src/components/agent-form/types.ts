@@ -30,9 +30,10 @@ export type Pipeline = {
   stages: { id: string; name: string }[];
 };
 
-/** One outcome -> pipeline stage routing rule, as edited in the form. */
+/** One routing rule as edited in the form (outcome + optional attempt -> stage). */
 export type StageMapEntry = {
   outcome: string;
+  call_attempt: number | null;
   pipeline_id: string;
   pipeline_stage_id: string;
   pipeline_name: string | null;
