@@ -80,7 +80,7 @@ async function main() {
   // re-picked, so steady-state cost is ~0 when the webhook path is healthy.
   let reconcileTimer: NodeJS.Timeout | null = setInterval(async () => {
     try {
-      const summary = await reconcileStuckCalls({ olderThanMinutes: 2, limit: 50 });
+      const summary = await reconcileStuckCalls({ olderThanMinutes: 1, limit: 250 });
       if (summary.reconciled || summary.failed) {
         console.log("[reconcile] stuck-call sweep:", summary);
       }

@@ -37,6 +37,39 @@ function toE164(raw: string): string | null {
   return null; // unknown format — drop rather than dial something invalid
 }
 
+/**
+ * FUB POST /calls only accepts a fixed outcome enum. Our engine uses
+ * canonical snake_case outcomes — map them or omit the field (note still
+ * carries the human-readable outcome).
+ */
+export function mapFubCallOutcome(
+  outcome: string | undefined,
+  inVoicemail: boolean | undefined
+): string | undefined {
+  if (!outcome) return inVoicemail ? "Left Message" : undefined;
+  const key = outcome.trim().toLowerCase().replace(/[\s-]+/g, "_");
+  switch (key) {
+    case "appointment":
+    case "follow_up":
+      return "Interested";
+    case "not_interested":
+    case "dnd":
+      return "Not Interested";
+    case "no_answer_voicemail":
+      return inVoicemail ? "Left Message" : "No Answer";
+    case "voicemail":
+      return "Left Message";
+    case "no_answer":
+      return "No Answer";
+    case "busy":
+      return "Busy";
+    case "bad_number":
+      return "Bad Number";
+    default:
+      return inVoicemail ? "Left Message" : undefined;
+  }
+}
+
 export class FollowUpBossAdapter implements CrmAdapter {
   readonly provider = "followupboss" as const;
   private authHeader: string;
@@ -193,7 +226,8 @@ export class FollowUpBossAdapter implements CrmAdapter {
       isIncoming: input.isIncoming ?? false,
     };
     if (input.note) body.note = input.note;
-    if (input.outcome) body.outcome = input.outcome;
+    const fubOutcome = mapFubCallOutcome(input.outcome, input.inVoicemail);
+    if (fubOutcome) body.outcome = fubOutcome;
     if (typeof input.durationSeconds === "number") body.duration = input.durationSeconds;
     if (input.fromNumber) body.fromNumber = input.fromNumber;
     if (input.toNumber) body.toNumber = input.toNumber;

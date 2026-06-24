@@ -197,13 +197,21 @@ export async function placeCall(job: CallJob): Promise<{ callId: string; retellC
   });
 
   const retell = getRetellClientForAgent(agent);
+  const webhookUrl = appRetellWebhookUrl();
+  // Defense-in-depth: bind agent-level webhook for separate Retell accounts (FUB).
+  void retell.ensureAgentWebhookUrl(agent.retell_agent_id, webhookUrl).catch((e) => {
+    console.warn(
+      `[caller] ensureAgentWebhookUrl failed for agent ${agent.id}: ${e instanceof Error ? e.message : e}`
+    );
+  });
+
   const { callId: retellCallId } = await retell.createPhoneCall({
     fromNumber: agent.retell_from_number,
     toNumber: job.toNumber,
     agentId: agent.retell_agent_id,
     dynamicVariables,
     metadata: { call_id: call.id, workspace_id: workspace.id, agent_id: agent.id },
-    webhookUrl: appRetellWebhookUrl(),
+    webhookUrl,
   });
 
   const today = todayInTz(workspace.timezone);
@@ -230,8 +238,11 @@ export async function placeCall(job: CallJob): Promise<{ callId: string; retellC
   try {
     const crm = getCrmAdapterForAgent(agent, workspace);
     const dialedTag = `upsurgecalled${today.replace(/-/g, "")}`;
-    if (!contact.tags.includes(dialedTag)) {
-      await crm.setTags(contact.id, Array.from(new Set([...contact.tags, dialedTag])));
+    if (!contact.tags.includes(dialedTag) && contact.crm_contact_id) {
+      await crm.setTags(
+        contact.crm_contact_id,
+        Array.from(new Set([...contact.tags, dialedTag]))
+      );
     }
   } catch {
     // non-fatal — the local last_called_on already guards same-day re-dials

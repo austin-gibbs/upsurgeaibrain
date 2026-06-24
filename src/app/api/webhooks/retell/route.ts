@@ -4,70 +4,19 @@
 // We verify the signature, then process call_analyzed events.
 // =====================================================================
 import { NextRequest, NextResponse } from "next/server";
-import {
-  getRetellSignatureCandidatesForAgent,
-  listWebhookSecretCandidates,
-  verifyRetellSignature,
-} from "@/lib/retell/client";
+import { listWebhookSecretCandidates, verifyRetellSignature } from "@/lib/retell/client";
+import { perAgentWebhookSecretsFromBody } from "@/lib/retell/webhook-secrets";
 import { processRetellWebhook } from "@/lib/engine/process-outcome";
-import { createServiceClient } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-/** Resolve per-agent webhook secrets from the payload (Retell agent id or metadata). */
-async function perAgentWebhookSecrets(rawBody: string): Promise<string[]> {
-  try {
-    const body = JSON.parse(rawBody) as {
-      call?: { agent_id?: string; metadata?: { agent_id?: string } };
-    };
-    const retellAgentId = body?.call?.agent_id;
-    const ourAgentId = body?.call?.metadata?.agent_id;
-    const supabase = createServiceClient();
-    const secrets: string[] = [];
-
-    async function secretForAgentRow(
-      row: { retell_credentials_encrypted: string | null } | null
-    ): Promise<void> {
-      if (!row) return;
-      // Include the per-agent API key AND any dedicated webhook secret: Retell
-      // signs with the API key, so it must be a candidate or every signature 401s.
-      for (const secret of getRetellSignatureCandidatesForAgent(row)) {
-        secrets.push(secret);
-      }
-    }
-
-    if (retellAgentId) {
-      const { data: agent } = await supabase
-        .from("agents")
-        .select("retell_credentials_encrypted")
-        .eq("retell_agent_id", String(retellAgentId))
-        .maybeSingle<{ retell_credentials_encrypted: string | null }>();
-      await secretForAgentRow(agent);
-    }
-
-    // Fallback when Retell agent id lookup misses but metadata carries our id.
-    if (!secrets.length && ourAgentId) {
-      const { data: agent } = await supabase
-        .from("agents")
-        .select("retell_credentials_encrypted")
-        .eq("id", String(ourAgentId))
-        .maybeSingle<{ retell_credentials_encrypted: string | null }>();
-      await secretForAgentRow(agent);
-    }
-
-    return secrets;
-  } catch {
-    return [];
-  }
-}
 
 export async function POST(req: NextRequest) {
   const rawBody = await req.text();
   const signature =
     req.headers.get("x-retell-signature") ?? req.headers.get("X-Retell-Signature");
 
-  const extraSecrets = await perAgentWebhookSecrets(rawBody);
+  const extraSecrets = await perAgentWebhookSecretsFromBody(rawBody);
   const candidates = listWebhookSecretCandidates(extraSecrets);
 
   if (candidates.length === 0) {

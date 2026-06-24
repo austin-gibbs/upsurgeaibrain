@@ -180,6 +180,28 @@ export class RetellClient {
   }
 
   /**
+   * Bind agent-level webhook delivery (defense when per-call webhook_url is ignored).
+   * Idempotent — safe to call before dials for agents on separate Retell accounts.
+   */
+  async ensureAgentWebhookUrl(agentId: string, webhookUrl: string): Promise<void> {
+    const res = await fetchWithTimeout(`${RETELL_BASE}/update-agent/${agentId}`, {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${this.apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        webhook_url: webhookUrl,
+        webhook_events: ["call_started", "call_ended", "call_analyzed"],
+      }),
+      timeoutMs: READ_TIMEOUT_MS,
+    });
+    if (!res.ok) {
+      throw new Error(`Retell update-agent ${res.status}: ${await res.text()}`);
+    }
+  }
+
+  /**
    * Fetch one page of calls from Retell v3 list-calls.
    * Returns items plus pagination metadata for follow-up pages.
    */
