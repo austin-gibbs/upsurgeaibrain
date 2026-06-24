@@ -14,7 +14,10 @@ const AUTHORIZE_URL = "https://marketplace.gohighlevel.com/oauth/chooselocation"
 
 /** Redirect URI registered in the Marketplace app (no vendor name in the path). */
 export function crmOAuthCallbackUrl(): string {
-  const base = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+  // Use `||` (not `??`): an empty/whitespace NEXT_PUBLIC_APP_URL must fall back
+  // too, otherwise we'd emit a relative redirect_uri ("/api/oauth/crm/callback")
+  // that HighLevel rejects as a mismatch — the exact cause of a prod OAuth break.
+  const base = (process.env.NEXT_PUBLIC_APP_URL || "").trim() || "http://localhost:3000";
   return `${base.replace(/\/$/, "")}/api/oauth/crm/callback`;
 }
 

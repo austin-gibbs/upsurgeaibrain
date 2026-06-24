@@ -20,7 +20,9 @@ export const runtime = "nodejs";
 const STATE_MAX_AGE_MS = 10 * 60 * 1000; // 10 minutes
 
 function appUrl(path: string): string {
-  const base = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+  // `||` so an empty/whitespace value falls back instead of yielding a
+  // host-less redirect; mirrors crmOAuthCallbackUrl().
+  const base = (process.env.NEXT_PUBLIC_APP_URL || "").trim() || "http://localhost:3000";
   return `${base.replace(/\/$/, "")}${path}`;
 }
 
