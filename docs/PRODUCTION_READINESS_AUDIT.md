@@ -202,18 +202,17 @@ unavailable).
   failed) and now log + persist a loud divergence warning when the tag sync
   failed, for manual CRM reconcile. (The literal "don't mark terminal" fix was
   rejected — it would re-dial DND contacts.)
-- **H4 partial.** `HighLevelReauthRequiredError` is now thrown on `invalid_grant`
-  so the engine can distinguish a dead refresh token from a transient error.
-  Surfacing `crm_status='needs_reauth'` in the UI is still TODO (needs a column +
-  UI badge).
+- **H4 done.** `HighLevelReauthRequiredError` on `invalid_grant` now fires a
+  `crm_status='needs_reauth'` flag on the agent/workspace (migration `0017`,
+  applied to prod), surfaced as a "Reconnect needed" badge + banner on the agent
+  page; a successful refresh/OAuth connect clears it.
 - **H5 done.** FUB + HighLevel adapters honor `Retry-After` on 429 with bounded
   backoff before surfacing to BullMQ.
 - **H6 done.** OAuth `state` now binds `userId`; the callback rejects a state
   minted for a different user.
-- **H7 partial.** `.github/workflows/ci.yml` runs typecheck + test + build on
-  push/PR to `main`. ESLint config intentionally deferred — adding the deps would
-  desync `package-lock.json` (can't regenerate it in-session); add locally with
-  `npm i -D eslint eslint-config-next && echo '{"extends":"next/core-web-vitals"}' > .eslintrc.json`.
+- **H7 done.** `.github/workflows/ci.yml` runs lint + typecheck + test + build on
+  push/PR to `main`. ESLint configured (`eslint` + `eslint-config-next` installed,
+  `.eslintrc.json` extends `next/core-web-vitals`); `npm run lint` is clean.
 
 **Medium / Low**
 - **M1 done.** Deleted `api/cron/apply-migration-0007/route.ts`.
@@ -223,9 +222,14 @@ unavailable).
 - **M5 done.** Unknown Retell outcomes log a warning before the safe fallback.
 - **M6** — verified correct by existing `nextEligibleDate` tests; no change.
 - **L1 done** (real-dial idempotency in `placeCall`). **L2 done** (timing-safe
-  `bearerMatches` in `src/lib/secure.ts`, used by the cron auth). **L4 done**
+  `bearerMatches` in `src/lib/secure.ts`, used by the cron auth). **L3 done**
+  (worker concurrency + rate limiter now env-configurable:
+  `CALL_WORKER_CONCURRENCY` / `CALL_WORKER_RATE_MAX` / `CALL_WORKER_RATE_DURATION_MS`,
+  defaults unchanged — set to match the Retell plan). **L4 done**
   (intrinsic-terminal net for dnd/not_interested/appointment when taxonomy is
   missing). **L5 done** (`.nvmrc` = 22).
+- **M7 done.** `assertCanAccess()` helper (`src/lib/authz.ts`) centralizes the
+  RLS read-check before service-client writes; adopted in both OAuth routes.
 
 **Database (Supabase, applied to prod)**
 - Migration `0016`: pinned `search_path` on `seed_default_outcome_tags` +
@@ -234,10 +238,14 @@ unavailable).
 - Left executable for `authenticated`: `user_org_ids` / `user_workspace_ids` —
   the RLS policies call them; they return only the caller's own ids. Accepted WARN.
 
+**Verification (this pass)**
+- `npm run lint`, `npm run typecheck`, `npm test` (37 pass), and `npm run build`
+  all green. Committed on `main` (not pushed/deployed).
+
 **Still open (not code — needs you / ops)**
-- Enable Auth "leaked password protection" in the Supabase dashboard (advisor).
-- H4 UI reconnect badge; M7 `assertCanAccess()` helper refactor; L3 confirm
-  Retell concurrent-call cap vs worker `concurrency`.
+- Enable Auth "leaked password protection" in the Supabase dashboard (advisor) —
+  Authentication → Policies → enable HaveIBeenPwned check. No SQL/API exposed.
+- Tune `CALL_WORKER_*` env vars to the Retell account's concurrent-call cap.
 - **Phase 2 ops** (unchanged): provision Redis, set `REDIS_URL` on Vercel +
   Railway, deploy worker, parallel cutover. See `docs/DEPLOY_WORKER.md`.
 
