@@ -135,15 +135,22 @@ export class HighLevelAdapter implements CrmAdapter {
   async getContactsByTag(tag: string): Promise<CrmContact[]> {
     const out: CrmContact[] = [];
     let page = 1;
-    const limit = 100;
+    const pageLimit = 100;
     for (;;) {
-      // The search endpoint accepts a tag filter via query string.
-      const data = await this.request<any>(
-        `/contacts/?locationId=${this.locationId}&limit=${limit}&page=${page}&query=&tags=${encodeURIComponent(tag)}`
-      );
+      // GET /contacts does not accept a tags query param (422). Use the advanced
+      // search endpoint with a tag filter instead.
+      const data = await this.request<any>("/contacts/search", {
+        method: "POST",
+        body: JSON.stringify({
+          locationId: this.locationId,
+          page,
+          pageLimit,
+          filters: [{ field: "tags", operator: "eq", value: tag }],
+        }),
+      });
       const contacts: any[] = data.contacts ?? [];
       out.push(...contacts.map((c) => this.mapContact(c)));
-      if (contacts.length < limit) break;
+      if (contacts.length < pageLimit) break;
       page += 1;
     }
     return out;
