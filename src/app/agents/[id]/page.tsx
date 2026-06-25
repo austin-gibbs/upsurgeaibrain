@@ -17,7 +17,7 @@ import {
   type StageMapEntry,
   type TaskConfig,
 } from "@/components/agent-form/types";
-import { normalizeHHMM } from "@/lib/hhmm";
+import { normalizeHHMM, normalizeTaskConfigList } from "@/lib/hhmm";
 import {
   prepareStageMapForSave,
   prepareTaskConfigForSave,
@@ -40,6 +40,7 @@ import {
   IconBadge,
   Segmented,
   Select,
+  cn,
 } from "@/components/ui";
 
 type Direction = "inbound" | "outbound";
@@ -86,6 +87,7 @@ export default function AgentDetailPage({
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [actionMsg, setActionMsg] = useState<string | null>(null);
+  const [taskActionMsg, setTaskActionMsg] = useState<string | null>(null);
 
   const [direction, setDirection] = useState<Direction>("outbound");
   const [retellId, setRetellId] = useState("");
@@ -156,7 +158,7 @@ export default function AgentDetailPage({
         } else {
           setCallCfg(defaultCallConfig());
         }
-        const tc = d.agent.agent_task_configs?.[0];
+        const tc = normalizeTaskConfigList(d.agent.agent_task_configs)[0];
         if (tc) {
           setTaskCfg(taskConfigFromRow(tc));
         } else {
@@ -296,11 +298,15 @@ export default function AgentDetailPage({
     body: Record<string, unknown>,
     opts?: {
       refresh?: boolean;
+      feedback?: "task" | "global";
       savedTaskSettings?: { taskConfig: TaskConfig; stageMap?: StageMapEntry[] };
     }
   ) {
+    const feedback = opts?.feedback ?? "global";
+    const setFeedback = feedback === "task" ? setTaskActionMsg : setActionMsg;
     setSaving(true);
     setActionMsg(null);
+    setTaskActionMsg(null);
     try {
       const res = await fetch(`/api/agents/${params.id}`, {
         method: "PATCH",
@@ -324,14 +330,14 @@ export default function AgentDetailPage({
         load();
       }
       if (data.queueRescheduled > 0) {
-        setActionMsg(
+        setFeedback(
           `Saved. Rescheduled ${data.queueRescheduled} queued call${data.queueRescheduled === 1 ? "" : "s"} to the new window.`
         );
       } else {
-        setActionMsg("Saved.");
+        setFeedback("Saved.");
       }
     } catch (e: any) {
-      setActionMsg(e.message);
+      setFeedback(e.message);
     } finally {
       setSaving(false);
     }
@@ -411,21 +417,29 @@ export default function AgentDetailPage({
       validateTaskConfigForSave(prepared) ??
       validateStageMapForSave(stageMap, prepared.pipeline_automation_enabled);
     if (validationError) {
-      setActionMsg(validationError);
+      setTaskActionMsg(validationError);
       return;
     }
-    const includeStageMap =
-      isHighLevel &&
-      (prepared.pipeline_automation_enabled || preparedStageMap.length > 0);
     const body: Record<string, unknown> = { task_config: prepared };
-    if (includeStageMap) {
-      body.pipeline_stage_map = preparedStageMap;
+    if (isHighLevel) {
+      body.pipeline_stage_map =
+        prepared.pipeline_automation_enabled && preparedStageMap.length > 0
+          ? preparedStageMap
+          : [];
     }
     patch(body, {
       refresh: false,
+      feedback: "task",
       savedTaskSettings: {
         taskConfig: prepared,
-        ...(includeStageMap ? { stageMap: preparedStageMap } : {}),
+        ...(isHighLevel
+          ? {
+              stageMap:
+                prepared.pipeline_automation_enabled && preparedStageMap.length > 0
+                  ? preparedStageMap
+                  : [],
+            }
+          : {}),
       },
     });
   }
@@ -444,7 +458,7 @@ export default function AgentDetailPage({
     );
 
   const isInbound = direction === "inbound";
-  const tc = agent.agent_task_configs[0];
+  const tc = normalizeTaskConfigList(agent.agent_task_configs)[0];
 
   const linkageReady = isInbound
     ? Boolean(agent.retell_agent_id && agent.has_retell_credentials)
@@ -754,13 +768,27 @@ export default function AgentDetailPage({
               onRefresh={loadPipelines}
             />
           )}
+          {taskActionMsg && (
+            <p
+              className={cn(
+                "rounded-xl px-4 py-2.5 text-sm",
+                taskActionMsg.toLowerCase().includes("saved")
+                  ? "bg-accent-mint-bg text-accent-mint-fg"
+                  : "bg-accent-rose-bg text-accent-rose-fg"
+              )}
+            >
+              {taskActionMsg}
+            </p>
+          )}
           <Button variant="secondary" disabled={saving} onClick={saveTaskSettings}>
             Save tasks & automations
           </Button>
-          {tc?.enabled && (
+          {Boolean(tc?.enabled) && (
             <p className="text-xs text-ink-500">
               Tasks currently <Badge tone="green">on</Badge>
-              {tc.assignee_label ? ` → ${tc.assignee_label}` : ""}
+              {typeof tc.assignee_label === "string" && tc.assignee_label
+                ? ` → ${tc.assignee_label}`
+                : ""}
             </p>
           )}
         </Card>

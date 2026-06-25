@@ -44,3 +44,25 @@ export function normalizeCallConfigList(raw: unknown): Record<string, unknown>[]
     (config) => normalizeCallConfigTimes(config) as Record<string, unknown>
   );
 }
+
+
+/** Normalize HH:MM fields on a single agent_task_configs row. */
+export function normalizeTaskConfigTimes(
+  config: Record<string, unknown> | null | undefined
+): Record<string, unknown> | null | undefined {
+  if (!config || typeof config !== "object") return config;
+  return {
+    ...config,
+    due_at_time:
+      typeof config.due_at_time === "string"
+        ? normalizeHHMM(config.due_at_time)
+        : config.due_at_time,
+  };
+}
+
+/** Supabase may return agent_task_configs as object or array — normalize both. */
+export function normalizeTaskConfigList(raw: unknown): Record<string, unknown>[] {
+  return normalizeEmbedList(raw as Record<string, unknown> | Record<string, unknown>[] | null).map(
+    (config) => normalizeTaskConfigTimes(config) as Record<string, unknown>
+  );
+}

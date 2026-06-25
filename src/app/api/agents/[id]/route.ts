@@ -16,7 +16,11 @@ import {
 } from "@/lib/validation";
 import type { AgentDirection } from "@/types";
 import type { Database } from "@/types/database";
-import { normalizeCallConfigList, normalizeHHMM } from "@/lib/hhmm";
+import {
+  normalizeCallConfigList,
+  normalizeHHMM,
+  normalizeTaskConfigList,
+} from "@/lib/hhmm";
 import { rescheduleAgentCallQueue } from "@/lib/queue/reschedule";
 import { prepareTaskConfigForSave } from "@/lib/task-config";
 import { defaultTaskConfig } from "@/components/agent-form/types";
@@ -124,6 +128,7 @@ export async function GET(
   const normalizedAgent = {
     ...publicAgent(agentRow),
     agent_call_configs: normalizeCallConfigList(agentRow.agent_call_configs),
+    agent_task_configs: normalizeTaskConfigList(agentRow.agent_task_configs),
   };
 
   return NextResponse.json({

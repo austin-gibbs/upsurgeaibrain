@@ -41,25 +41,25 @@ describe("mergePipelinesForRouting", () => {
 });
 
 describe("prepareTaskConfigForSave", () => {
-  it("auto-enables opportunity field when id and value are set", () => {
+  it("does not auto-enable opportunity field when disabled but id and value are set", () => {
     const prepared = prepareTaskConfigForSave({
       ...defaultTaskConfig(),
       opportunity_custom_field_enabled: false,
       opportunity_custom_field_id: " cf_1 ",
       opportunity_custom_field_value: " Seller Outgoing AI Agent ",
     });
-    assert.equal(prepared.opportunity_custom_field_enabled, true);
+    assert.equal(prepared.opportunity_custom_field_enabled, false);
     assert.equal(prepared.opportunity_custom_field_id, "cf_1");
   });
 
-  it("keeps poll stage enabled when pipeline and stage are selected", () => {
+  it("does not auto-enable poll stage when disabled but pipeline and stage are selected", () => {
     const prepared = prepareTaskConfigForSave({
       ...defaultTaskConfig(),
-      poll_stage_enabled: true,
+      poll_stage_enabled: false,
       poll_pipeline_id: "pipe_1",
       poll_pipeline_stage_id: "stage_1",
     });
-    assert.equal(prepared.poll_stage_enabled, true);
+    assert.equal(prepared.poll_stage_enabled, false);
   });
 });
 

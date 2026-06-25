@@ -54,6 +54,41 @@ const CHECKS = [
     column: "post_call_webhook_url",
     migration: "0008",
   },
+  {
+    table: "agent_task_configs",
+    column: "pipeline_automation_enabled",
+    migration: "0009",
+  },
+  {
+    table: "agent_task_configs",
+    column: "poll_stage_enabled",
+    migration: "0010",
+  },
+  {
+    table: "agent_task_configs",
+    column: "poll_pipeline_id",
+    migration: "0010",
+  },
+  {
+    table: "agent_task_configs",
+    column: "poll_pipeline_stage_id",
+    migration: "0010",
+  },
+  {
+    table: "agent_task_configs",
+    column: "opportunity_custom_field_enabled",
+    migration: "0010",
+  },
+  {
+    table: "agent_task_configs",
+    column: "opportunity_custom_field_id",
+    migration: "0010",
+  },
+  {
+    table: "agent_task_configs",
+    column: "opportunity_custom_field_value",
+    migration: "0010",
+  },
   { table: "calls", column: "finalized_by", migration: "0011" },
   { table: "calls", column: "note_logged", migration: "0011" },
   { table: "calls", column: "recording_logged", migration: "0011" },

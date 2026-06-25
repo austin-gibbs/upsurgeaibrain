@@ -1,0 +1,121 @@
+npm warn Unknown env config "devdir". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+
+> upsurge-platform@0.1.0 test
+> tsx --test src/lib/**/*.test.ts
+
+▶ mapFubCallOutcome
+  ✔ maps follow_up and appointment to Interested (0.7065ms)
+  ✔ maps terminal declines to Not Interested (0.066166ms)
+  ✔ maps no_answer_voicemail based on voicemail flag (0.044708ms)
+  ✔ returns undefined for unknown outcomes when not voicemail (0.041916ms)
+✔ mapFubCallOutcome (1.668125ms)
+[crm-writeback] logCall failed for contact contact-1: 401 unauthorized
+▶ logCallToCrm
+  ✔ sets recordingLogged when playable call log succeeds (0.569625ms)
+  ✔ records warning and recordingLogged=false when HL note ok but playable call missing (0.110291ms)
+  ✔ falls back to addNote with recording link when logCall throws (0.349083ms)
+  ✔ recordingLogged stays false when call had no recording URL (0.315459ms)
+✔ logCallToCrm (1.737708ms)
+▶ noteWithRecording
+  ✔ appends recording URL when present (0.091333ms)
+  ✔ returns note unchanged when recording URL is absent (0.042417ms)
+✔ noteWithRecording (0.192375ms)
+▶ summarizeCrmErrors
+  ✔ joins errors and truncates long messages (0.068041ms)
+✔ summarizeCrmErrors (0.116542ms)
+[outcome] unrecognized Retell outcome "gibberish" (normalized "gibberish") — defaulting to no_answer_voicemail. Add it to the ALIAS map if it's a real outcome.
+[outcome] unrecognized Retell outcome "gibberish" (normalized "gibberish") — defaulting to no_answer_voicemail. Add it to the ALIAS map if it's a real outcome.
+[tags] no workspace taxonomy tag for outcome "dnd" — using fallback. Seed a workspace_outcome_tags row for this outcome.
+[tags] no workspace taxonomy tag for outcome "not_interested" — using fallback. Seed a workspace_outcome_tags row for this outcome.
+[tags] no workspace taxonomy tag for outcome "appointment" — using fallback. Seed a workspace_outcome_tags row for this outcome.
+[tags] no workspace taxonomy tag for outcome "no_answer_voicemail" — using fallback. Seed a workspace_outcome_tags row for this outcome.
+▶ classifyOutcome
+  ✔ maps known aliases to canonical outcomes (0.849917ms)
+  ✔ normalizes spaces and hyphens to underscores (0.137333ms)
+  ✔ falls back to no_answer_voicemail for unknown / empty outcomes (safe: keeps calling) (0.705583ms)
+  ✔ does not downgrade a real positive outcome when Retell flags voicemail (0.11325ms)
+✔ classifyOutcome (2.753416ms)
+▶ isEligible
+  ✔ is eligible for a fresh, never-called contact (0.212291ms)
+  ✔ is not eligible when terminal (0.183917ms)
+  ✔ is not eligible at/over the per-contact attempt cap (0.135708ms)
+  ✔ is not eligible if already called today (0.187917ms)
+  ✔ is not eligible before next_eligible_on, eligible on/after it (0.170125ms)
+✔ isEligible (1.184208ms)
+▶ nextEligibleDate
+  ✔ uses the gap for the attempt just completed (1.325833ms)
+  ✔ clamps to the last gap beyond the array length (0.100167ms)
+  ✔ never schedules the next attempt for the same day (min 1 day) (0.071875ms)
+✔ nextEligibleDate (1.813959ms)
+▶ reconcileTags
+  ✔ adds the new outcome tag and keeps unrelated tags (0.33575ms)
+  ✔ strips any prior AI outcome tag (no stacking) (0.082334ms)
+  ✔ drops the enroll tag on a terminal outcome (leaves the flow) (0.07175ms)
+  ✔ is idempotent — re-running the same outcome is a no-op (1.041583ms)
+  ✔ treats dnd/not_interested/appointment as terminal even with NO taxonomy row (safety net) (0.333458ms)
+  ✔ keeps a non-terminal outcome non-terminal when taxonomy is missing (0.1625ms)
+✔ reconcileTags (2.203ms)
+▶ withinCallWindow
+  ✔ treats the window as inclusive HH:MM string bounds (11.539166ms)
+✔ withinCallWindow (11.601583ms)
+▶ dailyWindowCapacity
+  ✔ counts drip slots from window start through window end inclusive (0.18375ms)
+  ✔ returns 0 for invalid windows or drip (0.046958ms)
+  ✔ last projected slot never exceeds window end (0.059208ms)
+✔ dailyWindowCapacity (0.344292ms)
+▶ remainingWindowCapacity
+  ✔ matches window phase: full before open, partial mid-window, zero after close (0.267833ms)
+  ✔ returns a boolean-safe non-negative count (0.074959ms)
+✔ remainingWindowCapacity (0.374ms)
+▶ projectDialSlot
+  ✔ keeps today when the slot is still in the future (0.053958ms)
+  ✔ rolls to tomorrow when today's slot already passed (0.032125ms)
+✔ projectDialSlot (0.112417ms)
+▶ rollScheduleForwardIfPast
+  ✔ returns the same timestamp when still in the future (0.047834ms)
+  ✔ rolls a past timestamp forward by whole days (0.033292ms)
+✔ rollScheduleForwardIfPast (0.104167ms)
+▶ daily cap rollover math
+  ✔ 1200 eligible contacts span multiple days at window capacity (0.034209ms)
+✔ daily cap rollover math (0.05575ms)
+▶ buildOpportunityCustomFieldsPayload
+  ✔ returns undefined when no custom fields are provided (0.248625ms)
+  ✔ maps id, key, and field_value for create/update bodies (0.297916ms)
+✔ buildOpportunityCustomFieldsPayload (0.882833ms)
+▶ buildCustomFieldsFromTaskConfig
+  ✔ returns undefined when custom field automation is disabled (0.065667ms)
+  ✔ returns the configured custom field payload when enabled (0.044208ms)
+  ✔ requires both field id and value (0.036083ms)
+✔ buildCustomFieldsFromTaskConfig (0.218709ms)
+▶ applyPollStageRouting
+  ✔ moves only provided contacts with custom fields when poll stage is enabled (0.579042ms)
+  ✔ no-ops when poll stage automation is disabled (0.064042ms)
+  ✔ no-ops when poll pipeline/stage is incomplete (0.12525ms)
+✔ applyPollStageRouting (1.136917ms)
+▶ aggregateReporting
+  ✔ computes KPI totals from normalized calls (13.235458ms)
+  ✔ returns empty aggregates for no calls (0.300792ms)
+✔ aggregateReporting (13.88975ms)
+▶ crmContactUrl
+  ✔ normalizes trailing slashes on base URL (0.094875ms)
+  ✔ builds FUB contact deep-link (0.068625ms)
+  ✔ returns null without contact id or base URL (0.042042ms)
+✔ crmContactUrl (0.285667ms)
+▶ verifyRetellSignature
+  ✔ accepts a payload signed with the env RETELL_API_KEY (0.568375ms)
+  ✔ accepts a payload signed with a per-agent candidate (e.g. its API key) (0.558583ms)
+  ✔ rejects a payload signed with an unknown secret (0.44625ms)
+  ✔ rejects when no signature header is present (0.319584ms)
+✔ verifyRetellSignature (2.624291ms)
+▶ listWebhookSecretCandidates
+  ✔ includes the API key and dedupes against the webhook secret (0.170417ms)
+✔ listWebhookSecretCandidates (0.232042ms)
+ℹ tests 58
+ℹ suites 21
+ℹ pass 58
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 203.57675
+EXIT:0

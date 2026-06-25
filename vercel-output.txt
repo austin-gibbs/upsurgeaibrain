@@ -1,0 +1,20 @@
+Vercel CLI 54.14.5 (Node.js 24.13.0)
+Fetching deployments in austin-gibbs-projects
+> Production deployments for austin-gibbs-projects/upsurgeaiagentapp [89ms]
+
+  Age     Project                                     Deployment                                                               Status         Environment     Duration     Username        
+  16s     austin-gibbs-projects/upsurgeaiagentapp     https://upsurgeaiagentapp-ong50zy36-austin-gibbs-projects.vercel.app     ● Building     Production      --           austin-2208     
+  48m     austin-gibbs-projects/upsurgeaiagentapp     https://upsurgeaiagentapp-dmz5w6pyz-austin-gibbs-projects.vercel.app     ● Ready        Production      46s          austin-2208     
+  1h      austin-gibbs-projects/upsurgeaiagentapp     https://upsurgeaiagentapp-hlzeyavvf-austin-gibbs-projects.vercel.app     ● Ready        Production      40s          austin-2208     
+  22h     austin-gibbs-projects/upsurgeaiagentapp     https://upsurgeaiagentapp-1bfgv0eap-austin-gibbs-projects.vercel.app     ● Ready        Production      38s          austin-2208     
+  22h     austin-gibbs-projects/upsurgeaiagentapp     https://upsurgeaiagentapp-alkmgy7co-austin-gibbs-projects.vercel.app     ● Ready        Production      40s          austin-2208     
+  24h     austin-gibbs-projects/upsurgeaiagentapp     https://upsurgeaiagentapp-4b8qzozfe-austin-gibbs-projects.vercel.app     ● Ready        Production      53s          austin-2208     
+  24h     austin-gibbs-projects/upsurgeaiagentapp     https://upsurgeaiagentapp-8tu8p9w3v-austin-gibbs-projects.vercel.app     ● Ready        Production      36s          austin-2208     
+  24h     austin-gibbs-projects/upsurgeaiagentapp     https://upsurgeaiagentapp-8dfhl2d9k-austin-gibbs-projects.vercel.app     ● Ready        Production      39s          austin-2208     
+  1d      austin-gibbs-projects/upsurgeaiagentapp     https://upsurgeaiagentapp-8b3bfydnh-austin-gibbs-projects.vercel.app     ● Ready        Production      36s          austin-2208     
+  1d      austin-gibbs-projects/upsurgeaiagentapp     https://upsurgeaiagentapp-l8dt1h296-austin-gibbs-projects.vercel.app     ● Ready        Production      56s          austin-2208     
+  1d      austin-gibbs-projects/upsurgeaiagentapp     https://upsurgeaiagentapp-bwsvfydnl-austin-gibbs-projects.vercel.app     ● Ready        Production      36s          austin-2208     
+  1d      austin-gibbs-projects/upsurgeaiagentapp     https://upsurgeaiagentapp-2iadumrsy-austin-gibbs-projects.vercel.app     ● Ready        Production      44s          austin-2208     
+  1d      austin-gibbs-projects/upsurgeaiagentapp     https://upsurgeaiagentapp-kk6gd6epn-austin-gibbs-projects.vercel.app     ● Ready        Production      33s          austin-2208     
+  1d      austin-gibbs-projects/upsurgeaiagentapp     https://upsurgeaiagentapp-ydhlj1ahd-austin-gibbs-projects.vercel.app     ● Ready        Production      39s          austin-2208     
+  1d      austin-gibbs-projects/upsurgeaiagentapp     https://upsurgeaiagentapp-xah08ga5u-austin-gibbs-projects.vercel.app     ● Ready        Production      37s          austin-2208     

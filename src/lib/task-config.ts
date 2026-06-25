@@ -9,8 +9,7 @@ function trimOrNull(value: string | null | undefined): string | null {
 }
 
 /**
- * Normalize task-config before PATCH so enabled flags match the fields the
- * user actually configured, and empty strings don't fail validation.
+ * Normalize task-config before PATCH so empty strings don't fail validation.
  */
 export function prepareTaskConfigForSave(cfg: TaskConfig): TaskConfig {
   const opportunityId = trimOrNull(cfg.opportunity_custom_field_id);
@@ -19,23 +18,13 @@ export function prepareTaskConfigForSave(cfg: TaskConfig): TaskConfig {
   const pollStageId = trimOrNull(cfg.poll_pipeline_stage_id);
   const webhookUrl = trimOrNull(cfg.post_call_webhook_url);
 
-  let opportunity_custom_field_enabled = cfg.opportunity_custom_field_enabled;
-  if (opportunityId && opportunityValue) {
-    opportunity_custom_field_enabled = true;
-  }
-
-  let poll_stage_enabled = cfg.poll_stage_enabled;
-  if (pollPipelineId && pollStageId) {
-    poll_stage_enabled = true;
-  }
-
   return {
     ...cfg,
     due_at_time: cfg.due_at_time ? normalizeHHMM(cfg.due_at_time) : null,
     post_call_webhook_url: webhookUrl,
     poll_pipeline_id: pollPipelineId,
     poll_pipeline_stage_id: pollStageId,
-    poll_stage_enabled,
+    poll_stage_enabled: cfg.poll_stage_enabled,
     opportunity_custom_field_id: opportunityId,
     opportunity_custom_field_key: trimOrNull(cfg.opportunity_custom_field_key),
     opportunity_custom_field_label: trimOrNull(cfg.opportunity_custom_field_label),
@@ -43,7 +32,7 @@ export function prepareTaskConfigForSave(cfg: TaskConfig): TaskConfig {
     opportunity_custom_field_value_label: trimOrNull(
       cfg.opportunity_custom_field_value_label
     ),
-    opportunity_custom_field_enabled,
+    opportunity_custom_field_enabled: cfg.opportunity_custom_field_enabled,
   };
 }
 
