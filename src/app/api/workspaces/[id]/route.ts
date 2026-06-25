@@ -22,7 +22,9 @@ export async function GET(
 
   const { data: workspace, error: wsErr } = await db
     .from("workspaces")
-    .select("id, name, timezone, crm_provider, enroll_tag, is_active, created_at")
+    .select(
+      "id, name, timezone, crm_provider, enroll_tag, is_active, created_at, crm_credentials_encrypted"
+    )
     .eq("id", params.id)
     .single<{
       id: string;
@@ -32,6 +34,7 @@ export async function GET(
       enroll_tag: string;
       is_active: boolean;
       created_at: string;
+      crm_credentials_encrypted: string | null;
     }>();
 
   if (wsErr || !workspace) {
@@ -77,6 +80,7 @@ export async function GET(
     id: string;
     full_name: string | null;
     phones: string[];
+    tags: string[];
     attempt_count: number;
     last_called_on: string | null;
     next_eligible_on: string | null;
@@ -94,7 +98,7 @@ export async function GET(
     const { data: page, error: pageErr } = await db
       .from("contacts")
       .select(
-        "id, full_name, phones, attempt_count, last_called_on, next_eligible_on, is_terminal, terminal_outcome"
+        "id, full_name, phones, tags, attempt_count, last_called_on, next_eligible_on, is_terminal, terminal_outcome"
       )
       .eq("workspace_id", params.id)
       .order("is_terminal", { ascending: true })
@@ -113,8 +117,14 @@ export async function GET(
     .select("outcome, tag, is_terminal")
     .eq("workspace_id", params.id);
 
+  const { crm_credentials_encrypted, ...workspacePublic } = workspace;
+
   return NextResponse.json({
-    workspace: { ...workspace, crm_account_url: null },
+    workspace: {
+      ...workspacePublic,
+      crm_account_url: null,
+      has_workspace_crm_credentials: Boolean(crm_credentials_encrypted),
+    },
     agents: agents ?? [],
     contactCount: contactCount ?? 0,
     contacts,

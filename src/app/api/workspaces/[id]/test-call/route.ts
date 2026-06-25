@@ -16,6 +16,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase/server";
 import { cancelPendingDials, placeCall, placeTestCall } from "@/lib/engine/caller";
 import { testCallSchema } from "@/lib/validation";
+import {
+  contactHasEnrollTag,
+  effectiveEnrollTag,
+} from "@/lib/agents/enroll-tag";
 
 export const runtime = "nodejs";
 
@@ -32,9 +36,9 @@ export async function POST(
   // RLS scopes this to workspaces the caller can see.
   const { data: workspace, error: wsErr } = await db
     .from("workspaces")
-    .select("id")
+    .select("id, enroll_tag")
     .eq("id", params.id)
-    .single<{ id: string }>();
+    .single<{ id: string; enroll_tag: string }>();
   if (wsErr || !workspace) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
@@ -51,12 +55,13 @@ export async function POST(
 
   const { data: agent } = await db
     .from("agents")
-    .select("id, direction, retell_agent_id, retell_from_number")
+    .select("id, direction, enroll_tag, retell_agent_id, retell_from_number")
     .eq("id", agentId)
     .eq("workspace_id", params.id)
     .single<{
       id: string;
       direction: "inbound" | "outbound";
+      enroll_tag: string | null;
       retell_agent_id: string | null;
       retell_from_number: string | null;
     }>();
@@ -102,13 +107,14 @@ export async function POST(
 
   const { data: contact } = await db
     .from("contacts")
-    .select("id, full_name, phones, attempt_count, is_terminal")
+    .select("id, full_name, phones, tags, attempt_count, is_terminal")
     .eq("id", contactId)
     .eq("workspace_id", params.id)
     .single<{
       id: string;
       full_name: string | null;
       phones: string[];
+      tags: string[];
       attempt_count: number;
       is_terminal: boolean;
     }>();
@@ -118,6 +124,17 @@ export async function POST(
       { status: 404 }
     );
   }
+
+  const enrollTag = effectiveEnrollTag(agent.enroll_tag, workspace.enroll_tag);
+  if (!contactHasEnrollTag(contact.tags, enrollTag)) {
+    return NextResponse.json(
+      {
+        error: `Contact is not enrolled with tag "${enrollTag}" for this agent.`,
+      },
+      { status: 400 }
+    );
+  }
+
   if (contact.is_terminal) {
     return NextResponse.json(
       { error: "contact has already completed the flow" },

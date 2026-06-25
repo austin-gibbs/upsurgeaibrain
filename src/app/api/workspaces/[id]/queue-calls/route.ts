@@ -7,6 +7,10 @@ import { createServerClient, createServiceClient } from "@/lib/supabase/server";
 import { enqueueContactsNow } from "@/lib/engine/poller";
 import { listActiveQueueEntries } from "@/lib/engine/call-queue";
 import { queueCallsSchema } from "@/lib/validation";
+import {
+  contactHasEnrollTag,
+  effectiveEnrollTag,
+} from "@/lib/agents/enroll-tag";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -19,9 +23,9 @@ async function authorizeWorkspace(db: ReturnType<typeof createServerClient>, wor
 
   const { data: workspace, error } = await db
     .from("workspaces")
-    .select("id, is_active")
+    .select("id, is_active, enroll_tag")
     .eq("id", workspaceId)
-    .single<{ id: string; is_active: boolean }>();
+    .single<{ id: string; is_active: boolean; enroll_tag: string }>();
   if (error || !workspace) {
     return { error: NextResponse.json({ error: "not found" }, { status: 404 }) };
   }
@@ -30,15 +34,17 @@ async function authorizeWorkspace(db: ReturnType<typeof createServerClient>, wor
 }
 
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: { id: string } }
 ) {
   const db = createServerClient();
   const auth = await authorizeWorkspace(db, params.id);
   if ("error" in auth && auth.error) return auth.error;
 
+  const agentId = req.nextUrl.searchParams.get("agentId");
   const rows = await listActiveQueueEntries(createServiceClient(), params.id);
-  const entries = rows.map((row) => ({
+  const filtered = agentId ? rows.filter((row) => row.agent_id === agentId) : rows;
+  const entries = filtered.map((row) => ({
     id: row.id,
     agentId: row.agent_id,
     agentName: row.agents?.name ?? "Agent",
@@ -70,7 +76,9 @@ export async function POST(
   const db = createServerClient();
   const auth = await authorizeWorkspace(db, params.id);
   if ("error" in auth && auth.error) return auth.error;
-  const { workspace } = auth as { workspace: { id: string; is_active: boolean } };
+  const { workspace } = auth as {
+    workspace: { id: string; is_active: boolean; enroll_tag: string };
+  };
 
   if (!workspace.is_active) {
     return NextResponse.json({ error: "workspace inactive" }, { status: 400 });
@@ -88,10 +96,10 @@ export async function POST(
 
   const { data: agent } = await db
     .from("agents")
-    .select("id, direction")
+    .select("id, direction, enroll_tag")
     .eq("id", agentId)
     .eq("workspace_id", params.id)
-    .single<{ id: string; direction: "inbound" | "outbound" }>();
+    .single<{ id: string; direction: "inbound" | "outbound"; enroll_tag: string | null }>();
   if (!agent) {
     return NextResponse.json(
       { error: "agent not found in this workspace" },
@@ -105,6 +113,50 @@ export async function POST(
     );
   }
 
-  const result = await enqueueContactsNow(agentId, contactIds);
-  return NextResponse.json({ ok: result.enqueued > 0, ...result });
+  const enrollTag = effectiveEnrollTag(agent.enroll_tag, workspace.enroll_tag);
+  const { data: contacts } = await db
+    .from("contacts")
+    .select("id, tags")
+    .eq("workspace_id", params.id)
+    .in("id", contactIds)
+    .returns<{ id: string; tags: string[] }[]>();
+
+  const eligibleIds: string[] = [];
+  const enrollmentErrors: string[] = [];
+  for (const contactId of contactIds) {
+    const row = (contacts ?? []).find((c) => c.id === contactId);
+    if (!row) {
+      enrollmentErrors.push(`Contact ${contactId} not found in workspace`);
+      continue;
+    }
+    if (!contactHasEnrollTag(row.tags, enrollTag)) {
+      enrollmentErrors.push(
+        `Contact is not enrolled with tag "${enrollTag}" for this agent`
+      );
+      continue;
+    }
+    eligibleIds.push(contactId);
+  }
+
+  if (eligibleIds.length === 0) {
+    return NextResponse.json(
+      {
+        ok: false,
+        requested: contactIds.length,
+        enqueued: 0,
+        skippedReason: enrollmentErrors[0] ?? "No contacts belong to this agent's enrollment tag",
+        errors: enrollmentErrors,
+      },
+      { status: 400 }
+    );
+  }
+
+  const result = await enqueueContactsNow(agentId, eligibleIds);
+  return NextResponse.json({
+    ok: result.enqueued > 0,
+    ...result,
+    requested: contactIds.length,
+    skippedEnrollment: contactIds.length - eligibleIds.length,
+    errors: [...(result.errors ?? []), ...enrollmentErrors],
+  });
 }

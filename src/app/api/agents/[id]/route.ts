@@ -24,6 +24,16 @@ import {
 import { rescheduleAgentCallQueue } from "@/lib/queue/reschedule";
 import { prepareTaskConfigForSave } from "@/lib/task-config";
 import { defaultTaskConfig } from "@/components/agent-form/types";
+import {
+  assertEnrollTagUnique,
+  enrollTagTakenMessage,
+  effectiveEnrollTag,
+  isEnrollTagUniqueViolation,
+} from "@/lib/agents/enroll-tag";
+import {
+  agentInheritsWorkspaceCrm,
+} from "@/lib/agents/crm-inheritance";
+import { validateAgentActivation } from "@/lib/agents/activation";
 import { z } from "zod";
 
 export const runtime = "nodejs";
@@ -137,6 +147,8 @@ export async function GET(
     effectiveCrmProvider,
     hasEffectiveCrmCredentials,
     effectiveCrmStatus,
+    inheritsWorkspaceCrm: agentInheritsWorkspaceCrm(agentRow),
+    workspaceHasCrmCredentials: Boolean(workspaces?.crm_credentials_encrypted),
     calls: calls ?? [],
     pipelineStageMap: pipelineStageMap ?? [],
   });
@@ -151,6 +163,7 @@ const patchSchema = z.object({
   objective: z.string().nullable().optional(),
   crm_provider: z.enum(["followupboss", "highlevel"]).nullable().optional(),
   crm_credentials: crmCredentialsSchema.nullable().optional(),
+  inherit_workspace_crm: z.boolean().optional(),
   retell_credentials: retellCredentialsSchema.nullable().optional(),
   call_config: callConfigSchema.optional(),
   task_config: taskConfigSchema.optional(),
@@ -198,12 +211,14 @@ export async function PATCH(
   const { data: existing } = await userClient
     .from("agents")
     .select(
-      "id, direction, enroll_tag, retell_agent_id, retell_from_number, " +
-        "crm_provider, crm_credentials_encrypted, retell_credentials_encrypted"
+      "id, workspace_id, direction, enroll_tag, retell_agent_id, retell_from_number, " +
+        "crm_provider, crm_credentials_encrypted, retell_credentials_encrypted, " +
+        "workspaces(enroll_tag, crm_provider, crm_credentials_encrypted)"
     )
     .eq("id", params.id)
     .single<{
       id: string;
+      workspace_id: string;
       direction: AgentDirection;
       enroll_tag: string | null;
       retell_agent_id: string | null;
@@ -211,47 +226,108 @@ export async function PATCH(
       crm_provider: "followupboss" | "highlevel" | null;
       crm_credentials_encrypted: string | null;
       retell_credentials_encrypted: string | null;
+      workspaces: {
+        enroll_tag: string;
+        crm_provider: "followupboss" | "highlevel" | null;
+        crm_credentials_encrypted: string | null;
+      } | null;
     }>();
   if (!existing) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
 
+  const workspace = existing.workspaces;
+  if (!workspace) {
+    return NextResponse.json({ error: "workspace not found" }, { status: 404 });
+  }
+
   const nextDirection = input.direction ?? existing.direction;
   const nextRetellAgentId = input.retell_agent_id ?? existing.retell_agent_id;
   const nextFromNumber = input.retell_from_number ?? existing.retell_from_number;
-  const nextCrmProvider = input.crm_provider ?? existing.crm_provider;
-  const nextCrmEncrypted = input.crm_credentials
-    ? encryptJson(input.crm_credentials)
-    : existing.crm_credentials_encrypted;
+  const nextEnrollTag =
+    input.enroll_tag !== undefined ? input.enroll_tag : existing.enroll_tag;
+
+  let nextCrmProvider = input.crm_provider ?? existing.crm_provider;
+  let nextCrmEncrypted = existing.crm_credentials_encrypted;
+
+  if (input.inherit_workspace_crm) {
+    if (!workspace.crm_credentials_encrypted) {
+      return NextResponse.json(
+        {
+          error:
+            "Workspace has no CRM connection to inherit. Connect CRM at the workspace level first.",
+        },
+        { status: 400 }
+      );
+    }
+    nextCrmProvider = null;
+    nextCrmEncrypted = null;
+  } else if (input.crm_credentials) {
+    nextCrmEncrypted = encryptJson(input.crm_credentials);
+    if (input.crm_provider !== undefined) {
+      nextCrmProvider = input.crm_provider;
+    }
+  } else if (input.crm_provider !== undefined) {
+    nextCrmProvider = input.crm_provider;
+  }
+
   const nextRetellEncrypted = input.retell_credentials
     ? encryptJson(input.retell_credentials)
     : existing.retell_credentials_encrypted;
 
-  // Guard: activating requires direction-specific Retell linkage.
+  const db = createServiceClient();
+
+  if (
+    nextDirection === "outbound" &&
+    nextEnrollTag?.trim() &&
+    (input.enroll_tag !== undefined || input.direction !== undefined)
+  ) {
+    const enrollError = await assertEnrollTagUnique(
+      db,
+      existing.workspace_id,
+      nextEnrollTag,
+      workspace.enroll_tag,
+      params.id
+    );
+    if (enrollError) {
+      return NextResponse.json({ error: enrollError }, { status: 409 });
+    }
+  }
+
   if (input.status === "active") {
-    if (!nextRetellAgentId) {
-      return NextResponse.json(
-        { error: "Cannot activate: agent needs a Retell agent ID first." },
-        { status: 400 }
-      );
-    }
-    if (nextDirection === "outbound" && !nextFromNumber) {
-      return NextResponse.json(
-        {
-          error:
-            "Cannot activate: outbound agents need a Retell from-number first.",
-        },
-        { status: 400 }
-      );
-    }
-    if (nextDirection === "inbound" && !nextRetellEncrypted) {
-      return NextResponse.json(
-        {
-          error:
-            "Cannot activate: inbound agents need Retell credentials first.",
-        },
-        { status: 400 }
-      );
+    const { data: callConfigRow } = await db
+      .from("agent_call_configs")
+      .select("agent_id")
+      .eq("agent_id", params.id)
+      .maybeSingle();
+
+    const { data: peerAgents } = await db
+      .from("agents")
+      .select("id, direction, enroll_tag")
+      .eq("workspace_id", existing.workspace_id)
+      .returns<{ id: string; direction: "inbound" | "outbound"; enroll_tag: string | null }[]>();
+
+    const activationError = validateAgentActivation({
+      agentId: params.id,
+      direction: nextDirection,
+      enrollTag: nextEnrollTag,
+      retellAgentId: nextRetellAgentId,
+      retellFromNumber: nextFromNumber,
+      retellCredentialsEncrypted: nextRetellEncrypted,
+      workspaceEnrollTag: workspace.enroll_tag,
+      existingAgents: peerAgents ?? [],
+      agent: {
+        crm_provider: nextCrmProvider,
+        crm_credentials_encrypted: nextCrmEncrypted,
+      },
+      workspace: {
+        crm_provider: workspace.crm_provider,
+        crm_credentials_encrypted: workspace.crm_credentials_encrypted,
+      },
+      hasCallConfig: Boolean(callConfigRow),
+    });
+    if (activationError) {
+      return NextResponse.json({ error: activationError }, { status: 400 });
     }
   }
 
@@ -264,8 +340,10 @@ export async function PATCH(
     update.retell_from_number = input.retell_from_number;
   }
   if (input.enroll_tag !== undefined) update.enroll_tag = input.enroll_tag;
-  if (input.crm_provider !== undefined) update.crm_provider = input.crm_provider;
-  if (input.crm_credentials !== undefined) {
+  if (input.inherit_workspace_crm || input.crm_provider !== undefined) {
+    update.crm_provider = nextCrmProvider;
+  }
+  if (input.inherit_workspace_crm || input.crm_credentials !== undefined) {
     update.crm_credentials_encrypted = nextCrmEncrypted;
   }
   if (input.retell_credentials !== undefined) {
@@ -285,14 +363,16 @@ export async function PATCH(
     );
   }
 
-  const db = createServiceClient();
-
   if (Object.keys(update).length > 0) {
     const { error: agentError } = await db
       .from("agents")
       .update(update)
       .eq("id", params.id);
     if (agentError) {
+      if (isEnrollTagUniqueViolation(agentError)) {
+        const tag = effectiveEnrollTag(nextEnrollTag, workspace.enroll_tag);
+        return NextResponse.json({ error: enrollTagTakenMessage(tag) }, { status: 409 });
+      }
       return NextResponse.json({ error: agentError.message }, { status: 500 });
     }
   }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
@@ -28,6 +28,11 @@ import {
 type Direction = "inbound" | "outbound";
 type CrmProvider = "followupboss" | "highlevel";
 
+const CRM_LABEL: Record<CrmProvider, string> = {
+  followupboss: "Follow Up Boss",
+  highlevel: "HighLevel",
+};
+
 export default function NewAgentPage({
   params,
 }: {
@@ -39,16 +44,17 @@ export default function NewAgentPage({
   const [name, setName] = useState("");
   const [objective, setObjective] = useState("");
 
-  // Outbound-only
   const [enrollTag, setEnrollTag] = useState("");
   const [retellFromNumber, setRetellFromNumber] = useState("");
 
-  // Retell linkage (both directions need the agent id; inbound also needs creds)
   const [retellAgentId, setRetellAgentId] = useState("");
   const [retellApiKey, setRetellApiKey] = useState("");
   const [retellWebhookSecret, setRetellWebhookSecret] = useState("");
 
-  // CRM (per agent)
+  const [workspaceCrmProvider, setWorkspaceCrmProvider] =
+    useState<CrmProvider | null>(null);
+  const [workspaceHasCrm, setWorkspaceHasCrm] = useState(false);
+  const [inheritWorkspaceCrm, setInheritWorkspaceCrm] = useState(true);
   const [crmProvider, setCrmProvider] = useState<CrmProvider>("followupboss");
   const [fubApiKey, setFubApiKey] = useState("");
   const [hlAccessToken, setHlAccessToken] = useState("");
@@ -58,11 +64,38 @@ export default function NewAgentPage({
   const [taskConfig, setTaskConfig] = useState<TaskConfig>(defaultTaskConfig());
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [loadingWorkspace, setLoadingWorkspace] = useState(true);
 
   const isInbound = direction === "inbound";
+  const useWorkspaceCrm = inheritWorkspaceCrm && workspaceHasCrm;
+  const effectiveCrmProvider = useWorkspaceCrm
+    ? workspaceCrmProvider
+    : crmProvider;
 
-  const crmCredsValid =
-    crmProvider === "followupboss"
+  useEffect(() => {
+    fetch(`/api/workspaces/${params.id}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.error) {
+          setError(d.error);
+          return;
+        }
+        const ws = d.workspace;
+        const hasCrm = Boolean(ws?.has_workspace_crm_credentials);
+        setWorkspaceHasCrm(hasCrm);
+        setInheritWorkspaceCrm(hasCrm);
+        if (ws?.crm_provider) {
+          setWorkspaceCrmProvider(ws.crm_provider);
+          setCrmProvider(ws.crm_provider);
+        }
+      })
+      .catch((e) => setError(e.message))
+      .finally(() => setLoadingWorkspace(false));
+  }, [params.id]);
+
+  const crmCredsValid = useWorkspaceCrm
+    ? true
+    : crmProvider === "followupboss"
       ? fubApiKey.trim().length >= 10
       : hlAccessToken.trim().length >= 10 && hlLocationId.trim().length > 0;
 
@@ -70,7 +103,11 @@ export default function NewAgentPage({
     ? retellAgentId.trim().length > 0 && retellApiKey.trim().length >= 10
     : enrollTag.trim().length > 0;
 
-  const valid = name.trim().length > 0 && crmCredsValid && directionValid;
+  const valid =
+    name.trim().length > 0 &&
+    crmCredsValid &&
+    directionValid &&
+    (useWorkspaceCrm || !workspaceHasCrm || !inheritWorkspaceCrm);
 
   function crmCredentials() {
     return crmProvider === "followupboss"
@@ -93,8 +130,9 @@ export default function NewAgentPage({
           enroll_tag: isInbound ? null : enrollTag.trim(),
           retell_agent_id: retellAgentId.trim() || null,
           retell_from_number: isInbound ? null : retellFromNumber.trim() || null,
-          crm_provider: crmProvider,
-          crm_credentials: crmCredentials(),
+          inherit_workspace_crm: useWorkspaceCrm,
+          crm_provider: useWorkspaceCrm ? null : crmProvider,
+          crm_credentials: useWorkspaceCrm ? null : crmCredentials(),
           retell_credentials: isInbound
             ? {
                 apiKey: retellApiKey.trim(),
@@ -134,7 +172,6 @@ export default function NewAgentPage({
       />
 
       <div className="mx-auto max-w-3xl space-y-6">
-        {/* Direction */}
         <Card className="space-y-4 p-6 sm:p-8">
           <SectionHeader title="Agent type" />
           <div className="space-y-2">
@@ -154,7 +191,6 @@ export default function NewAgentPage({
           </div>
         </Card>
 
-        {/* Identity */}
         <Card className="space-y-6 p-6 sm:p-8">
           <SectionHeader title="Identity" />
           <div className="grid gap-4 sm:grid-cols-2">
@@ -169,7 +205,7 @@ export default function NewAgentPage({
 
             {!isInbound && (
               <div className="space-y-1.5">
-                <Label hint="CRM tag that enrolls contacts into this agent's flow">
+                <Label hint="CRM tag that enrolls contacts into this agent's flow — must be unique in this workspace">
                   Enrollment tag
                 </Label>
                 <Input
@@ -215,59 +251,94 @@ export default function NewAgentPage({
           </div>
         </Card>
 
-        {/* CRM */}
         <Card className="space-y-6 p-6 sm:p-8">
           <SectionHeader
             title="CRM"
-            description="Where this agent reads and writes contacts, notes, tags, and tasks."
+            description={
+              workspaceHasCrm
+                ? "For multiple agents on the same HighLevel location, inherit the workspace connection so OAuth tokens are not duplicated."
+                : "Where this agent reads and writes contacts, notes, tags, and tasks."
+            }
           />
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="space-y-1.5">
-              <Label>Provider</Label>
-              <Select
-                value={crmProvider}
-                onChange={(e) => setCrmProvider(e.target.value as CrmProvider)}
-              >
-                <option value="followupboss">Follow Up Boss</option>
-                <option value="highlevel">HighLevel</option>
-              </Select>
-            </div>
-
-            {crmProvider === "followupboss" ? (
-              <div className="space-y-1.5">
-                <Label hint="HTTP Basic — stored encrypted">API key</Label>
-                <Input
-                  type="password"
-                  value={fubApiKey}
-                  onChange={(e) => setFubApiKey(e.target.value)}
-                  placeholder="fka_…"
+          {loadingWorkspace ? (
+            <p className="text-sm text-ink-500">Loading workspace CRM…</p>
+          ) : workspaceHasCrm ? (
+            <div className="space-y-4">
+              <Label className="flex cursor-pointer items-start gap-2 font-normal text-ink-700">
+                <input
+                  type="checkbox"
+                  checked={inheritWorkspaceCrm}
+                  onChange={(e) => setInheritWorkspaceCrm(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-ink-300 text-brand-600 focus:ring-brand-500"
                 />
+                <span>
+                  Use workspace{" "}
+                  {workspaceCrmProvider
+                    ? CRM_LABEL[workspaceCrmProvider]
+                    : "CRM"}{" "}
+                  connection
+                  <span className="mt-0.5 block text-xs text-ink-500">
+                    Recommended for multi-agent workspaces on the same CRM account.
+                  </span>
+                </span>
+              </Label>
+              {useWorkspaceCrm && (
+                <p className="rounded-xl bg-accent-mint-bg px-4 py-3 text-sm text-accent-mint-fg">
+                  This agent will share the workspace CRM credentials. No separate OAuth
+                  connection is stored on the agent.
+                </p>
+              )}
+            </div>
+          ) : null}
+
+          {!useWorkspaceCrm && (
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label>Provider</Label>
+                <Select
+                  value={crmProvider}
+                  onChange={(e) => setCrmProvider(e.target.value as CrmProvider)}
+                >
+                  <option value="followupboss">Follow Up Boss</option>
+                  <option value="highlevel">HighLevel</option>
+                </Select>
               </div>
-            ) : (
-              <>
+
+              {crmProvider === "followupboss" ? (
                 <div className="space-y-1.5">
-                  <Label hint="stored encrypted">Access token</Label>
+                  <Label hint="HTTP Basic — stored encrypted">API key</Label>
                   <Input
                     type="password"
-                    value={hlAccessToken}
-                    onChange={(e) => setHlAccessToken(e.target.value)}
-                    placeholder="eyJ…"
+                    value={fubApiKey}
+                    onChange={(e) => setFubApiKey(e.target.value)}
+                    placeholder="fka_…"
                   />
                 </div>
-                <div className="space-y-1.5">
-                  <Label>Location ID</Label>
-                  <Input
-                    value={hlLocationId}
-                    onChange={(e) => setHlLocationId(e.target.value)}
-                    placeholder="loc_…"
-                  />
-                </div>
-              </>
-            )}
-          </div>
+              ) : (
+                <>
+                  <div className="space-y-1.5">
+                    <Label hint="stored encrypted">Access token</Label>
+                    <Input
+                      type="password"
+                      value={hlAccessToken}
+                      onChange={(e) => setHlAccessToken(e.target.value)}
+                      placeholder="eyJ…"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Location ID</Label>
+                    <Input
+                      value={hlLocationId}
+                      onChange={(e) => setHlLocationId(e.target.value)}
+                      placeholder="loc_…"
+                    />
+                  </div>
+                </>
+              )}
+            </div>
+          )}
         </Card>
 
-        {/* Retell credentials — inbound only */}
         {isInbound && (
           <Card className="space-y-6 p-6 sm:p-8">
             <SectionHeader
@@ -297,7 +368,6 @@ export default function NewAgentPage({
           </Card>
         )}
 
-        {/* Outbound-only cadence + tasks */}
         {!isInbound && (
           <>
             <Card className="space-y-6 p-6 sm:p-8">
@@ -315,7 +385,7 @@ export default function NewAgentPage({
                 users={[]}
                 onChange={(p) => setTaskConfig((c) => ({ ...c, ...p }))}
               />
-              {crmProvider === "highlevel" && (
+              {effectiveCrmProvider === "highlevel" && (
                 <PostCallWebhookSettings
                   cfg={taskConfig}
                   onChange={(p) => setTaskConfig((c) => ({ ...c, ...p }))}
@@ -335,7 +405,7 @@ export default function NewAgentPage({
           <Link href={`/workspaces/${params.id}`}>
             <Button variant="ghost">Cancel</Button>
           </Link>
-          <Button onClick={submit} disabled={!valid || submitting}>
+          <Button onClick={submit} disabled={!valid || submitting || loadingWorkspace}>
             {submitting ? "Creating…" : "Create agent"}
           </Button>
         </div>

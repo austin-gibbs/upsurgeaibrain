@@ -17,6 +17,7 @@ import { createServerClient, createServiceClient } from "@/lib/supabase/server";
 import { provisionWorkspaceSchema } from "@/lib/validation";
 import { buildAdapter } from "@/lib/crm";
 import { encryptJson } from "@/lib/crypto";
+import { validateAgentEnrollTagsForWorkspace } from "@/lib/agents/enroll-tag";
 
 export const runtime = "nodejs";
 
@@ -57,6 +58,17 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "invalid payload", issues: parsed.error.issues }, { status: 400 });
   }
   const input = parsed.data;
+
+  const enrollTagError = validateAgentEnrollTagsForWorkspace(
+    input.workspace.enroll_tag,
+    input.agents.map((a) => ({
+      direction: a.direction,
+      enroll_tag: a.enroll_tag,
+    }))
+  );
+  if (enrollTagError) {
+    return NextResponse.json({ error: enrollTagError }, { status: 400 });
+  }
 
   // 3. Verify CRM creds before persisting anything.
   const adapter = buildAdapter(input.workspace.crm_provider, input.workspace.credentials as any);

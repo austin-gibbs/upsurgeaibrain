@@ -111,6 +111,9 @@ export default function AgentDetailPage({
     useState<CrmProvider | null>(null);
   const [hasEffectiveCrmCredentials, setHasEffectiveCrmCredentials] =
     useState(false);
+  const [inheritsWorkspaceCrm, setInheritsWorkspaceCrm] = useState(false);
+  const [workspaceHasCrmCredentials, setWorkspaceHasCrmCredentials] =
+    useState(false);
   const [crmStatus, setCrmStatus] = useState<string | null>(null);
   const [stageMap, setStageMap] = useState<StageMapEntry[]>([]);
   const [pipelines, setPipelines] = useState<Pipeline[]>([]);
@@ -168,6 +171,8 @@ export default function AgentDetailPage({
         setWorkspaceTimezone(d.workspaceTimezone ?? "America/New_York");
         setEffectiveCrmProvider(d.effectiveCrmProvider ?? null);
         setHasEffectiveCrmCredentials(Boolean(d.hasEffectiveCrmCredentials));
+        setInheritsWorkspaceCrm(Boolean(d.inheritsWorkspaceCrm));
+        setWorkspaceHasCrmCredentials(Boolean(d.workspaceHasCrmCredentials));
         setCrmStatus(d.effectiveCrmStatus ?? null);
       })
       .catch((e) => setError(e.message));
@@ -375,6 +380,10 @@ export default function AgentDetailPage({
       };
     }
     patch(body);
+  }
+
+  function useWorkspaceCrmConnection() {
+    patch({ inherit_workspace_crm: true });
   }
 
   function saveRetellCreds() {
@@ -606,6 +615,19 @@ export default function AgentDetailPage({
               until you reconnect. Click “Connect via OAuth” below to restore it.
             </p>
           )}
+          {inheritsWorkspaceCrm && workspaceHasCrmCredentials && (
+            <p className="rounded-xl bg-accent-mint-bg px-3 py-2 text-xs text-accent-mint-fg">
+              Using the workspace CRM connection. OAuth tokens are shared across
+              agents in this workspace.
+            </p>
+          )}
+          {!inheritsWorkspaceCrm && workspaceHasCrmCredentials && agent.has_crm_credentials && (
+            <p className="rounded-xl bg-accent-amber-bg px-3 py-2 text-xs text-accent-amber-fg">
+              This agent stores its own CRM credentials. For multiple agents on
+              the same HighLevel location, prefer the workspace connection to
+              avoid duplicate OAuth tokens.
+            </p>
+          )}
           <div className="space-y-1.5">
             <Label>Provider</Label>
             <Select
@@ -658,6 +680,16 @@ export default function AgentDetailPage({
           >
             Save CRM
           </Button>
+          {workspaceHasCrmCredentials && !inheritsWorkspaceCrm && (
+            <Button
+              variant="ghost"
+              className="w-full"
+              disabled={saving}
+              onClick={useWorkspaceCrmConnection}
+            >
+              Use workspace connection
+            </Button>
+          )}
           {crmProvider === "highlevel" && (
             <a
               href={`/api/agents/${params.id}/crm/connect`}

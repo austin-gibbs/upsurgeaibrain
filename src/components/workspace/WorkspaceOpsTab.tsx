@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   Bot,
   Users,
@@ -13,6 +14,7 @@ import {
   Phone,
   ListOrdered,
   Loader2,
+  Copy,
 } from "lucide-react";
 import {
   Card,
@@ -28,11 +30,18 @@ import {
   Select,
 } from "@/components/ui";
 import { dailyWindowCapacity } from "@/lib/engine/cadence";
+import {
+  contactHasEnrollTag,
+  effectiveEnrollTag,
+  enrollTagConflict,
+  suggestDuplicateEnrollTag,
+} from "@/lib/agents/enroll-tag";
 
 type ContactRow = {
   id: string;
   full_name: string | null;
   phones: string[];
+  tags: string[];
   attempt_count: number;
   last_called_on: string | null;
   next_eligible_on: string | null;
@@ -57,6 +66,7 @@ type OpsData = {
     crm_provider: string;
     enroll_tag: string;
     is_active: boolean;
+    has_workspace_crm_credentials?: boolean;
   };
   agents: {
     id: string;
@@ -315,10 +325,47 @@ export function WorkspaceOpsTab({
     dialing: 0,
   });
   const [queueLoading, setQueueLoading] = useState(true);
+  const [opsAgentId, setOpsAgentId] = useState("");
+  const [testAgentId, setTestAgentId] = useState<string>("");
+  const [duplicateSource, setDuplicateSource] = useState<OpsData["agents"][number] | null>(
+    null
+  );
+  const [duplicateName, setDuplicateName] = useState("");
+  const [duplicateEnrollTag, setDuplicateEnrollTag] = useState("");
+  const [duplicateError, setDuplicateError] = useState<string | null>(null);
+  const [duplicating, setDuplicating] = useState(false);
+
+  const router = useRouter();
+
+  const { workspace, agents, contactCount, contacts, outcomeTags } = data;
+
+  const agentEnrollRows = agents.map((a) => ({
+    id: a.id,
+    direction: a.direction as "inbound" | "outbound",
+    enroll_tag: a.enroll_tag,
+  }));
+
+  const outboundAgents = agents.filter((a) => a.direction === "outbound");
+  const defaultOpsAgentId =
+    outboundAgents.find((a) => a.status === "active")?.id ??
+    outboundAgents[0]?.id ??
+    "";
+  const selectedOpsAgent =
+    outboundAgents.find((a) => a.id === opsAgentId) ?? outboundAgents[0] ?? null;
+  const selectedEnrollTag = selectedOpsAgent
+    ? effectiveEnrollTag(selectedOpsAgent.enroll_tag, workspace.enroll_tag)
+    : workspace.enroll_tag;
+
+  useEffect(() => {
+    if (!opsAgentId && defaultOpsAgentId) {
+      setOpsAgentId(defaultOpsAgentId);
+    }
+  }, [defaultOpsAgentId, opsAgentId]);
 
   const fetchQueue = useCallback(async () => {
     try {
-      const res = await fetch(`/api/workspaces/${workspaceId}/queue-calls`);
+      const qs = opsAgentId ? `?agentId=${opsAgentId}` : "";
+      const res = await fetch(`/api/workspaces/${workspaceId}/queue-calls${qs}`);
       if (!res.ok) return;
       const data = (await res.json()) as {
         entries: QueueEntry[];
@@ -333,7 +380,7 @@ export function WorkspaceOpsTab({
     } finally {
       setQueueLoading(false);
     }
-  }, [workspaceId]);
+  }, [workspaceId, opsAgentId]);
 
   useEffect(() => {
     fetchQueue();
@@ -341,14 +388,94 @@ export function WorkspaceOpsTab({
     return () => clearInterval(timer);
   }, [fetchQueue]);
 
-  const { workspace, agents, contactCount, contacts, outcomeTags } = data;
-
   // Outbound agents that are wired up to Retell can place a manual test call.
   const callableAgents = agents.filter(
     (a) => a.direction === "outbound" && a.retell_agent_id
   );
-  const [testAgentId, setTestAgentId] = useState<string>("");
-  const activeTestAgentId = testAgentId || callableAgents[0]?.id || "";
+  const activeTestAgentId =
+    testAgentId || opsAgentId || callableAgents[0]?.id || "";
+
+  function setOpsAgent(nextId: string) {
+    setOpsAgentId(nextId);
+    setTestAgentId(nextId);
+    setSelectedIds(new Set());
+  }
+
+  function closeDuplicateDialog() {
+    setDuplicateSource(null);
+    setDuplicateName("");
+    setDuplicateEnrollTag("");
+    setDuplicateError(null);
+  }
+
+  function openDuplicateDialog(agent: OpsData["agents"][number]) {
+    setDuplicateSource(agent);
+    setDuplicateName(`Copy of ${agent.name}`);
+    if (agent.direction === "outbound") {
+      setDuplicateEnrollTag(
+        suggestDuplicateEnrollTag(agent.enroll_tag, workspace.enroll_tag, agentEnrollRows)
+      );
+    } else {
+      setDuplicateEnrollTag("");
+    }
+    setDuplicateError(null);
+  }
+
+  function duplicateEnrollTagValidation(tag: string): string | null {
+    if (!duplicateSource || duplicateSource.direction !== "outbound") return null;
+    const trimmed = tag.trim();
+    if (!trimmed) return "Enrollment tag is required.";
+    if (enrollTagConflict(trimmed, workspace.enroll_tag, agentEnrollRows)) {
+      return "An agent in this workspace already uses this enrollment tag.";
+    }
+    return null;
+  }
+
+  async function submitDuplicate() {
+    if (!duplicateSource) return;
+    const name = duplicateName.trim();
+    if (!name) {
+      setDuplicateError("Agent name is required.");
+      return;
+    }
+    const tagErr = duplicateEnrollTagValidation(duplicateEnrollTag);
+    if (tagErr) {
+      setDuplicateError(tagErr);
+      return;
+    }
+
+    setDuplicating(true);
+    setDuplicateError(null);
+    try {
+      const res = await fetch(`/api/agents/${duplicateSource.id}/duplicate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name,
+          enroll_tag:
+            duplicateSource.direction === "outbound" ? duplicateEnrollTag.trim() : null,
+        }),
+      });
+      const payload = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        agentId?: string;
+      };
+      if (!res.ok) {
+        setDuplicateError(payload.error ?? "Failed to duplicate agent.");
+        return;
+      }
+      closeDuplicateDialog();
+      if (payload.agentId) {
+        router.push(`/agents/${payload.agentId}`);
+      } else {
+        onRefresh();
+      }
+    } catch {
+      setDuplicateError("Network error while duplicating agent.");
+    } finally {
+      setDuplicating(false);
+    }
+  }
 
   async function placeAdHocTestCall() {
     const agentId = activeTestAgentId;
@@ -573,18 +700,25 @@ export function WorkspaceOpsTab({
   const today = todayInTz(workspace.timezone);
   const nowEt = nowHHMMInTz(workspace.timezone);
   const tzLabel = timezoneAbbrev(workspace.timezone);
+  const selectedCallConfig = selectedOpsAgent
+    ? firstEmbed(selectedOpsAgent.agent_call_configs)
+    : firstCallConfig(agents);
+  const reducedMaxAttempts = agents.reduce(
+    (m, a) => Math.max(m, firstEmbed(a.agent_call_configs)?.max_attempts_per_contact ?? 0),
+    0
+  );
   const maxAttempts =
-    agents.reduce(
-      (m, a) => Math.max(m, firstEmbed(a.agent_call_configs)?.max_attempts_per_contact ?? 0),
-      0
-    ) || null;
-  const outboundConfig = firstCallConfig(agents);
-  const windowStart = outboundConfig?.call_window_start ?? "09:00";
-  const windowEnd = outboundConfig?.call_window_end ?? "18:00";
-  const dripSeconds = outboundConfig?.drip_seconds ?? 60;
-  const maxCallsPerDay = outboundConfig?.max_calls_per_day ?? 100;
+    selectedCallConfig?.max_attempts_per_contact ??
+    (reducedMaxAttempts > 0 ? reducedMaxAttempts : null);
+  const windowStart = selectedCallConfig?.call_window_start ?? "09:00";
+  const windowEnd = selectedCallConfig?.call_window_end ?? "18:00";
+  const dripSeconds = selectedCallConfig?.drip_seconds ?? 60;
+  const maxCallsPerDay = selectedCallConfig?.max_calls_per_day ?? 100;
+  const agentContacts = selectedOpsAgent
+    ? contacts.filter((c) => contactHasEnrollTag(c.tags ?? [], selectedEnrollTag))
+    : contacts;
   const schedules = buildSchedules(
-    contacts,
+    agentContacts,
     today,
     nowEt,
     windowStart,
@@ -596,12 +730,12 @@ export function WorkspaceOpsTab({
   );
   const q = query.trim().toLowerCase();
   const filteredContacts = q
-    ? contacts.filter(
+    ? agentContacts.filter(
         (c) =>
           (c.full_name ?? "").toLowerCase().includes(q) ||
           c.phones.some((p) => p.toLowerCase().includes(q))
       )
-    : contacts;
+    : agentContacts;
   const isSelectable = (c: ContactRow) => !c.is_terminal && Boolean(c.phones[0]);
   const selectableFiltered = filteredContacts.filter(isSelectable);
   const allFilteredSelected =
@@ -630,7 +764,7 @@ export function WorkspaceOpsTab({
     });
   }
 
-  const upcomingCount = contacts.filter(
+  const upcomingCount = agentContacts.filter(
     (c) => !c.is_terminal && !(maxAttempts != null && c.attempt_count >= maxAttempts)
   ).length;
   const activeOutboundCount = agents.filter(
@@ -640,6 +774,52 @@ export function WorkspaceOpsTab({
 
   return (
     <>
+      {outboundAgents.length > 1 && (
+        <Card className="mb-6 p-5">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <SectionHeader
+                title="Operations scope"
+                description="Filter schedules, queue actions, and contact lists by outbound agent."
+              />
+            </div>
+            <div className="sm:w-72">
+              <Label htmlFor="ops-agent">Outbound agent</Label>
+              <Select
+                id="ops-agent"
+                value={opsAgentId}
+                onChange={(e) => setOpsAgent(e.target.value)}
+              >
+                {outboundAgents.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name} ({a.status})
+                  </option>
+                ))}
+              </Select>
+            </div>
+          </div>
+          {selectedOpsAgent && (
+            <div className="mt-4 flex flex-wrap gap-3 text-sm text-ink-600">
+              <Badge tone={selectedOpsAgent.status === "active" ? "green" : "amber"}>
+                {selectedOpsAgent.status}
+              </Badge>
+              <span>
+                Trigger tag:{" "}
+                <span className="font-mono text-ink-800">{selectedEnrollTag}</span>
+              </span>
+              <span className="text-ink-300">·</span>
+              <span>
+                Window {windowStart}–{windowEnd} {tzLabel}
+              </span>
+              <span className="text-ink-300">·</span>
+              <span>{agentContacts.length} enrolled contacts</span>
+              <span className="text-ink-300">·</span>
+              <span>{queueSummary.total} in queue</span>
+            </div>
+          )}
+        </Card>
+      )}
+
       <div className="mb-6 flex flex-wrap items-center justify-end gap-4">
         <div className="flex flex-col items-end gap-1">
           <Label className="flex cursor-pointer items-center gap-2 font-normal text-ink-600">
@@ -675,10 +855,19 @@ export function WorkspaceOpsTab({
 
       <div className="mb-10 grid gap-5 sm:grid-cols-3">
         <StatTile label="Agents" value={agents.length} icon={Bot} tone="sky" />
-        <StatTile label="Enrolled contacts" value={contactCount} icon={Users} tone="mint" />
         <StatTile
-          label="Enroll tag"
-          value={<span className="font-mono text-base">{workspace.enroll_tag}</span>}
+          label={selectedOpsAgent ? "Enrolled (agent)" : "Enrolled contacts"}
+          value={selectedOpsAgent ? agentContacts.length : contactCount}
+          icon={Users}
+          tone="mint"
+        />
+        <StatTile
+          label={selectedOpsAgent ? "Trigger tag" : "Default enroll tag"}
+          value={
+            <span className="font-mono text-base">
+              {selectedOpsAgent ? selectedEnrollTag : workspace.enroll_tag}
+            </span>
+          }
           icon={Tags}
           tone="violet"
         />
@@ -705,7 +894,10 @@ export function WorkspaceOpsTab({
                     <Select
                       id="test-agent"
                       value={activeTestAgentId}
-                      onChange={(e) => setTestAgentId(e.target.value)}
+                      onChange={(e) => {
+                        setTestAgentId(e.target.value);
+                        setOpsAgentId(e.target.value);
+                      }}
                     >
                       {callableAgents.map((a) => (
                         <option key={a.id} value={a.id}>
@@ -774,40 +966,60 @@ export function WorkspaceOpsTab({
           const cc = firstEmbed(a.agent_call_configs);
           const tc = firstEmbed(a.agent_task_configs);
           return (
-            <Link key={a.id} href={`/agents/${a.id}`}>
-              <Card hover className="group flex items-center justify-between p-5">
-                <div className="flex items-center gap-4">
-                  <IconBadge icon={Bot} tone="sky" className="h-10 w-10" />
-                  <div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-semibold text-ink-900">{a.name}</span>
-                      <StatusBadge status={a.status} />
-                      <Badge tone={a.direction === "inbound" ? "green" : "blue"}>
-                        {a.direction}
-                      </Badge>
-                      {!a.retell_agent_id && <Badge tone="amber">no Retell ID</Badge>}
-                    </div>
-                    {a.objective && (
-                      <p className="mt-0.5 text-sm text-ink-500">{a.objective}</p>
-                    )}
-                    <p className="mt-0.5 font-mono text-xs text-ink-400">
-                      enroll: {a.enroll_tag ?? workspace.enroll_tag}
-                    </p>
+            <Card
+              key={a.id}
+              hover
+              className="group flex items-center justify-between gap-4 p-5"
+            >
+              <Link href={`/agents/${a.id}`} className="flex min-w-0 flex-1 items-center gap-4">
+                <IconBadge icon={Bot} tone="sky" className="h-10 w-10" />
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-semibold text-ink-900">{a.name}</span>
+                    <StatusBadge status={a.status} />
+                    <Badge tone={a.direction === "inbound" ? "green" : "blue"}>
+                      {a.direction}
+                    </Badge>
+                    {!a.retell_agent_id && <Badge tone="amber">no Retell ID</Badge>}
                   </div>
+                  {a.objective && (
+                    <p className="mt-0.5 text-sm text-ink-500">{a.objective}</p>
+                  )}
+                  <p className="mt-0.5 font-mono text-xs text-ink-400">
+                    enroll: {a.enroll_tag ?? workspace.enroll_tag}
+                  </p>
                 </div>
-                <div className="flex items-center gap-4 text-right">
-                  <div className="text-sm text-ink-500">
-                    {cc && (
-                      <span>
-                        {cc.max_calls_per_day}/day · {cc.max_attempts_per_contact} attempts
-                      </span>
-                    )}
-                    <div className="text-xs">{tc?.enabled ? "tasks on" : "no tasks"}</div>
-                  </div>
-                  <ArrowUpRight className="h-4 w-4 text-ink-300 transition-colors group-hover:text-brand-500" />
+              </Link>
+              <div className="flex shrink-0 items-center gap-3 text-right">
+                <div className="text-sm text-ink-500">
+                  {cc && (
+                    <span>
+                      {cc.max_calls_per_day}/day · {cc.max_attempts_per_contact} attempts
+                    </span>
+                  )}
+                  <div className="text-xs">{tc?.enabled ? "tasks on" : "no tasks"}</div>
                 </div>
-              </Card>
-            </Link>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  className="gap-1.5"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    openDuplicateDialog(a);
+                  }}
+                >
+                  <Copy className="h-3.5 w-3.5" />
+                  Duplicate
+                </Button>
+                <Link
+                  href={`/agents/${a.id}`}
+                  className="text-ink-300 transition-colors hover:text-brand-500"
+                >
+                  <ArrowUpRight className="h-4 w-4" />
+                </Link>
+              </div>
+            </Card>
           );
         })}
       </div>
@@ -815,7 +1027,11 @@ export function WorkspaceOpsTab({
       <div className="mb-10">
         <SectionHeader
           title="Call queue"
-          description="Live queue of contacts waiting to dial or currently on a call. Contacts appear here when enqueued and are removed automatically after the call finishes and CRM write-back completes."
+          description={
+            selectedOpsAgent
+              ? `Queue for ${selectedOpsAgent.name}. Contacts appear here when enqueued and are removed after the call finishes.`
+              : "Live queue of contacts waiting to dial or currently on a call. Contacts appear here when enqueued and are removed automatically after the call finishes and CRM write-back completes."
+          }
           action={
             <Button variant="ghost" size="sm" onClick={fetchQueue} disabled={queueLoading}>
               Refresh
@@ -899,13 +1115,20 @@ export function WorkspaceOpsTab({
       <div className="mb-10">
         <SectionHeader
           title="Call schedule"
-          description={`Projected next dial times from cadence and drip settings. Use "Call now" to dial a contact immediately for testing, ignoring call windows and cadence.`}
+          description={
+            selectedOpsAgent
+              ? `Projected dial times for ${selectedOpsAgent.name} (${selectedEnrollTag}). Window ${windowStart}–${windowEnd} ${tzLabel}.`
+              : `Projected next dial times from cadence and drip settings. Use "Call now" to dial a contact immediately for testing, ignoring call windows and cadence.`
+          }
           action={
             <div className="flex items-center gap-3">
               {callableAgents.length > 1 && (
                 <Select
                   value={activeTestAgentId}
-                  onChange={(e) => setTestAgentId(e.target.value)}
+                  onChange={(e) => {
+                    setTestAgentId(e.target.value);
+                    setOpsAgentId(e.target.value);
+                  }}
                   className="w-44"
                   aria-label="Agent for test calls"
                 >
@@ -1109,6 +1332,78 @@ export function WorkspaceOpsTab({
           </div>
         ))}
       </Card>
+
+      {duplicateSource && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-ink-900/40 p-4"
+          onClick={closeDuplicateDialog}
+        >
+          <Card
+            className="w-full max-w-md p-6 shadow-lifted"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-lg font-semibold text-ink-900">Duplicate agent</h3>
+            <p className="mt-1 text-sm text-ink-500">
+              Copy settings from <span className="font-medium">{duplicateSource.name}</span>.
+              The new agent starts as draft.
+            </p>
+            <div className="mt-5 space-y-4">
+              <div className="space-y-1.5">
+                <Label>Agent name</Label>
+                <Input
+                  value={duplicateName}
+                  onChange={(e) => {
+                    setDuplicateName(e.target.value);
+                    setDuplicateError(null);
+                  }}
+                  placeholder="Copy of Seller Outbound"
+                />
+              </div>
+              {duplicateSource.direction === "outbound" && (
+                <div className="space-y-1.5">
+                  <Label hint="Must be unique in this workspace">
+                    Enrollment tag
+                  </Label>
+                  <Input
+                    value={duplicateEnrollTag}
+                    onChange={(e) => {
+                      setDuplicateEnrollTag(e.target.value);
+                      setDuplicateError(null);
+                    }}
+                    placeholder="upsurge-probate-ai-copy"
+                    className="font-mono"
+                  />
+                  {duplicateEnrollTagValidation(duplicateEnrollTag) && (
+                    <p className="text-xs text-accent-rose-fg">
+                      {duplicateEnrollTagValidation(duplicateEnrollTag)}
+                    </p>
+                  )}
+                </div>
+              )}
+              {duplicateError && (
+                <div className="rounded-xl bg-accent-rose-bg px-4 py-3 text-sm text-accent-rose-fg">
+                  {duplicateError}
+                </div>
+              )}
+            </div>
+            <div className="mt-6 flex justify-end gap-3">
+              <Button variant="ghost" onClick={closeDuplicateDialog} disabled={duplicating}>
+                Cancel
+              </Button>
+              <Button
+                onClick={submitDuplicate}
+                disabled={
+                  duplicating ||
+                  !duplicateName.trim() ||
+                  Boolean(duplicateEnrollTagValidation(duplicateEnrollTag))
+                }
+              >
+                {duplicating ? "Duplicating…" : "Duplicate agent"}
+              </Button>
+            </div>
+          </Card>
+        </div>
+      )}
     </>
   );
 }

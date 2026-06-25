@@ -155,37 +155,63 @@ export const agentSchema = z.object({
 });
 
 /**
- * Payload for adding an agent to an existing workspace. Requires a CRM choice +
- * credentials, and enforces direction-specific rules:
+ * Payload for adding an agent to an existing workspace. CRM can be supplied
+ * per-agent or inherited from the workspace (`inherit_workspace_crm`).
+ * Direction-specific rules:
  *   - outbound → enroll tag required (drives enrollment + cadence).
  *   - inbound  → Retell agent id + Retell credentials required.
  */
-export const createAgentSchema = agentSchema.superRefine((val, ctx) => {
-  if (!val.crm_provider) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ["crm_provider"],
-      message: "Choose a CRM (Follow Up Boss or HighLevel).",
-    });
-  }
-  if (!val.crm_credentials) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ["crm_credentials"],
-      message: "CRM credentials are required.",
-    });
-  } else if (val.crm_provider === "followupboss" && !("apiKey" in val.crm_credentials)) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ["crm_credentials"],
-      message: "Follow Up Boss needs an API key.",
-    });
-  } else if (val.crm_provider === "highlevel" && !("accessToken" in val.crm_credentials)) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ["crm_credentials"],
-      message: "HighLevel needs an access token and location id.",
-    });
+export const createAgentSchema = agentSchema
+  .extend({
+    inherit_workspace_crm: z.boolean().default(false),
+  })
+  .superRefine((val, ctx) => {
+  const inheritsCrm =
+    val.inherit_workspace_crm ||
+    (!val.crm_provider && !val.crm_credentials);
+
+  if (inheritsCrm) {
+    if (val.crm_provider || val.crm_credentials) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["inherit_workspace_crm"],
+        message:
+          "Use either workspace CRM inheritance or per-agent credentials, not both.",
+      });
+    }
+  } else {
+    if (!val.crm_provider) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["crm_provider"],
+        message: "Choose a CRM (Follow Up Boss or HighLevel), or inherit the workspace connection.",
+      });
+    }
+    if (!val.crm_credentials) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["crm_credentials"],
+        message: "CRM credentials are required unless inheriting the workspace connection.",
+      });
+    } else if (
+      val.crm_provider === "followupboss" &&
+      !("apiKey" in val.crm_credentials)
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["crm_credentials"],
+        message: "Follow Up Boss needs an API key.",
+      });
+    } else if (
+      val.crm_provider === "highlevel" &&
+      !("accessToken" in val.crm_credentials)
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["crm_credentials"],
+        message: "HighLevel needs an access token and location id.",
+      });
+    }
   }
 
   if (val.direction === "outbound") {
@@ -231,6 +257,14 @@ export const provisionWorkspaceSchema = z.object({
 
 export type ProvisionWorkspaceInput = z.infer<typeof provisionWorkspaceSchema>;
 export type CreateAgentInput = z.infer<typeof createAgentSchema>;
+
+/** Payload for POST /api/agents/:id/duplicate — outbound needs a unique enroll tag. */
+export const duplicateAgentSchema = z.object({
+  name: z.string().trim().min(1, "Agent name is required."),
+  enroll_tag: z.string().nullable().default(null),
+});
+
+export type DuplicateAgentInput = z.infer<typeof duplicateAgentSchema>;
 
 export const runWorkspacePollSchema = z.object({
   testMode: z.boolean().default(false),

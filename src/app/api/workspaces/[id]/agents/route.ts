@@ -1,23 +1,26 @@
 // =====================================================================
 // POST /api/workspaces/:id/agents — add an agent to an existing workspace.
 //
-// Creates the agent in draft with its call + task configs. Each agent
-// must have a distinct enroll tag so contact segments stay disjoint.
+// Creates the agent in draft with its call + task configs. Each outbound
+// agent must have a distinct enroll tag. Agents may inherit workspace CRM
+// credentials instead of storing a duplicate HighLevel OAuth copy.
 // =====================================================================
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient, createServiceClient } from "@/lib/supabase/server";
 import { createAgentSchema } from "@/lib/validation";
 import { encryptJson } from "@/lib/crypto";
-import type { Agent } from "@/types";
+import {
+  assertEnrollTagUnique,
+  enrollTagTakenMessage,
+  effectiveEnrollTag,
+  isEnrollTagUniqueViolation,
+} from "@/lib/agents/enroll-tag";
+import {
+  hasEffectiveCrmCredentials,
+  workspaceHasCrmCredentials,
+} from "@/lib/agents/crm-inheritance";
 
 export const runtime = "nodejs";
-
-function effectiveEnrollTag(
-  agentEnrollTag: string | null,
-  workspaceEnrollTag: string
-): string {
-  return (agentEnrollTag ?? workspaceEnrollTag).toLowerCase();
-}
 
 export async function POST(
   req: NextRequest,
@@ -31,9 +34,14 @@ export async function POST(
 
   const { data: workspace } = await userClient
     .from("workspaces")
-    .select("id, enroll_tag")
+    .select("id, enroll_tag, crm_provider, crm_credentials_encrypted")
     .eq("id", params.id)
-    .single<{ id: string; enroll_tag: string }>();
+    .single<{
+      id: string;
+      enroll_tag: string;
+      crm_provider: "followupboss" | "highlevel" | null;
+      crm_credentials_encrypted: string | null;
+    }>();
   if (!workspace) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
@@ -48,39 +56,57 @@ export async function POST(
   }
   const input = parsed.data;
 
+  const inheritsCrm =
+    input.inherit_workspace_crm ||
+    (!input.crm_provider && !input.crm_credentials);
+
+  if (inheritsCrm && !workspaceHasCrmCredentials(workspace)) {
+    return NextResponse.json(
+      {
+        error:
+          "This workspace has no CRM connection yet. Connect CRM at the workspace level or provide per-agent credentials.",
+      },
+      { status: 400 }
+    );
+  }
+
   const db = createServiceClient();
 
-  // Enroll-tag uniqueness only applies to outbound agents — inbound agents
-  // answer the line and never enroll contacts, so they carry no enroll tag.
   if (input.direction === "outbound" && input.enroll_tag) {
-    const { data: existingAgents } = await db
-      .from("agents")
-      .select("enroll_tag")
-      .eq("workspace_id", params.id)
-      .returns<Pick<Agent, "enroll_tag">[]>();
-
-    const newTag = input.enroll_tag.toLowerCase();
-    const taken = (existingAgents ?? []).some(
-      (a) => effectiveEnrollTag(a.enroll_tag, workspace.enroll_tag) === newTag
+    const enrollError = await assertEnrollTagUnique(
+      db,
+      params.id,
+      input.enroll_tag,
+      workspace.enroll_tag
     );
-    if (taken) {
+    if (enrollError) {
+      return NextResponse.json({ error: enrollError }, { status: 409 });
+    }
+  }
+
+  let crmCredsEncrypted: string | null = null;
+  let retellCredsEncrypted: string | null = null;
+  let crmProvider: "followupboss" | "highlevel" | null = null;
+
+  if (inheritsCrm) {
+    crmProvider = null;
+    crmCredsEncrypted = null;
+  } else {
+    crmProvider = input.crm_provider;
+    try {
+      crmCredsEncrypted = input.crm_credentials
+        ? encryptJson(input.crm_credentials)
+        : null;
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "encryption failed";
       return NextResponse.json(
-        {
-          error:
-            "An agent in this workspace already uses that enroll tag. Choose a distinct tag.",
-        },
-        { status: 409 }
+        { error: "encryption misconfigured", detail: message },
+        { status: 500 }
       );
     }
   }
 
-  // Encrypt the per-agent credentials at rest (mirrors workspace CRM creds).
-  let crmCredsEncrypted: string | null = null;
-  let retellCredsEncrypted: string | null = null;
   try {
-    crmCredsEncrypted = input.crm_credentials
-      ? encryptJson(input.crm_credentials)
-      : null;
     retellCredsEncrypted = input.retell_credentials
       ? encryptJson(input.retell_credentials)
       : null;
@@ -102,7 +128,7 @@ export async function POST(
       retell_agent_id: input.retell_agent_id,
       retell_from_number: input.retell_from_number,
       objective: input.objective,
-      crm_provider: input.crm_provider,
+      crm_provider: crmProvider,
       crm_credentials_encrypted: crmCredsEncrypted,
       retell_credentials_encrypted: retellCredsEncrypted,
       status: "draft",
@@ -110,6 +136,10 @@ export async function POST(
     .select("id")
     .single<{ id: string }>();
   if (agErr || !agent) {
+    if (isEnrollTagUniqueViolation(agErr)) {
+      const tag = effectiveEnrollTag(input.enroll_tag, workspace.enroll_tag);
+      return NextResponse.json({ error: enrollTagTakenMessage(tag) }, { status: 409 });
+    }
     return NextResponse.json(
       { error: "failed to create agent", detail: agErr?.message },
       { status: 500 }
@@ -135,5 +165,13 @@ export async function POST(
     );
   }
 
-  return NextResponse.json({ ok: true, agentId: agent.id });
+  return NextResponse.json({
+    ok: true,
+    agentId: agent.id,
+    inheritsWorkspaceCrm: inheritsCrm,
+    hasEffectiveCrm: hasEffectiveCrmCredentials(
+      { crm_provider: crmProvider, crm_credentials_encrypted: crmCredsEncrypted },
+      workspace
+    ),
+  });
 }
