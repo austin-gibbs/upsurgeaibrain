@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import { Plus, RefreshCw, Trash2 } from "lucide-react";
 import { outcomeLabel } from "@/lib/engine/outcome";
 import { Button, Input, Label, Select } from "@/components/ui";
@@ -12,6 +13,53 @@ import {
 
 function ruleKey(rule: StageMapEntry, index: number): string {
   return `${rule.outcome}:${rule.call_attempt ?? "any"}:${index}`;
+}
+
+function mergePipelinesWithSaved(
+  pipelines: Pipeline[],
+  cfg: TaskConfig
+): Pipeline[] {
+  const savedPipelineId = cfg.poll_pipeline_id?.trim();
+  if (!savedPipelineId) return pipelines;
+
+  const existing = pipelines.find((p) => p.id === savedPipelineId);
+  if (existing) {
+    const savedStageId = cfg.poll_pipeline_stage_id?.trim();
+    if (!savedStageId || existing.stages.some((s) => s.id === savedStageId)) {
+      return pipelines;
+    }
+    return pipelines.map((p) =>
+      p.id === savedPipelineId
+        ? {
+            ...p,
+            stages: [
+              ...p.stages,
+              {
+                id: savedStageId,
+                name: cfg.poll_stage_name ?? savedStageId,
+              },
+            ],
+          }
+        : p
+    );
+  }
+
+  const savedStageId = cfg.poll_pipeline_stage_id?.trim();
+  return [
+    ...pipelines,
+    {
+      id: savedPipelineId,
+      name: cfg.poll_pipeline_name ?? savedPipelineId,
+      stages: savedStageId
+        ? [
+            {
+              id: savedStageId,
+              name: cfg.poll_stage_name ?? savedStageId,
+            },
+          ]
+        : [],
+    },
+  ];
 }
 
 export function PipelineStageSettings({
@@ -34,6 +82,11 @@ export function PipelineStageSettings({
   /** Re-pull pipelines + stages from HighLevel (used by the Refresh button). */
   onRefresh?: () => void;
 }) {
+  const pipelineOptions = useMemo(
+    () => mergePipelinesWithSaved(pipelines, cfg),
+    [pipelines, cfg]
+  );
+
   function updateRule(index: number, patch: Partial<StageMapEntry>) {
     onChangeMap(map.map((r, i) => (i === index ? { ...r, ...patch } : r)));
   }
@@ -56,7 +109,9 @@ export function PipelineStageSettings({
     ]);
   }
 
-  const pollPipeline = pipelines.find((p) => p.id === cfg.poll_pipeline_id);
+  const pollPipeline = pipelineOptions.find((p) => p.id === cfg.poll_pipeline_id);
+  const showPollSelectors =
+    pipelineOptions.length > 0 || Boolean(cfg.poll_pipeline_id);
 
   return (
     <div className="space-y-5 border-t border-ink-100 pt-5">
@@ -115,13 +170,13 @@ export function PipelineStageSettings({
               <p className="text-xs text-ink-500">Loading pipelines…</p>
             )}
             {error && <p className="text-xs text-accent-rose-fg">{error}</p>}
-            {!loading && !error && pipelines.length === 0 && (
+            {!loading && !error && pipelineOptions.length === 0 && (
               <p className="text-xs text-accent-amber-fg">
                 No pipelines found. Save valid HighLevel credentials first, then
                 reopen this page.
               </p>
             )}
-            {pipelines.length > 0 && (
+            {showPollSelectors && (
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="space-y-1.5">
                   <Label>Poll pipeline</Label>
@@ -129,7 +184,7 @@ export function PipelineStageSettings({
                     value={cfg.poll_pipeline_id ?? ""}
                     onChange={(e) => {
                       const val = e.target.value;
-                      const p = pipelines.find((p) => p.id === val);
+                      const p = pipelineOptions.find((p) => p.id === val);
                       onChange({
                         poll_pipeline_id: val || null,
                         poll_pipeline_name: p?.name ?? null,
@@ -139,7 +194,7 @@ export function PipelineStageSettings({
                     }}
                   >
                     <option value="">— Select —</option>
-                    {pipelines.map((p) => (
+                    {pipelineOptions.map((p) => (
                       <option key={p.id} value={p.id}>
                         {p.name}
                       </option>
@@ -211,14 +266,14 @@ export function PipelineStageSettings({
             <p className="text-xs text-ink-500">Loading pipelines…</p>
           )}
           {error && <p className="text-xs text-accent-rose-fg">{error}</p>}
-          {!loading && !error && pipelines.length === 0 && (
+          {!loading && !error && pipelineOptions.length === 0 && (
             <p className="text-xs text-accent-amber-fg">
               No pipelines found. Save valid HighLevel credentials for this agent
               first, then reopen this page.
             </p>
           )}
 
-          {pipelines.length > 0 && (
+          {pipelineOptions.length > 0 && (
             <div className="space-y-3">
               {map.length === 0 && (
                 <p className="text-xs text-ink-500">
@@ -229,7 +284,7 @@ export function PipelineStageSettings({
               )}
 
               {map.map((rule, index) => {
-                const pipeline = pipelines.find((p) => p.id === rule.pipeline_id);
+                const pipeline = pipelineOptions.find((p) => p.id === rule.pipeline_id);
                 return (
                   <div
                     key={ruleKey(rule, index)}
@@ -272,7 +327,7 @@ export function PipelineStageSettings({
                           value={rule.pipeline_id}
                           onChange={(e) => {
                             const val = e.target.value;
-                            const p = pipelines.find((p) => p.id === val);
+                            const p = pipelineOptions.find((p) => p.id === val);
                             updateRule(index, {
                               pipeline_id: val,
                               pipeline_name: p?.name ?? null,
@@ -282,7 +337,7 @@ export function PipelineStageSettings({
                           }}
                         >
                           <option value="">— Select —</option>
-                          {pipelines.map((p) => (
+                          {pipelineOptions.map((p) => (
                             <option key={p.id} value={p.id}>
                               {p.name}
                             </option>

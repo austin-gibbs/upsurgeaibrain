@@ -18,6 +18,8 @@ import type { AgentDirection } from "@/types";
 import type { Database } from "@/types/database";
 import { normalizeCallConfigList, normalizeHHMM } from "@/lib/hhmm";
 import { rescheduleAgentCallQueue } from "@/lib/queue/reschedule";
+import { prepareTaskConfigForSave } from "@/lib/task-config";
+import { defaultTaskConfig } from "@/components/agent-form/types";
 import { z } from "zod";
 
 export const runtime = "nodejs";
@@ -161,10 +163,26 @@ export async function PATCH(
   if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   const json = await req.json().catch(() => null);
-  const parsed = patchSchema.safeParse(json);
+  const body =
+    json && typeof json === "object"
+      ? {
+          ...json,
+          ...(json.task_config && typeof json.task_config === "object"
+            ? {
+                task_config: prepareTaskConfigForSave({
+                  ...defaultTaskConfig(),
+                  ...json.task_config,
+                }),
+              }
+            : {}),
+        }
+      : json;
+  const parsed = patchSchema.safeParse(body);
   if (!parsed.success) {
+    const message =
+      parsed.error.issues[0]?.message ?? "invalid payload";
     return NextResponse.json(
-      { error: "invalid payload", issues: parsed.error.issues },
+      { error: message, issues: parsed.error.issues },
       { status: 400 }
     );
   }

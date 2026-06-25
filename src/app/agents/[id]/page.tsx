@@ -18,6 +18,10 @@ import {
   type TaskConfig,
 } from "@/components/agent-form/types";
 import { normalizeHHMM } from "@/lib/hhmm";
+import {
+  prepareTaskConfigForSave,
+  validateTaskConfigForSave,
+} from "@/lib/task-config";
 import { outcomeLabel } from "@/lib/engine/outcome";
 import type { CallOutcome } from "@/types";
 import { PageShell } from "@/components/TopNav";
@@ -264,7 +268,16 @@ export default function AgentDetailPage({
         body: JSON.stringify(body),
       });
       const data = await res.json();
-      if (!res.ok || data.error) throw new Error(data.error ?? "Failed");
+      if (!res.ok || data.error) {
+        const detail =
+          Array.isArray(data.issues) && data.issues.length > 0
+            ? data.issues
+                .map((issue: { message?: string }) => issue.message)
+                .filter(Boolean)
+                .join(" ")
+            : null;
+        throw new Error(detail ?? data.error ?? "Failed");
+      }
       load();
       if (data.queueRescheduled > 0) {
         setActionMsg(
@@ -348,7 +361,13 @@ export default function AgentDetailPage({
   }
 
   function saveTaskSettings() {
-    const body: Record<string, unknown> = { task_config: taskCfg };
+    const prepared = prepareTaskConfigForSave(taskCfg);
+    const validationError = validateTaskConfigForSave(prepared);
+    if (validationError) {
+      setActionMsg(validationError);
+      return;
+    }
+    const body: Record<string, unknown> = { task_config: prepared };
     // Only send the routing map for HighLevel agents; full-replace with the
     // complete-only entries (both a pipeline and a stage chosen).
     if (isHighLevel) {

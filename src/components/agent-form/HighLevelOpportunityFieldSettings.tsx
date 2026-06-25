@@ -1,8 +1,39 @@
 "use client";
 
+import { useMemo } from "react";
 import { RefreshCw } from "lucide-react";
 import { Input, Label, Select } from "@/components/ui";
 import type { OpportunityCustomField, TaskConfig } from "./types";
+
+function mergeOpportunityFields(
+  fields: OpportunityCustomField[],
+  cfg: TaskConfig
+): OpportunityCustomField[] {
+  const savedId = cfg.opportunity_custom_field_id?.trim();
+  if (!savedId || fields.some((f) => f.id === savedId)) return fields;
+
+  const savedOptions = cfg.opportunity_custom_field_value
+    ? [
+        {
+          label:
+            cfg.opportunity_custom_field_value_label ??
+            cfg.opportunity_custom_field_value,
+          value: cfg.opportunity_custom_field_value,
+        },
+      ]
+    : [];
+
+  return [
+    ...fields,
+    {
+      id: savedId,
+      key: cfg.opportunity_custom_field_key,
+      name: cfg.opportunity_custom_field_label ?? savedId,
+      dataType: "unknown",
+      options: savedOptions,
+    },
+  ];
+}
 
 export function HighLevelOpportunityFieldSettings({
   cfg,
@@ -19,8 +50,15 @@ export function HighLevelOpportunityFieldSettings({
   onChange: (patch: Partial<TaskConfig>) => void;
   onRefresh?: () => void;
 }) {
-  const selectedField = fields.find((f) => f.id === cfg.opportunity_custom_field_id);
-  const useManualField = fields.length === 0 && !loading;
+  const fieldOptions = useMemo(
+    () => mergeOpportunityFields(fields, cfg),
+    [fields, cfg]
+  );
+  const selectedField = fieldOptions.find(
+    (f) => f.id === cfg.opportunity_custom_field_id
+  );
+  const useManualField =
+    fieldOptions.length === 0 && !loading && !cfg.opportunity_custom_field_id;
 
   return (
     <div className="space-y-4 rounded-2xl border border-ink-200/50 bg-ink-50/30 p-4">
@@ -76,7 +114,7 @@ export function HighLevelOpportunityFieldSettings({
               value={cfg.opportunity_custom_field_id ?? ""}
               onChange={(e) => {
                 const val = e.target.value;
-                const field = fields.find((f) => f.id === val);
+                const field = fieldOptions.find((f) => f.id === val);
                 onChange({
                   opportunity_custom_field_id: val || null,
                   opportunity_custom_field_key: field?.key ?? null,
@@ -88,7 +126,7 @@ export function HighLevelOpportunityFieldSettings({
               }}
             >
               <option value="">— Select field —</option>
-              {fields.map((f) => (
+              {fieldOptions.map((f) => (
                 <option key={f.id} value={f.id}>
                   {f.name}
                 </option>
@@ -114,7 +152,7 @@ export function HighLevelOpportunityFieldSettings({
                 {selectedField ? "— Select value —" : "—"}
               </option>
               {selectedField?.options.map((o) => (
-                <option key={o.value} value={o.value}>
+                <option key={`${o.value}:${o.label}`} value={o.value}>
                   {o.label}
                 </option>
               ))}
