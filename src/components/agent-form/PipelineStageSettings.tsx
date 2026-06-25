@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import { Plus, RefreshCw, Trash2 } from "lucide-react";
 import { outcomeLabel } from "@/lib/engine/outcome";
+import { mergePipelinesForRouting } from "@/lib/pipeline-options";
 import { Button, Input, Label, Select } from "@/components/ui";
 import {
   OUTCOMES,
@@ -10,57 +11,6 @@ import {
   type StageMapEntry,
   type TaskConfig,
 } from "./types";
-
-function ruleKey(rule: StageMapEntry, index: number): string {
-  return `${rule.outcome}:${rule.call_attempt ?? "any"}:${index}`;
-}
-
-function mergePipelinesWithSaved(
-  pipelines: Pipeline[],
-  cfg: TaskConfig
-): Pipeline[] {
-  const savedPipelineId = cfg.poll_pipeline_id?.trim();
-  if (!savedPipelineId) return pipelines;
-
-  const existing = pipelines.find((p) => p.id === savedPipelineId);
-  if (existing) {
-    const savedStageId = cfg.poll_pipeline_stage_id?.trim();
-    if (!savedStageId || existing.stages.some((s) => s.id === savedStageId)) {
-      return pipelines;
-    }
-    return pipelines.map((p) =>
-      p.id === savedPipelineId
-        ? {
-            ...p,
-            stages: [
-              ...p.stages,
-              {
-                id: savedStageId,
-                name: cfg.poll_stage_name ?? savedStageId,
-              },
-            ],
-          }
-        : p
-    );
-  }
-
-  const savedStageId = cfg.poll_pipeline_stage_id?.trim();
-  return [
-    ...pipelines,
-    {
-      id: savedPipelineId,
-      name: cfg.poll_pipeline_name ?? savedPipelineId,
-      stages: savedStageId
-        ? [
-            {
-              id: savedStageId,
-              name: cfg.poll_stage_name ?? savedStageId,
-            },
-          ]
-        : [],
-    },
-  ];
-}
 
 export function PipelineStageSettings({
   cfg,
@@ -78,26 +28,30 @@ export function PipelineStageSettings({
   loading: boolean;
   error: string | null;
   onChange: (patch: Partial<TaskConfig>) => void;
-  onChangeMap: (map: StageMapEntry[]) => void;
+  onChangeMap: (
+    map: StageMapEntry[] | ((prev: StageMapEntry[]) => StageMapEntry[])
+  ) => void;
   /** Re-pull pipelines + stages from HighLevel (used by the Refresh button). */
   onRefresh?: () => void;
 }) {
   const pipelineOptions = useMemo(
-    () => mergePipelinesWithSaved(pipelines, cfg),
-    [pipelines, cfg]
+    () => mergePipelinesForRouting(pipelines, cfg, map),
+    [pipelines, cfg, map]
   );
 
   function updateRule(index: number, patch: Partial<StageMapEntry>) {
-    onChangeMap(map.map((r, i) => (i === index ? { ...r, ...patch } : r)));
+    onChangeMap((prev) =>
+      prev.map((r, i) => (i === index ? { ...r, ...patch } : r))
+    );
   }
 
   function removeRule(index: number) {
-    onChangeMap(map.filter((_, i) => i !== index));
+    onChangeMap((prev) => prev.filter((_, i) => i !== index));
   }
 
   function addRule() {
-    onChangeMap([
-      ...map,
+    onChangeMap((prev) => [
+      ...prev,
       {
         outcome: "no_answer_voicemail",
         call_attempt: null,
@@ -112,6 +66,8 @@ export function PipelineStageSettings({
   const pollPipeline = pipelineOptions.find((p) => p.id === cfg.poll_pipeline_id);
   const showPollSelectors =
     pipelineOptions.length > 0 || Boolean(cfg.poll_pipeline_id);
+  const showOutcomeRules =
+    loading || pipelineOptions.length > 0 || map.length > 0;
 
   return (
     <div className="space-y-5 border-t border-ink-100 pt-5">
@@ -266,16 +222,16 @@ export function PipelineStageSettings({
             <p className="text-xs text-ink-500">Loading pipelines…</p>
           )}
           {error && <p className="text-xs text-accent-rose-fg">{error}</p>}
-          {!loading && !error && pipelineOptions.length === 0 && (
+          {!loading && !error && pipelineOptions.length === 0 && map.length === 0 && (
             <p className="text-xs text-accent-amber-fg">
               No pipelines found. Save valid HighLevel credentials for this agent
               first, then reopen this page.
             </p>
           )}
 
-          {pipelineOptions.length > 0 && (
+          {showOutcomeRules && (
             <div className="space-y-3">
-              {map.length === 0 && (
+              {map.length === 0 && !loading && (
                 <p className="text-xs text-ink-500">
                   No routing rules yet. Add a rule to map outcomes (and optionally
                   call attempts) to pipeline stages — e.g. No Answer/Voicemail + attempt 1 →
@@ -287,7 +243,7 @@ export function PipelineStageSettings({
                 const pipeline = pipelineOptions.find((p) => p.id === rule.pipeline_id);
                 return (
                   <div
-                    key={ruleKey(rule, index)}
+                    key={`rule-${index}`}
                     className="rounded-2xl border border-ink-200/50 bg-ink-50/30 p-4"
                   >
                     <div className="grid items-end gap-3 sm:grid-cols-[1fr_100px_1fr_1fr_auto]">
@@ -386,6 +342,7 @@ export function PipelineStageSettings({
                 variant="secondary"
                 size="sm"
                 onClick={addRule}
+                disabled={loading && pipelineOptions.length === 0}
               >
                 <Plus className="h-4 w-4" strokeWidth={1.75} />
                 Add routing rule

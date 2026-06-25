@@ -19,7 +19,11 @@ import {
 } from "@/components/agent-form/types";
 import { normalizeHHMM } from "@/lib/hhmm";
 import {
+  prepareStageMapForSave,
   prepareTaskConfigForSave,
+  stageMapFromRows,
+  taskConfigFromRow,
+  validateStageMapForSave,
   validateTaskConfigForSave,
 } from "@/lib/task-config";
 import { outcomeLabel } from "@/lib/engine/outcome";
@@ -113,6 +117,10 @@ export default function AgentDetailPage({
   const [opportunityFields, setOpportunityFields] = useState<OpportunityCustomField[]>([]);
   const [opportunityFieldsLoading, setOpportunityFieldsLoading] = useState(false);
   const [opportunityFieldsError, setOpportunityFieldsError] = useState<string | null>(null);
+  const [crmUsers, setCrmUsers] = useState<{ id: string; name: string }[]>([]);
+  const [crmUsersLoading, setCrmUsersLoading] = useState(false);
+
+  const isHighLevel = effectiveCrmProvider === "highlevel";
 
   function load() {
     fetch(`/api/agents/${params.id}`)
@@ -125,7 +133,9 @@ export default function AgentDetailPage({
         setRetellId(d.agent.retell_agent_id ?? "");
         setFromNumber(d.agent.retell_from_number ?? "");
         setEnrollTag(d.agent.enroll_tag ?? "");
-        setCrmProvider(d.agent.crm_provider ?? "followupboss");
+        setCrmProvider(
+          d.agent.crm_provider ?? d.effectiveCrmProvider ?? "followupboss"
+        );
         setFubApiKey("");
         setHlAccessToken("");
         setHlLocationId("");
@@ -148,44 +158,11 @@ export default function AgentDetailPage({
         }
         const tc = d.agent.agent_task_configs?.[0];
         if (tc) {
-          setTaskCfg({
-            enabled: tc.enabled ?? false,
-            name_template: tc.name_template ?? defaultTaskConfig().name_template,
-            task_type: tc.task_type ?? "Follow Up",
-            assignee_crm_id: tc.assignee_crm_id ?? null,
-            assignee_label: tc.assignee_label ?? null,
-            due_offset_minutes: tc.due_offset_minutes ?? 0,
-            due_at_time: tc.due_at_time ?? null,
-            only_outcomes: tc.only_outcomes ?? null,
-            post_call_webhook_enabled: tc.post_call_webhook_enabled ?? false,
-            post_call_webhook_url: tc.post_call_webhook_url ?? null,
-            post_call_webhook_only_outcomes: tc.post_call_webhook_only_outcomes ?? null,
-            pipeline_automation_enabled: tc.pipeline_automation_enabled ?? false,
-            poll_stage_enabled: tc.poll_stage_enabled ?? false,
-            poll_pipeline_id: tc.poll_pipeline_id ?? null,
-            poll_pipeline_stage_id: tc.poll_pipeline_stage_id ?? null,
-            poll_pipeline_name: tc.poll_pipeline_name ?? null,
-            poll_stage_name: tc.poll_stage_name ?? null,
-            opportunity_custom_field_enabled: tc.opportunity_custom_field_enabled ?? false,
-            opportunity_custom_field_id: tc.opportunity_custom_field_id ?? null,
-            opportunity_custom_field_key: tc.opportunity_custom_field_key ?? null,
-            opportunity_custom_field_label: tc.opportunity_custom_field_label ?? null,
-            opportunity_custom_field_value: tc.opportunity_custom_field_value ?? null,
-            opportunity_custom_field_value_label: tc.opportunity_custom_field_value_label ?? null,
-          });
+          setTaskCfg(taskConfigFromRow(tc));
         } else {
           setTaskCfg(defaultTaskConfig());
         }
-        setStageMap(
-          (d.pipelineStageMap ?? []).map((m: any) => ({
-            outcome: m.outcome,
-            call_attempt: m.call_attempt ?? null,
-            pipeline_id: m.pipeline_id,
-            pipeline_stage_id: m.pipeline_stage_id,
-            pipeline_name: m.pipeline_name ?? null,
-            stage_name: m.stage_name ?? null,
-          }))
-        );
+        setStageMap(stageMapFromRows(d.pipelineStageMap ?? []));
         setWorkspaceTimezone(d.workspaceTimezone ?? "America/New_York");
         setEffectiveCrmProvider(d.effectiveCrmProvider ?? null);
         setHasEffectiveCrmCredentials(Boolean(d.hasEffectiveCrmCredentials));
@@ -258,7 +235,48 @@ export default function AgentDetailPage({
     loadOpportunityFields();
   }, [loadOpportunityFields]);
 
-  async function patch(body: Record<string, unknown>) {
+  const loadCrmUsers = useCallback(() => {
+    if (!hasEffectiveCrmCredentials) {
+      setCrmUsers([]);
+      return;
+    }
+    setCrmUsersLoading(true);
+    fetch(`/api/agents/${params.id}/users`)
+      .then((r) => r.json())
+      .then((d) => setCrmUsers(d.users ?? []))
+      .catch(() => setCrmUsers([]))
+      .finally(() => setCrmUsersLoading(false));
+  }, [hasEffectiveCrmCredentials, params.id]);
+
+  useEffect(() => {
+    loadCrmUsers();
+  }, [loadCrmUsers]);
+
+  function applySavedTaskSettings(data: {
+    taskConfig?: Record<string, unknown>;
+    pipelineStageMap?: Record<string, unknown>[];
+  }) {
+    if (data.taskConfig) {
+      const nextTaskCfg = taskConfigFromRow(data.taskConfig);
+      setTaskCfg(nextTaskCfg);
+      setAgent((prev) =>
+        prev
+          ? {
+              ...prev,
+              agent_task_configs: [data.taskConfig],
+            }
+          : prev
+      );
+    }
+    if (data.pipelineStageMap) {
+      setStageMap(stageMapFromRows(data.pipelineStageMap));
+    }
+  }
+
+  async function patch(
+    body: Record<string, unknown>,
+    opts?: { refresh?: boolean }
+  ) {
     setSaving(true);
     setActionMsg(null);
     try {
@@ -278,7 +296,13 @@ export default function AgentDetailPage({
             : null;
         throw new Error(detail ?? data.error ?? "Failed");
       }
-      load();
+      const refresh = opts?.refresh ?? true;
+      if (data.taskConfig || data.pipelineStageMap) {
+        applySavedTaskSettings(data);
+      }
+      if (refresh) {
+        load();
+      }
       if (data.queueRescheduled > 0) {
         setActionMsg(
           `Saved. Rescheduled ${data.queueRescheduled} queued call${data.queueRescheduled === 1 ? "" : "s"} to the new window.`
@@ -362,20 +386,19 @@ export default function AgentDetailPage({
 
   function saveTaskSettings() {
     const prepared = prepareTaskConfigForSave(taskCfg);
-    const validationError = validateTaskConfigForSave(prepared);
+    const preparedStageMap = prepareStageMapForSave(stageMap);
+    const validationError =
+      validateTaskConfigForSave(prepared) ??
+      validateStageMapForSave(stageMap, prepared.pipeline_automation_enabled);
     if (validationError) {
       setActionMsg(validationError);
       return;
     }
     const body: Record<string, unknown> = { task_config: prepared };
-    // Only send the routing map for HighLevel agents; full-replace with the
-    // complete-only entries (both a pipeline and a stage chosen).
     if (isHighLevel) {
-      body.pipeline_stage_map = stageMap.filter(
-        (m) => m.pipeline_id && m.pipeline_stage_id
-      );
+      body.pipeline_stage_map = preparedStageMap;
     }
-    patch(body);
+    patch(body, { refresh: false });
   }
 
   if (error)
@@ -393,10 +416,6 @@ export default function AgentDetailPage({
 
   const isInbound = direction === "inbound";
   const tc = agent.agent_task_configs[0];
-  // HighLevel if the agent's own CRM is HighLevel OR it inherits HighLevel
-  // from its workspace (covers already-integrated workspaces).
-  const isHighLevel =
-    crmProvider === "highlevel" || effectiveCrmProvider === "highlevel";
 
   const linkageReady = isInbound
     ? Boolean(agent.retell_agent_id && agent.has_retell_credentials)
@@ -670,7 +689,14 @@ export default function AgentDetailPage({
             title="Tasks & automations"
             description="Post-call CRM tasks, HighLevel workflow webhooks, poll-stage routing, opportunity custom fields, and outcome-based pipeline routing."
           />
-          <TaskSettings cfg={taskCfg} users={[]} onChange={(p) => setTaskCfg((c) => ({ ...c, ...p }))} />
+          <TaskSettings
+            cfg={taskCfg}
+            users={crmUsers}
+            onChange={(p) => setTaskCfg((c) => ({ ...c, ...p }))}
+          />
+          {crmUsersLoading && (
+            <p className="text-xs text-ink-500">Loading CRM users for assignee…</p>
+          )}
           {isHighLevel && (
             <PostCallWebhookSettings
               cfg={taskCfg}

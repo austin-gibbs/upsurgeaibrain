@@ -472,7 +472,12 @@ export class HighLevelAdapter implements CrmAdapter {
       id: String(p.id),
       name: p.name ?? "Pipeline",
       stages: Array.isArray(p.stages)
-        ? p.stages.map((s: any) => ({ id: String(s.id), name: s.name ?? "Stage" }))
+        ? p.stages
+            .map((s: any) => ({
+              id: String(s.id ?? s.stageId ?? s.pipelineStageId ?? ""),
+              name: s.name ?? s.stageName ?? "Stage",
+            }))
+            .filter((s: { id: string }) => s.id)
         : [],
     }));
   }

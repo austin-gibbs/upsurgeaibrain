@@ -334,6 +334,16 @@ export async function PATCH(
 
   // Pipeline routing map: full replace for this agent. An empty array clears
   // all routing rules; rows present overwrite the stored map.
+  let savedPipelineStageMap:
+    | {
+        outcome: string;
+        call_attempt: number | null;
+        pipeline_id: string;
+        pipeline_stage_id: string;
+        pipeline_name: string | null;
+        stage_name: string | null;
+      }[]
+    | undefined;
   if (input.pipeline_stage_map) {
     const { error: deleteError } = await db
       .from("agent_pipeline_stage_map")
@@ -360,6 +370,23 @@ export async function PATCH(
         return NextResponse.json({ error: insertError.message }, { status: 500 });
       }
     }
+    const { data: pipelineStageMap } = await db
+      .from("agent_pipeline_stage_map")
+      .select(
+        "outcome, call_attempt, pipeline_id, pipeline_stage_id, pipeline_name, stage_name"
+      )
+      .eq("agent_id", params.id);
+    savedPipelineStageMap = pipelineStageMap ?? [];
+  }
+
+  let savedTaskConfig: Record<string, unknown> | undefined;
+  if (input.task_config) {
+    const { data: taskConfig } = await db
+      .from("agent_task_configs")
+      .select("*")
+      .eq("agent_id", params.id)
+      .maybeSingle<Record<string, unknown>>();
+    savedTaskConfig = taskConfig ?? undefined;
   }
 
   const { data: updated, error } = await db
@@ -383,5 +410,7 @@ export async function PATCH(
       agent_call_configs: normalizeCallConfigList(updated.agent_call_configs),
     },
     queueRescheduled,
+    ...(savedTaskConfig ? { taskConfig: savedTaskConfig } : {}),
+    ...(savedPipelineStageMap ? { pipelineStageMap: savedPipelineStageMap } : {}),
   });
 }
