@@ -102,62 +102,41 @@ export function validateStageMapForSave(
 /** Hydrate form state from an agent_task_configs row. */
 export function taskConfigFromRow(row: Record<string, unknown> | null | undefined): TaskConfig {
   if (!row) return defaultTaskConfig();
+
+  const str = (key: string): string | null => {
+    const val = row[key];
+    return typeof val === "string" && val.trim() ? val : null;
+  };
+
   return {
     enabled: Boolean(row.enabled),
-    name_template:
-      typeof row.name_template === "string"
-        ? row.name_template
-        : defaultTaskConfig().name_template,
-    task_type: typeof row.task_type === "string" ? row.task_type : "Follow Up",
-    assignee_crm_id:
-      typeof row.assignee_crm_id === "string" ? row.assignee_crm_id : null,
-    assignee_label:
-      typeof row.assignee_label === "string" ? row.assignee_label : null,
+    name_template: str("name_template") ?? defaultTaskConfig().name_template,
+    task_type: str("task_type") ?? "Follow Up",
+    assignee_crm_id: str("assignee_crm_id"),
+    assignee_label: str("assignee_label"),
     due_offset_minutes:
       typeof row.due_offset_minutes === "number" ? row.due_offset_minutes : 0,
-    due_at_time: typeof row.due_at_time === "string" ? row.due_at_time : null,
+    due_at_time: str("due_at_time"),
     only_outcomes: Array.isArray(row.only_outcomes)
       ? (row.only_outcomes as string[])
       : null,
     post_call_webhook_enabled: Boolean(row.post_call_webhook_enabled),
-    post_call_webhook_url:
-      typeof row.post_call_webhook_url === "string" ? row.post_call_webhook_url : null,
+    post_call_webhook_url: str("post_call_webhook_url"),
     post_call_webhook_only_outcomes: Array.isArray(row.post_call_webhook_only_outcomes)
       ? (row.post_call_webhook_only_outcomes as string[])
       : null,
     pipeline_automation_enabled: Boolean(row.pipeline_automation_enabled),
     poll_stage_enabled: Boolean(row.poll_stage_enabled),
-    poll_pipeline_id:
-      typeof row.poll_pipeline_id === "string" ? row.poll_pipeline_id : null,
-    poll_pipeline_stage_id:
-      typeof row.poll_pipeline_stage_id === "string"
-        ? row.poll_pipeline_stage_id
-        : null,
-    poll_pipeline_name:
-      typeof row.poll_pipeline_name === "string" ? row.poll_pipeline_name : null,
-    poll_stage_name:
-      typeof row.poll_stage_name === "string" ? row.poll_stage_name : null,
+    poll_pipeline_id: str("poll_pipeline_id"),
+    poll_pipeline_stage_id: str("poll_pipeline_stage_id"),
+    poll_pipeline_name: str("poll_pipeline_name"),
+    poll_stage_name: str("poll_stage_name"),
     opportunity_custom_field_enabled: Boolean(row.opportunity_custom_field_enabled),
-    opportunity_custom_field_id:
-      typeof row.opportunity_custom_field_id === "string"
-        ? row.opportunity_custom_field_id
-        : null,
-    opportunity_custom_field_key:
-      typeof row.opportunity_custom_field_key === "string"
-        ? row.opportunity_custom_field_key
-        : null,
-    opportunity_custom_field_label:
-      typeof row.opportunity_custom_field_label === "string"
-        ? row.opportunity_custom_field_label
-        : null,
-    opportunity_custom_field_value:
-      typeof row.opportunity_custom_field_value === "string"
-        ? row.opportunity_custom_field_value
-        : null,
-    opportunity_custom_field_value_label:
-      typeof row.opportunity_custom_field_value_label === "string"
-        ? row.opportunity_custom_field_value_label
-        : null,
+    opportunity_custom_field_id: str("opportunity_custom_field_id"),
+    opportunity_custom_field_key: str("opportunity_custom_field_key"),
+    opportunity_custom_field_label: str("opportunity_custom_field_label"),
+    opportunity_custom_field_value: str("opportunity_custom_field_value"),
+    opportunity_custom_field_value_label: str("opportunity_custom_field_value_label"),
   };
 }
 
@@ -170,4 +149,17 @@ export function stageMapFromRows(rows: Record<string, unknown>[]): StageMapEntry
     pipeline_name: typeof m.pipeline_name === "string" ? m.pipeline_name : null,
     stage_name: typeof m.stage_name === "string" ? m.stage_name : null,
   }));
+}
+
+/**
+ * After PATCH, prefer the config we just submitted so the form never clears
+ * when a server re-read omits newer columns.
+ */
+export function resolveTaskConfigAfterSave(
+  serverRow: Record<string, unknown> | undefined,
+  submitted: TaskConfig | undefined
+): TaskConfig | null {
+  if (submitted) return submitted;
+  if (serverRow) return taskConfigFromRow(serverRow);
+  return null;
 }

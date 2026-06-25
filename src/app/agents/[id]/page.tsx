@@ -252,30 +252,52 @@ export default function AgentDetailPage({
     loadCrmUsers();
   }, [loadCrmUsers]);
 
-  function applySavedTaskSettings(data: {
-    taskConfig?: Record<string, unknown>;
-    pipelineStageMap?: Record<string, unknown>[];
-  }) {
-    if (data.taskConfig) {
+  function applySavedTaskSettings(
+    data: {
+      taskConfig?: Record<string, unknown>;
+      pipelineStageMap?: Record<string, unknown>[];
+    },
+    fallback?: {
+      taskConfig: TaskConfig;
+      stageMap?: StageMapEntry[];
+    }
+  ) {
+    if (fallback?.taskConfig) {
+      setTaskCfg(fallback.taskConfig);
+      setAgent((prev) =>
+        prev
+          ? {
+              ...prev,
+              agent_task_configs: [fallback.taskConfig],
+            }
+          : prev
+      );
+    } else if (data.taskConfig) {
       const nextTaskCfg = taskConfigFromRow(data.taskConfig);
       setTaskCfg(nextTaskCfg);
       setAgent((prev) =>
         prev
           ? {
               ...prev,
-              agent_task_configs: [data.taskConfig],
+              agent_task_configs: [data.taskConfig!],
             }
           : prev
       );
     }
-    if (data.pipelineStageMap) {
+
+    if (fallback?.stageMap) {
+      setStageMap(fallback.stageMap);
+    } else if (data.pipelineStageMap) {
       setStageMap(stageMapFromRows(data.pipelineStageMap));
     }
   }
 
   async function patch(
     body: Record<string, unknown>,
-    opts?: { refresh?: boolean }
+    opts?: {
+      refresh?: boolean;
+      savedTaskSettings?: { taskConfig: TaskConfig; stageMap?: StageMapEntry[] };
+    }
   ) {
     setSaving(true);
     setActionMsg(null);
@@ -297,9 +319,7 @@ export default function AgentDetailPage({
         throw new Error(detail ?? data.error ?? "Failed");
       }
       const refresh = opts?.refresh ?? true;
-      if (data.taskConfig || data.pipelineStageMap) {
-        applySavedTaskSettings(data);
-      }
+      applySavedTaskSettings(data, opts?.savedTaskSettings);
       if (refresh) {
         load();
       }
@@ -394,11 +414,20 @@ export default function AgentDetailPage({
       setActionMsg(validationError);
       return;
     }
+    const includeStageMap =
+      isHighLevel &&
+      (prepared.pipeline_automation_enabled || preparedStageMap.length > 0);
     const body: Record<string, unknown> = { task_config: prepared };
-    if (isHighLevel) {
+    if (includeStageMap) {
       body.pipeline_stage_map = preparedStageMap;
     }
-    patch(body, { refresh: false });
+    patch(body, {
+      refresh: false,
+      savedTaskSettings: {
+        taskConfig: prepared,
+        ...(includeStageMap ? { stageMap: preparedStageMap } : {}),
+      },
+    });
   }
 
   if (error)

@@ -381,12 +381,12 @@ export async function PATCH(
 
   let savedTaskConfig: Record<string, unknown> | undefined;
   if (input.task_config) {
-    const { data: taskConfig } = await db
-      .from("agent_task_configs")
-      .select("*")
-      .eq("agent_id", params.id)
-      .maybeSingle<Record<string, unknown>>();
-    savedTaskConfig = taskConfig ?? undefined;
+    // Echo the validated payload we just wrote — avoids a re-read race or
+    // PostgREST schema-cache gaps that can omit newer columns in SELECT *.
+    savedTaskConfig = {
+      agent_id: params.id,
+      ...input.task_config,
+    };
   }
 
   const { data: updated, error } = await db

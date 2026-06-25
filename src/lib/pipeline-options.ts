@@ -1,5 +1,25 @@
 import type { Pipeline, StageMapEntry, TaskConfig } from "@/components/agent-form/types";
 
+function ensurePipelineOption(
+  options: Pipeline[],
+  id: string | null | undefined,
+  name: string | null | undefined
+): Pipeline[] {
+  const trimmed = id?.trim();
+  if (!trimmed || options.some((p) => p.id === trimmed)) return options;
+  return [...options, { id: trimmed, name: name?.trim() || trimmed, stages: [] }];
+}
+
+function ensureStageOption(
+  stages: { id: string; name: string }[],
+  id: string | null | undefined,
+  name: string | null | undefined
+): { id: string; name: string }[] {
+  const trimmed = id?.trim();
+  if (!trimmed || stages.some((s) => s.id === trimmed)) return stages;
+  return [...stages, { id: trimmed, name: name?.trim() || trimmed }];
+}
+
 function ensurePipeline(
   byId: Map<string, Pipeline>,
   pipelineId: string,
@@ -69,3 +89,5 @@ export function mergePipelinesForRouting(
 
   return Array.from(byId.values()).sort((a, b) => a.name.localeCompare(b.name));
 }
+
+export { ensurePipelineOption, ensureStageOption };

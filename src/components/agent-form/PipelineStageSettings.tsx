@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 import { Plus, RefreshCw, Trash2 } from "lucide-react";
 import { outcomeLabel } from "@/lib/engine/outcome";
-import { mergePipelinesForRouting } from "@/lib/pipeline-options";
+import { mergePipelinesForRouting, ensurePipelineOption, ensureStageOption } from "@/lib/pipeline-options";
 import { Button, Input, Label, Select } from "@/components/ui";
 import {
   OUTCOMES,
@@ -64,6 +64,16 @@ export function PipelineStageSettings({
   }
 
   const pollPipeline = pipelineOptions.find((p) => p.id === cfg.poll_pipeline_id);
+  const pollPipelineOptions = ensurePipelineOption(
+    pipelineOptions,
+    cfg.poll_pipeline_id,
+    cfg.poll_pipeline_name
+  );
+  const pollStageOptions = ensureStageOption(
+    pollPipeline?.stages ?? [],
+    cfg.poll_pipeline_stage_id,
+    cfg.poll_stage_name
+  );
   const showPollSelectors =
     pipelineOptions.length > 0 || Boolean(cfg.poll_pipeline_id);
   const showOutcomeRules =
@@ -140,7 +150,7 @@ export function PipelineStageSettings({
                     value={cfg.poll_pipeline_id ?? ""}
                     onChange={(e) => {
                       const val = e.target.value;
-                      const p = pipelineOptions.find((p) => p.id === val);
+                      const p = pollPipelineOptions.find((p) => p.id === val);
                       onChange({
                         poll_pipeline_id: val || null,
                         poll_pipeline_name: p?.name ?? null,
@@ -150,7 +160,7 @@ export function PipelineStageSettings({
                     }}
                   >
                     <option value="">— Select —</option>
-                    {pipelineOptions.map((p) => (
+                    {pollPipelineOptions.map((p) => (
                       <option key={p.id} value={p.id}>
                         {p.name}
                       </option>
@@ -161,10 +171,10 @@ export function PipelineStageSettings({
                   <Label>Poll stage</Label>
                   <Select
                     value={cfg.poll_pipeline_stage_id ?? ""}
-                    disabled={!pollPipeline}
+                    disabled={!cfg.poll_pipeline_id}
                     onChange={(e) => {
                       const val = e.target.value;
-                      const s = pollPipeline?.stages.find((s) => s.id === val);
+                      const s = pollStageOptions.find((s) => s.id === val);
                       onChange({
                         poll_pipeline_stage_id: val || null,
                         poll_stage_name: s?.name ?? null,
@@ -172,9 +182,9 @@ export function PipelineStageSettings({
                     }}
                   >
                     <option value="">
-                      {pollPipeline ? "— Select —" : "—"}
+                      {cfg.poll_pipeline_id ? "— Select —" : "—"}
                     </option>
-                    {pollPipeline?.stages.map((s) => (
+                    {pollStageOptions.map((s) => (
                       <option key={s.id} value={s.id}>
                         {s.name}
                       </option>
@@ -182,6 +192,11 @@ export function PipelineStageSettings({
                   </Select>
                 </div>
               </div>
+            )}
+            {cfg.poll_pipeline_name && cfg.poll_stage_name && (
+              <p className="text-xs text-ink-500">
+                Selected: {cfg.poll_pipeline_name} → {cfg.poll_stage_name}
+              </p>
             )}
           </>
         )}
