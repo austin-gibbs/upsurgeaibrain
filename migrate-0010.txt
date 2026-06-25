@@ -1,7 +1,0 @@
-npm warn Unknown env config "devdir". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
-
-> upsurge-platform@0.1.0 db:apply-0010
-> node scripts/apply-0010.mjs
-
-Missing SUPABASE_ACCESS_TOKEN.
-Create one at https://supabase.com/dashboard/account/tokens

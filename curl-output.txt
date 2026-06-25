@@ -1,9 +1,0 @@
-HTTP/2 307 
-cache-control: public, max-age=0, must-revalidate
-content-type: text/plain
-date: Thu, 25 Jun 2026 06:00:17 GMT
-location: /login?redirectedFrom=%2F
-server: Vercel
-strict-transport-security: max-age=63072000
-x-vercel-id: sfo1::p6n8m-1782367217002-424650753828
-
