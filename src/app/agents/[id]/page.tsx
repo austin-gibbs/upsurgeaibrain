@@ -11,6 +11,7 @@ import {
   defaultCallConfig,
   defaultTaskConfig,
   type CallConfig,
+  type OpportunityCustomField,
   type Pipeline,
   type StageMapEntry,
   type TaskConfig,
@@ -104,6 +105,9 @@ export default function AgentDetailPage({
   const [pipelines, setPipelines] = useState<Pipeline[]>([]);
   const [pipelinesLoading, setPipelinesLoading] = useState(false);
   const [pipelinesError, setPipelinesError] = useState<string | null>(null);
+  const [opportunityFields, setOpportunityFields] = useState<OpportunityCustomField[]>([]);
+  const [opportunityFieldsLoading, setOpportunityFieldsLoading] = useState(false);
+  const [opportunityFieldsError, setOpportunityFieldsError] = useState<string | null>(null);
 
   function load() {
     fetch(`/api/agents/${params.id}`)
@@ -146,11 +150,23 @@ export default function AgentDetailPage({
             assignee_crm_id: tc.assignee_crm_id ?? null,
             assignee_label: tc.assignee_label ?? null,
             due_offset_minutes: tc.due_offset_minutes ?? 0,
+            due_at_time: tc.due_at_time ?? null,
             only_outcomes: tc.only_outcomes ?? null,
             post_call_webhook_enabled: tc.post_call_webhook_enabled ?? false,
             post_call_webhook_url: tc.post_call_webhook_url ?? null,
             post_call_webhook_only_outcomes: tc.post_call_webhook_only_outcomes ?? null,
             pipeline_automation_enabled: tc.pipeline_automation_enabled ?? false,
+            poll_stage_enabled: tc.poll_stage_enabled ?? false,
+            poll_pipeline_id: tc.poll_pipeline_id ?? null,
+            poll_pipeline_stage_id: tc.poll_pipeline_stage_id ?? null,
+            poll_pipeline_name: tc.poll_pipeline_name ?? null,
+            poll_stage_name: tc.poll_stage_name ?? null,
+            opportunity_custom_field_enabled: tc.opportunity_custom_field_enabled ?? false,
+            opportunity_custom_field_id: tc.opportunity_custom_field_id ?? null,
+            opportunity_custom_field_key: tc.opportunity_custom_field_key ?? null,
+            opportunity_custom_field_label: tc.opportunity_custom_field_label ?? null,
+            opportunity_custom_field_value: tc.opportunity_custom_field_value ?? null,
+            opportunity_custom_field_value_label: tc.opportunity_custom_field_value_label ?? null,
           });
         } else {
           setTaskCfg(defaultTaskConfig());
@@ -215,6 +231,27 @@ export default function AgentDetailPage({
   useEffect(() => {
     loadPipelines();
   }, [loadPipelines]);
+
+  const loadOpportunityFields = useCallback(() => {
+    if (effectiveCrmProvider !== "highlevel" || !hasEffectiveCrmCredentials) {
+      setOpportunityFields([]);
+      return;
+    }
+    setOpportunityFieldsLoading(true);
+    setOpportunityFieldsError(null);
+    fetch(`/api/agents/${params.id}/opportunity-fields`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.error && !d.fields) setOpportunityFieldsError(d.error);
+        setOpportunityFields(d.fields ?? []);
+      })
+      .catch((e) => setOpportunityFieldsError(e.message))
+      .finally(() => setOpportunityFieldsLoading(false));
+  }, [effectiveCrmProvider, hasEffectiveCrmCredentials, params.id]);
+
+  useEffect(() => {
+    loadOpportunityFields();
+  }, [loadOpportunityFields]);
 
   async function patch(body: Record<string, unknown>) {
     setSaving(true);
@@ -611,7 +648,7 @@ export default function AgentDetailPage({
         <Card className="mt-6 space-y-5 p-6">
           <SectionHeader
             title="Tasks & automations"
-            description="Post-call CRM tasks, HighLevel workflow webhooks, and pipeline routing."
+            description="Post-call CRM tasks, HighLevel workflow webhooks, poll-stage routing, opportunity custom fields, and outcome-based pipeline routing."
           />
           <TaskSettings cfg={taskCfg} users={[]} onChange={(p) => setTaskCfg((c) => ({ ...c, ...p }))} />
           {isHighLevel && (
@@ -625,11 +662,15 @@ export default function AgentDetailPage({
               cfg={taskCfg}
               pipelines={pipelines}
               map={stageMap}
+              opportunityFields={opportunityFields}
               loading={pipelinesLoading}
+              opportunityFieldsLoading={opportunityFieldsLoading}
               error={pipelinesError}
+              opportunityFieldsError={opportunityFieldsError}
               onChange={(p) => setTaskCfg((c) => ({ ...c, ...p }))}
               onChangeMap={setStageMap}
               onRefresh={loadPipelines}
+              onRefreshOpportunityFields={loadOpportunityFields}
             />
           )}
           <Button variant="secondary" disabled={saving} onClick={saveTaskSettings}>

@@ -25,6 +25,54 @@ export function addDays(isoDate: string, days: number): string {
   return d.toISOString().slice(0, 10);
 }
 
+/**
+ * Milliseconds offset (wall-clock minus UTC) of an IANA timezone at a given
+ * UTC instant. Positive east of UTC, negative west. Handles DST because the
+ * offset is read at that specific instant.
+ */
+function tzOffsetMs(timezone: string, instantMs: number): number {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).formatToParts(new Date(instantMs));
+  const val = (t: string) => Number(parts.find((p) => p.type === t)?.value ?? "0");
+  const asUtc = Date.UTC(
+    val("year"),
+    val("month") - 1,
+    val("day"),
+    val("hour") % 24, // en-US can emit "24" at midnight
+    val("minute"),
+    val("second")
+  );
+  return asUtc - instantMs;
+}
+
+/**
+ * Express a wall-clock time (HH:MM) on a YYYY-MM-DD calendar date in an IANA
+ * timezone as a UTC ISO timestamp. Used for fixed task due-times (e.g. "today
+ * at 05:00 America/New_York") so the due moment is the same regardless of when
+ * the call actually completes. Correct across EST/EDT transitions.
+ */
+export function zonedDateTimeToUtcIso(
+  timezone: string,
+  isoDate: string,
+  hhmm: string
+): string {
+  const [h, m] = normalizeHHMM(hhmm).split(":").map(Number);
+  const [y, mo, d] = isoDate.split("-").map(Number);
+  // Treat the wall time as if it were UTC, then correct by the zone's offset at
+  // that instant. One pass converges for fixed-time-of-day values like 05:00.
+  const utcGuess = Date.UTC(y, mo - 1, d, h, m, 0);
+  const offset = tzOffsetMs(timezone, utcGuess);
+  return new Date(utcGuess - offset).toISOString();
+}
+
 /** Current HH:MM in a timezone, for call-window checks. */
 export function nowHHMMInTz(timezone: string): string {
   return new Intl.DateTimeFormat("en-GB", {

@@ -120,12 +120,28 @@ export interface AgentTaskConfig {
   assignee_crm_id: string | null;
   assignee_label: string | null;
   due_offset_minutes: number;
+  /** Fixed task due time-of-day (HH:MM) in the workspace timezone. When set, it
+   * overrides due_offset_minutes and pins the task to today at this time. */
+  due_at_time: string | null;
   only_outcomes: CallOutcome[] | null;
   post_call_webhook_enabled: boolean;
   post_call_webhook_url: string | null;
   post_call_webhook_only_outcomes: CallOutcome[] | null;
   /** HighLevel only: move the contact's opportunity to the mapped stage after each call. */
   pipeline_automation_enabled: boolean;
+  /** HighLevel only: move queued contacts' opportunities to poll stage during poll. */
+  poll_stage_enabled: boolean;
+  poll_pipeline_id: string | null;
+  poll_pipeline_stage_id: string | null;
+  poll_pipeline_name: string | null;
+  poll_stage_name: string | null;
+  /** HighLevel only: set an opportunity custom-field dropdown on create/update. */
+  opportunity_custom_field_enabled: boolean;
+  opportunity_custom_field_id: string | null;
+  opportunity_custom_field_key: string | null;
+  opportunity_custom_field_label: string | null;
+  opportunity_custom_field_value: string | null;
+  opportunity_custom_field_value_label: string | null;
 }
 
 /** One outcome (+ optional call attempt) -> HighLevel pipeline stage routing rule. */

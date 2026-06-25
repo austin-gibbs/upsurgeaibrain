@@ -9,6 +9,7 @@
 import type {
   CrmAdapter,
   CrmContact,
+  CrmOpportunityCustomField,
   CrmPipeline,
   CrmUser,
   CreateTaskInput,
@@ -18,6 +19,7 @@ import type {
   LogCallInput,
   LogCallResult,
   MoveStageInput,
+  OpportunityCustomFieldInput,
 } from "./types";
 import {
   refreshHighLevelToken,
@@ -32,6 +34,42 @@ const API_VERSION = "2021-07-28";
 // are versioned separately from contacts/opportunities and reject 2021-07-28.
 const CONVERSATIONS_API_VERSION = "2021-04-15";
 const MAX_429_RETRIES = 2;
+
+/** Build the customFields array for HighLevel opportunity create/update bodies. */
+export function buildOpportunityCustomFieldsPayload(
+  customFields?: OpportunityCustomFieldInput[]
+): Array<{ id?: string; key?: string; field_value: string | string[] }> | undefined {
+  if (!customFields?.length) return undefined;
+  return customFields.map((cf) => ({
+    ...(cf.id ? { id: cf.id } : {}),
+    ...(cf.key ? { key: cf.key } : {}),
+    field_value: cf.field_value,
+  }));
+}
+
+function isDropdownFieldType(dataType: string): boolean {
+  const dt = dataType.toUpperCase();
+  return (
+    dt.includes("OPTION") ||
+    dt === "DROPDOWN" ||
+    dt === "SINGLE_OPTIONS" ||
+    dt === "MULTIPLE_OPTIONS"
+  );
+}
+
+function mapCustomFieldOptions(rawOptions: unknown[]): { label: string; value: string }[] {
+  return rawOptions.map((o) => {
+    if (typeof o === "string") return { label: o, value: o };
+    if (o && typeof o === "object") {
+      const obj = o as Record<string, unknown>;
+      const label = String(obj.label ?? obj.name ?? obj.value ?? obj);
+      const value = String(obj.value ?? obj.label ?? obj.name ?? obj);
+      return { label, value };
+    }
+    const s = String(o);
+    return { label: s, value: s };
+  });
+}
 
 // Map our internal outcome → a HighLevel call status so the logged call card
 // reads correctly (Answered / Voicemail / No-answer, etc). Defaults to
@@ -397,8 +435,25 @@ export class HighLevelAdapter implements CrmAdapter {
     }));
   }
 
+  async listOpportunityCustomFields(): Promise<CrmOpportunityCustomField[]> {
+    const data = await this.request<any>(
+      `/locations/${this.locationId}/customFields?model=opportunity`
+    );
+    const fields: any[] = data.customFields ?? [];
+    return fields
+      .filter((f) => isDropdownFieldType(String(f.dataType ?? f.type ?? "")))
+      .map((f) => ({
+        id: String(f.id),
+        key: f.fieldKey ? String(f.fieldKey) : f.key ? String(f.key) : null,
+        name: String(f.name ?? f.label ?? "Field"),
+        dataType: String(f.dataType ?? f.type ?? "unknown"),
+        options: mapCustomFieldOptions(f.picklistOptions ?? f.options ?? []),
+      }));
+  }
+
   async moveContactToStage(input: MoveStageInput): Promise<void> {
-    const { contactId, pipelineId, stageId, contactName, status } = input;
+    const { contactId, pipelineId, stageId, contactName, status, customFields } = input;
+    const customFieldsPayload = buildOpportunityCustomFieldsPayload(customFields);
 
     // 1. Find an existing opportunity for this contact. Prefer one already in
     //    the target pipeline; otherwise reuse the first one we find so we move
@@ -427,6 +482,7 @@ export class HighLevelAdapter implements CrmAdapter {
           pipelineId,
           pipelineStageId: stageId,
           ...(status ? { status } : {}),
+          ...(customFieldsPayload ? { customFields: customFieldsPayload } : {}),
         }),
       });
       return;
@@ -442,6 +498,7 @@ export class HighLevelAdapter implements CrmAdapter {
         name: contactName || "UpSurge Lead",
         status: status ?? "open",
         contactId,
+        ...(customFieldsPayload ? { customFields: customFieldsPayload } : {}),
       }),
     });
   }

@@ -67,6 +67,10 @@ export const taskConfigSchema = z
     assignee_crm_id: z.string().nullable().default(null),
     assignee_label: z.string().nullable().default(null),
     due_offset_minutes: z.number().int().default(0),
+    due_at_time: z
+      .union([z.string().regex(/^\d{1,2}:\d{2}$/), z.literal(""), z.null()])
+      .default(null)
+      .transform((v) => (v === "" ? null : v)),
     only_outcomes: z.array(callOutcomeSchema).nullable().default(null),
     post_call_webhook_enabled: z.boolean().default(false),
     post_call_webhook_url: z
@@ -75,6 +79,17 @@ export const taskConfigSchema = z
       .transform((v) => (v === "" ? null : v)),
     post_call_webhook_only_outcomes: z.array(callOutcomeSchema).nullable().default(null),
     pipeline_automation_enabled: z.boolean().default(false),
+    poll_stage_enabled: z.boolean().default(false),
+    poll_pipeline_id: z.string().nullable().default(null),
+    poll_pipeline_stage_id: z.string().nullable().default(null),
+    poll_pipeline_name: z.string().nullable().default(null),
+    poll_stage_name: z.string().nullable().default(null),
+    opportunity_custom_field_enabled: z.boolean().default(false),
+    opportunity_custom_field_id: z.string().nullable().default(null),
+    opportunity_custom_field_key: z.string().nullable().default(null),
+    opportunity_custom_field_label: z.string().nullable().default(null),
+    opportunity_custom_field_value: z.string().nullable().default(null),
+    opportunity_custom_field_value_label: z.string().nullable().default(null),
   })
   .superRefine((val, ctx) => {
     if (val.post_call_webhook_enabled && !val.post_call_webhook_url) {
@@ -82,6 +97,26 @@ export const taskConfigSchema = z
         code: z.ZodIssueCode.custom,
         path: ["post_call_webhook_url"],
         message: "Webhook URL is required when post-call webhook is enabled.",
+      });
+    }
+    if (
+      val.poll_stage_enabled &&
+      (!val.poll_pipeline_id?.trim() || !val.poll_pipeline_stage_id?.trim())
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["poll_pipeline_stage_id"],
+        message: "Poll stage requires both a pipeline and stage when enabled.",
+      });
+    }
+    if (
+      val.opportunity_custom_field_enabled &&
+      (!val.opportunity_custom_field_id?.trim() || !val.opportunity_custom_field_value?.trim())
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["opportunity_custom_field_value"],
+        message: "Opportunity custom field requires a field and value when enabled.",
       });
     }
   });

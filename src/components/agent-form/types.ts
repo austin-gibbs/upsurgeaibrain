@@ -16,11 +16,23 @@ export type TaskConfig = {
   assignee_crm_id: string | null;
   assignee_label: string | null;
   due_offset_minutes: number;
+  due_at_time: string | null;
   only_outcomes: string[] | null;
   post_call_webhook_enabled: boolean;
   post_call_webhook_url: string | null;
   post_call_webhook_only_outcomes: string[] | null;
   pipeline_automation_enabled: boolean;
+  poll_stage_enabled: boolean;
+  poll_pipeline_id: string | null;
+  poll_pipeline_stage_id: string | null;
+  poll_pipeline_name: string | null;
+  poll_stage_name: string | null;
+  opportunity_custom_field_enabled: boolean;
+  opportunity_custom_field_id: string | null;
+  opportunity_custom_field_key: string | null;
+  opportunity_custom_field_label: string | null;
+  opportunity_custom_field_value: string | null;
+  opportunity_custom_field_value_label: string | null;
 };
 
 /** A CRM pipeline + its ordered stages, from GET /api/agents/:id/pipelines. */
@@ -28,6 +40,15 @@ export type Pipeline = {
   id: string;
   name: string;
   stages: { id: string; name: string }[];
+};
+
+/** One opportunity custom dropdown field from GET /api/agents/:id/opportunity-fields. */
+export type OpportunityCustomField = {
+  id: string;
+  key: string | null;
+  name: string;
+  dataType: string;
+  options: { label: string; value: string }[];
 };
 
 /** One routing rule as edited in the form (outcome + optional attempt -> stage). */
@@ -70,10 +91,22 @@ export function defaultTaskConfig(): TaskConfig {
     assignee_crm_id: null,
     assignee_label: null,
     due_offset_minutes: 0,
+    due_at_time: null,
     only_outcomes: null,
     post_call_webhook_enabled: false,
     post_call_webhook_url: null,
     post_call_webhook_only_outcomes: null,
     pipeline_automation_enabled: false,
+    poll_stage_enabled: false,
+    poll_pipeline_id: null,
+    poll_pipeline_stage_id: null,
+    poll_pipeline_name: null,
+    poll_stage_name: null,
+    opportunity_custom_field_enabled: false,
+    opportunity_custom_field_id: null,
+    opportunity_custom_field_key: null,
+    opportunity_custom_field_label: null,
+    opportunity_custom_field_value: null,
+    opportunity_custom_field_value_label: null,
   };
 }

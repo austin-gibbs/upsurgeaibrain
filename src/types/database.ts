@@ -207,11 +207,23 @@ export type Database = {
           assignee_crm_id: string | null
           assignee_label: string | null
           created_at: string
+          due_at_time: string | null
           due_offset_minutes: number
           enabled: boolean
           name_template: string
           only_outcomes: Database["public"]["Enums"]["call_outcome"][] | null
           pipeline_automation_enabled: boolean
+          poll_stage_enabled: boolean
+          poll_pipeline_id: string | null
+          poll_pipeline_stage_id: string | null
+          poll_pipeline_name: string | null
+          poll_stage_name: string | null
+          opportunity_custom_field_enabled: boolean
+          opportunity_custom_field_id: string | null
+          opportunity_custom_field_key: string | null
+          opportunity_custom_field_label: string | null
+          opportunity_custom_field_value: string | null
+          opportunity_custom_field_value_label: string | null
           post_call_webhook_enabled: boolean
           post_call_webhook_only_outcomes:
             | Database["public"]["Enums"]["call_outcome"][]
@@ -225,11 +237,23 @@ export type Database = {
           assignee_crm_id?: string | null
           assignee_label?: string | null
           created_at?: string
+          due_at_time?: string | null
           due_offset_minutes?: number
           enabled?: boolean
           name_template?: string
           only_outcomes?: Database["public"]["Enums"]["call_outcome"][] | null
           pipeline_automation_enabled?: boolean
+          poll_stage_enabled?: boolean
+          poll_pipeline_id?: string | null
+          poll_pipeline_stage_id?: string | null
+          poll_pipeline_name?: string | null
+          poll_stage_name?: string | null
+          opportunity_custom_field_enabled?: boolean
+          opportunity_custom_field_id?: string | null
+          opportunity_custom_field_key?: string | null
+          opportunity_custom_field_label?: string | null
+          opportunity_custom_field_value?: string | null
+          opportunity_custom_field_value_label?: string | null
           post_call_webhook_enabled?: boolean
           post_call_webhook_only_outcomes?:
             | Database["public"]["Enums"]["call_outcome"][]
@@ -243,11 +267,23 @@ export type Database = {
           assignee_crm_id?: string | null
           assignee_label?: string | null
           created_at?: string
+          due_at_time?: string | null
           due_offset_minutes?: number
           enabled?: boolean
           name_template?: string
           only_outcomes?: Database["public"]["Enums"]["call_outcome"][] | null
           pipeline_automation_enabled?: boolean
+          poll_stage_enabled?: boolean
+          poll_pipeline_id?: string | null
+          poll_pipeline_stage_id?: string | null
+          poll_pipeline_name?: string | null
+          poll_stage_name?: string | null
+          opportunity_custom_field_enabled?: boolean
+          opportunity_custom_field_id?: string | null
+          opportunity_custom_field_key?: string | null
+          opportunity_custom_field_label?: string | null
+          opportunity_custom_field_value?: string | null
+          opportunity_custom_field_value_label?: string | null
           post_call_webhook_enabled?: boolean
           post_call_webhook_only_outcomes?:
             | Database["public"]["Enums"]["call_outcome"][]

@@ -17,8 +17,9 @@ import {
   todayInTz,
   withinCallWindow,
 } from "./cadence";
-import type { Agent, AgentCallConfig, Contact, Workspace } from "@/types";
+import type { Agent, AgentCallConfig, AgentTaskConfig, Contact, Workspace } from "@/types";
 import { upsertQueueEntry, countActiveQueueForAgent } from "./call-queue";
+import { applyPollStageRouting } from "./pipeline-routing";
 
 export interface PollOptions {
   testMode?: boolean;
@@ -57,6 +58,12 @@ export async function pollAgent(
     .eq("agent_id", agentId)
     .single<AgentCallConfig>();
   if (!config) return { agentId, scanned: 0, eligible: 0, enqueued: 0, skippedReason: "no call config" };
+
+  const { data: taskConfig } = await supabase
+    .from("agent_task_configs")
+    .select("*")
+    .eq("agent_id", agentId)
+    .maybeSingle<AgentTaskConfig>();
 
   const { data: workspace } = await supabase
     .from("workspaces")
@@ -134,6 +141,15 @@ export async function pollAgent(
       );
   const dailyCap = Math.min(config.max_calls_per_day, windowCapacity);
   const capped = eligible.slice(0, dailyCap);
+
+  // 3b. HighLevel poll-stage routing — move only contacts we are about to queue.
+  if (taskConfig?.poll_stage_enabled && capped.length > 0) {
+    try {
+      await applyPollStageRouting({ crm, contacts: capped, taskConfig });
+    } catch {
+      /* non-fatal: never block poll on a pipeline move */
+    }
+  }
 
   const baseDelay = options?.testMode
     ? 0

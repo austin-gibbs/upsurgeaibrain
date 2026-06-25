@@ -3,7 +3,13 @@
 import { Plus, RefreshCw, Trash2 } from "lucide-react";
 import { outcomeLabel } from "@/lib/engine/outcome";
 import { Button, Input, Label, Select } from "@/components/ui";
-import { OUTCOMES, type Pipeline, type StageMapEntry, type TaskConfig } from "./types";
+import {
+  OUTCOMES,
+  type OpportunityCustomField,
+  type Pipeline,
+  type StageMapEntry,
+  type TaskConfig,
+} from "./types";
 
 function ruleKey(rule: StageMapEntry, index: number): string {
   return `${rule.outcome}:${rule.call_attempt ?? "any"}:${index}`;
@@ -13,21 +19,30 @@ export function PipelineStageSettings({
   cfg,
   pipelines,
   map,
+  opportunityFields,
   loading,
+  opportunityFieldsLoading,
   error,
+  opportunityFieldsError,
   onChange,
   onChangeMap,
   onRefresh,
+  onRefreshOpportunityFields,
 }: {
   cfg: TaskConfig;
   pipelines: Pipeline[];
   map: StageMapEntry[];
+  opportunityFields: OpportunityCustomField[];
   loading: boolean;
+  opportunityFieldsLoading: boolean;
   error: string | null;
+  opportunityFieldsError: string | null;
   onChange: (patch: Partial<TaskConfig>) => void;
   onChangeMap: (map: StageMapEntry[]) => void;
   /** Re-pull pipelines + stages from HighLevel (used by the Refresh button). */
   onRefresh?: () => void;
+  /** Re-pull opportunity custom fields from HighLevel. */
+  onRefreshOpportunityFields?: () => void;
 }) {
   function updateRule(index: number, patch: Partial<StageMapEntry>) {
     onChangeMap(map.map((r, i) => (i === index ? { ...r, ...patch } : r)));
@@ -51,13 +66,250 @@ export function PipelineStageSettings({
     ]);
   }
 
+  const selectedField = opportunityFields.find(
+    (f) => f.id === cfg.opportunity_custom_field_id
+  );
+  const pollPipeline = pipelines.find((p) => p.id === cfg.poll_pipeline_id);
+
   return (
     <div className="space-y-5 border-t border-ink-100 pt-5">
+      <div>
+        <h3 className="text-sm font-semibold text-ink-900">
+          HighLevel opportunity automation
+        </h3>
+        <p className="mt-1 text-xs text-ink-500">
+          Configure poll-time stage moves and the opportunity custom-field value
+          applied whenever UpSurge creates or updates an opportunity.
+        </p>
+      </div>
+
+      {/* Poll stage routing */}
+      <div className="space-y-4 rounded-2xl border border-ink-200/50 bg-ink-50/30 p-4">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h4 className="text-sm font-semibold text-ink-900">Poll stage</h4>
+            <p className="mt-1 text-xs text-ink-500">
+              When a poll enqueues calls, move each queued contact&apos;s
+              opportunity into this stage before dialing begins.
+            </p>
+          </div>
+          {onRefresh && (
+            <button
+              type="button"
+              onClick={onRefresh}
+              disabled={loading}
+              title="Re-pull pipelines & stages from HighLevel"
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-ink-200 px-3 py-1.5 text-xs font-medium text-ink-600 transition-colors hover:bg-ink-50 disabled:opacity-50"
+            >
+              <RefreshCw
+                className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`}
+                strokeWidth={1.75}
+              />
+              {loading ? "Refreshing…" : "Refresh"}
+            </button>
+          )}
+        </div>
+
+        <label className="flex cursor-pointer items-center gap-3">
+          <input
+            type="checkbox"
+            className="h-4 w-4 rounded border-ink-300 text-brand-600 focus:ring-brand-500"
+            checked={cfg.poll_stage_enabled}
+            onChange={(e) => onChange({ poll_stage_enabled: e.target.checked })}
+          />
+          <span className="text-sm font-medium text-ink-700">
+            Move opportunities when poll queues calls
+          </span>
+        </label>
+
+        {cfg.poll_stage_enabled && (
+          <>
+            {loading && (
+              <p className="text-xs text-ink-500">Loading pipelines…</p>
+            )}
+            {error && <p className="text-xs text-accent-rose-fg">{error}</p>}
+            {!loading && !error && pipelines.length === 0 && (
+              <p className="text-xs text-accent-amber-fg">
+                No pipelines found. Save valid HighLevel credentials first, then
+                reopen this page.
+              </p>
+            )}
+            {pipelines.length > 0 && (
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-1.5">
+                  <Label>Poll pipeline</Label>
+                  <Select
+                    value={cfg.poll_pipeline_id ?? ""}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      const p = pipelines.find((p) => p.id === val);
+                      onChange({
+                        poll_pipeline_id: val || null,
+                        poll_pipeline_name: p?.name ?? null,
+                        poll_pipeline_stage_id: null,
+                        poll_stage_name: null,
+                      });
+                    }}
+                  >
+                    <option value="">— Select —</option>
+                    {pipelines.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Poll stage</Label>
+                  <Select
+                    value={cfg.poll_pipeline_stage_id ?? ""}
+                    disabled={!pollPipeline}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      const s = pollPipeline?.stages.find((s) => s.id === val);
+                      onChange({
+                        poll_pipeline_stage_id: val || null,
+                        poll_stage_name: s?.name ?? null,
+                      });
+                    }}
+                  >
+                    <option value="">
+                      {pollPipeline ? "— Select —" : "—"}
+                    </option>
+                    {pollPipeline?.stages.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+
+      {/* Opportunity custom field */}
+      <div className="space-y-4 rounded-2xl border border-ink-200/50 bg-ink-50/30 p-4">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h4 className="text-sm font-semibold text-ink-900">
+              Opportunity AI Agent value
+            </h4>
+            <p className="mt-1 text-xs text-ink-500">
+              Set a dropdown custom field on every opportunity UpSurge creates or
+              moves — e.g. AI Agent = Seller Outgoing AI Agent.
+            </p>
+          </div>
+          {onRefreshOpportunityFields && (
+            <button
+              type="button"
+              onClick={onRefreshOpportunityFields}
+              disabled={opportunityFieldsLoading}
+              title="Re-pull opportunity custom fields from HighLevel"
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-ink-200 px-3 py-1.5 text-xs font-medium text-ink-600 transition-colors hover:bg-ink-50 disabled:opacity-50"
+            >
+              <RefreshCw
+                className={`h-3.5 w-3.5 ${opportunityFieldsLoading ? "animate-spin" : ""}`}
+                strokeWidth={1.75}
+              />
+              {opportunityFieldsLoading ? "Refreshing…" : "Refresh"}
+            </button>
+          )}
+        </div>
+
+        <label className="flex cursor-pointer items-center gap-3">
+          <input
+            type="checkbox"
+            className="h-4 w-4 rounded border-ink-300 text-brand-600 focus:ring-brand-500"
+            checked={cfg.opportunity_custom_field_enabled}
+            onChange={(e) =>
+              onChange({ opportunity_custom_field_enabled: e.target.checked })
+            }
+          />
+          <span className="text-sm font-medium text-ink-700">
+            Set opportunity custom field on create/update
+          </span>
+        </label>
+
+        {cfg.opportunity_custom_field_enabled && (
+          <>
+            {opportunityFieldsLoading && (
+              <p className="text-xs text-ink-500">Loading custom fields…</p>
+            )}
+            {opportunityFieldsError && (
+              <p className="text-xs text-accent-rose-fg">{opportunityFieldsError}</p>
+            )}
+            {!opportunityFieldsLoading &&
+              !opportunityFieldsError &&
+              opportunityFields.length === 0 && (
+                <p className="text-xs text-accent-amber-fg">
+                  No dropdown opportunity fields found. Create one in HighLevel
+                  first, then refresh.
+                </p>
+              )}
+            {opportunityFields.length > 0 && (
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-1.5">
+                  <Label>Custom field</Label>
+                  <Select
+                    value={cfg.opportunity_custom_field_id ?? ""}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      const field = opportunityFields.find((f) => f.id === val);
+                      onChange({
+                        opportunity_custom_field_id: val || null,
+                        opportunity_custom_field_key: field?.key ?? null,
+                        opportunity_custom_field_label: field?.name ?? null,
+                        opportunity_custom_field_value: null,
+                        opportunity_custom_field_value_label: null,
+                      });
+                    }}
+                  >
+                    <option value="">— Select —</option>
+                    {opportunityFields.map((f) => (
+                      <option key={f.id} value={f.id}>
+                        {f.name}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Field value</Label>
+                  <Select
+                    value={cfg.opportunity_custom_field_value ?? ""}
+                    disabled={!selectedField}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      const opt = selectedField?.options.find((o) => o.value === val);
+                      onChange({
+                        opportunity_custom_field_value: val || null,
+                        opportunity_custom_field_value_label: opt?.label ?? null,
+                      });
+                    }}
+                  >
+                    <option value="">
+                      {selectedField ? "— Select —" : "—"}
+                    </option>
+                    {selectedField?.options.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+
+      {/* Outcome-based pipeline routing */}
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h3 className="text-sm font-semibold text-ink-900">
-            Pipeline routing
-          </h3>
+          <h4 className="text-sm font-semibold text-ink-900">
+            Pipeline routing by outcome
+          </h4>
           <p className="mt-1 text-xs text-ink-500">
             Move the contact&apos;s HighLevel opportunity to a pipeline stage based
             on call outcome — and optionally the call attempt number. Leave
@@ -65,21 +317,6 @@ export function PipelineStageSettings({
             on any attempt). More specific attempt rules win over catch-alls.
           </p>
         </div>
-        {onRefresh && (
-          <button
-            type="button"
-            onClick={onRefresh}
-            disabled={loading}
-            title="Re-pull pipelines & stages from HighLevel"
-            className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-ink-200 px-3 py-1.5 text-xs font-medium text-ink-600 transition-colors hover:bg-ink-50 disabled:opacity-50"
-          >
-            <RefreshCw
-              className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`}
-              strokeWidth={1.75}
-            />
-            {loading ? "Refreshing…" : "Refresh"}
-          </button>
-        )}
       </div>
 
       <label className="flex cursor-pointer items-center gap-3">

@@ -14,7 +14,7 @@ import { createServiceClient } from "@/lib/supabase/server";
 import { getCrmAdapterForAgent } from "@/lib/crm";
 import { classifyOutcome, outcomeLabel, extractFromRetellPayload } from "./outcome";
 import { reconcileTags } from "./tags";
-import { nextEligibleDate, todayInTz } from "./cadence";
+import { nextEligibleDate, todayInTz, zonedDateTimeToUtcIso } from "./cadence";
 import { updateMemoryAfterCall } from "./memory";
 import { applyPipelineRouting } from "./pipeline-routing";
 import { processInboundCall } from "./process-inbound";
@@ -186,7 +186,12 @@ export async function processRetellWebhook(
     const name = taskConfig.name_template
       .replace("{contact_name}", contact.full_name ?? "Contact")
       .replace("{date}", today);
-    const dueAt = new Date(Date.now() + taskConfig.due_offset_minutes * 60_000).toISOString();
+    // due_at_time pins every task to a fixed wall-clock time on today's
+    // workspace-local date (e.g. 05:00 ET — even if already past), so the team
+    // can require same-day completion. Falls back to the relative offset.
+    const dueAt = taskConfig.due_at_time
+      ? zonedDateTimeToUtcIso(workspace.timezone, today, taskConfig.due_at_time)
+      : new Date(Date.now() + taskConfig.due_offset_minutes * 60_000).toISOString();
     const assignees = parseAssignees(taskConfig.assignee_crm_id);
     const targets = assignees.length ? assignees : [null];
     taskCreated = await createTasksToCrm(
@@ -237,6 +242,7 @@ export async function processRetellWebhook(
         contact,
         outcome,
         attemptNumber: call.attempt_number,
+        taskConfig,
       });
     } catch {
       /* non-fatal: never block cadence advance on a pipeline move */

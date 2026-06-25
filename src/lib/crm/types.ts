@@ -72,6 +72,26 @@ export interface CrmPipeline {
   stages: CrmPipelineStage[];
 }
 
+export interface CrmOpportunityCustomFieldOption {
+  label: string;
+  value: string;
+}
+
+/** A dropdown/select custom field on HighLevel opportunities. */
+export interface CrmOpportunityCustomField {
+  id: string;
+  key: string | null;
+  name: string;
+  dataType: string;
+  options: CrmOpportunityCustomFieldOption[];
+}
+
+export interface OpportunityCustomFieldInput {
+  id?: string;
+  key?: string;
+  field_value: string | string[];
+}
+
 export interface MoveStageInput {
   /** Provider-native contact id. */
   contactId: string;
@@ -81,6 +101,8 @@ export interface MoveStageInput {
   contactName?: string | null;
   /** Optional opportunity status to set alongside the stage move. */
   status?: "open" | "won" | "lost" | "abandoned";
+  /** Optional opportunity custom fields to set on create/update. */
+  customFields?: OpportunityCustomFieldInput[];
 }
 
 export interface CreateContactInput {
@@ -124,6 +146,9 @@ export interface CrmAdapter {
 
   /** List the pipelines + their stages, to populate the mapping UI. */
   listPipelines?(): Promise<CrmPipeline[]>;
+
+  /** List dropdown custom fields on opportunities (HighLevel only). */
+  listOpportunityCustomFields?(): Promise<CrmOpportunityCustomField[]>;
 
   /**
    * Move the contact's opportunity to a pipeline stage. Finds the contact's

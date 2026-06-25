@@ -104,10 +104,22 @@ export function TaskSettings({
           </div>
           <NumField
             label="Due offset (minutes)"
-            hint="from call time"
+            hint="from call time (ignored if a fixed due time is set)"
             value={cfg.due_offset_minutes}
             onChange={(v) => onChange({ due_offset_minutes: v ?? 0 })}
           />
+          <div className="space-y-1.5">
+            <Label hint="HH:MM in workspace timezone, today — overrides offset">
+              Fixed due time
+            </Label>
+            <Input
+              type="time"
+              value={cfg.due_at_time ?? ""}
+              onChange={(e) =>
+                onChange({ due_at_time: e.target.value || null })
+              }
+            />
+          </div>
           <div className="space-y-1.5 sm:col-span-2">
             <Label hint="leave all unchecked = every outcome makes a task">
               Only on these outcomes
