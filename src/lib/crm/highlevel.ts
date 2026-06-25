@@ -53,22 +53,64 @@ function isDropdownFieldType(dataType: string): boolean {
     dt.includes("OPTION") ||
     dt === "DROPDOWN" ||
     dt === "SINGLE_OPTIONS" ||
-    dt === "MULTIPLE_OPTIONS"
+    dt === "MULTIPLE_OPTIONS" ||
+    dt === "RADIO" ||
+    dt === "CHECKBOX" ||
+    dt === "TEXTBOX_LIST" ||
+    dt === "SELECT" ||
+    dt === "PICKLIST"
   );
 }
 
-function mapCustomFieldOptions(rawOptions: unknown[]): { label: string; value: string }[] {
+function fieldOptionSources(raw: Record<string, unknown>): unknown[] {
+  const sources = [
+    raw.picklistOptions,
+    raw.options,
+    raw.picklistImageOptions,
+  ];
+  for (const src of sources) {
+    if (Array.isArray(src) && src.length > 0) return src;
+  }
+  return [];
+}
+
+export function mapCustomFieldOptions(
+  rawOptions: unknown[]
+): { label: string; value: string }[] {
   return rawOptions.map((o) => {
     if (typeof o === "string") return { label: o, value: o };
     if (o && typeof o === "object") {
       const obj = o as Record<string, unknown>;
       const label = String(obj.label ?? obj.name ?? obj.value ?? obj);
-      const value = String(obj.value ?? obj.label ?? obj.name ?? obj);
+      // HighLevel SINGLE_OPTIONS writes expect the display label.
+      const value = String(obj.label ?? obj.name ?? obj.value ?? obj);
       return { label, value };
     }
     const s = String(o);
     return { label: s, value: s };
   });
+}
+
+/** True when a raw HighLevel field definition has selectable options. */
+export function isSelectableOpportunityField(raw: Record<string, unknown>): boolean {
+  const dataType = String(raw.dataType ?? raw.type ?? "");
+  if (isDropdownFieldType(dataType)) return true;
+  return fieldOptionSources(raw).length > 0;
+}
+
+export function parseOpportunityCustomField(
+  raw: Record<string, unknown>
+): CrmOpportunityCustomField | null {
+  if (!raw.id) return null;
+  const options = mapCustomFieldOptions(fieldOptionSources(raw));
+  if (!isSelectableOpportunityField(raw) && options.length === 0) return null;
+  return {
+    id: String(raw.id),
+    key: raw.fieldKey ? String(raw.fieldKey) : raw.key ? String(raw.key) : null,
+    name: String(raw.name ?? raw.label ?? "Field"),
+    dataType: String(raw.dataType ?? raw.type ?? "unknown"),
+    options,
+  };
 }
 
 // Map our internal outcome → a HighLevel call status so the logged call card
@@ -436,19 +478,37 @@ export class HighLevelAdapter implements CrmAdapter {
   }
 
   async listOpportunityCustomFields(): Promise<CrmOpportunityCustomField[]> {
-    const data = await this.request<any>(
-      `/locations/${this.locationId}/customFields?model=opportunity`
-    );
-    const fields: any[] = data.customFields ?? [];
-    return fields
-      .filter((f) => isDropdownFieldType(String(f.dataType ?? f.type ?? "")))
-      .map((f) => ({
-        id: String(f.id),
-        key: f.fieldKey ? String(f.fieldKey) : f.key ? String(f.key) : null,
-        name: String(f.name ?? f.label ?? "Field"),
-        dataType: String(f.dataType ?? f.type ?? "unknown"),
-        options: mapCustomFieldOptions(f.picklistOptions ?? f.options ?? []),
-      }));
+    const byId = new Map<string, CrmOpportunityCustomField>();
+
+    const ingest = (rawList: unknown[]) => {
+      for (const raw of rawList) {
+        if (!raw || typeof raw !== "object") continue;
+        const parsed = parseOpportunityCustomField(raw as Record<string, unknown>);
+        if (parsed) byId.set(parsed.id, parsed);
+      }
+    };
+
+    try {
+      const data = await this.request<any>(
+        `/locations/${this.locationId}/customFields?model=opportunity`
+      );
+      ingest(data.customFields ?? []);
+    } catch {
+      /* fall through to V2 */
+    }
+
+    if (byId.size === 0) {
+      try {
+        const v2 = await this.request<any>(
+          `/custom-fields/object/opportunity?locationId=${this.locationId}`
+        );
+        ingest(v2.customFields ?? v2.fields ?? []);
+      } catch {
+        /* no V2 fields */
+      }
+    }
+
+    return Array.from(byId.values()).sort((a, b) => a.name.localeCompare(b.name));
   }
 
   async moveContactToStage(input: MoveStageInput): Promise<void> {

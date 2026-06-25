@@ -6,6 +6,7 @@ import { ArrowLeft, Phone, Settings, KeyRound } from "lucide-react";
 import { CallSettings } from "@/components/agent-form/CallSettings";
 import { TaskSettings } from "@/components/agent-form/TaskSettings";
 import { PostCallWebhookSettings } from "@/components/agent-form/PostCallWebhookSettings";
+import { HighLevelOpportunityFieldSettings } from "@/components/agent-form/HighLevelOpportunityFieldSettings";
 import { PipelineStageSettings } from "@/components/agent-form/PipelineStageSettings";
 import {
   defaultCallConfig,
@@ -658,19 +659,25 @@ export default function AgentDetailPage({
             />
           )}
           {isHighLevel && (
+            <HighLevelOpportunityFieldSettings
+              cfg={taskCfg}
+              fields={opportunityFields}
+              loading={opportunityFieldsLoading}
+              error={opportunityFieldsError}
+              onChange={(p) => setTaskCfg((c) => ({ ...c, ...p }))}
+              onRefresh={loadOpportunityFields}
+            />
+          )}
+          {isHighLevel && (
             <PipelineStageSettings
               cfg={taskCfg}
               pipelines={pipelines}
               map={stageMap}
-              opportunityFields={opportunityFields}
               loading={pipelinesLoading}
-              opportunityFieldsLoading={opportunityFieldsLoading}
               error={pipelinesError}
-              opportunityFieldsError={opportunityFieldsError}
               onChange={(p) => setTaskCfg((c) => ({ ...c, ...p }))}
               onChangeMap={setStageMap}
               onRefresh={loadPipelines}
-              onRefreshOpportunityFields={loadOpportunityFields}
             />
           )}
           <Button variant="secondary" disabled={saving} onClick={saveTaskSettings}>
