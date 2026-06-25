@@ -63,12 +63,25 @@ function isDropdownFieldType(dataType: string): boolean {
 }
 
 function fieldOptionSources(raw: Record<string, unknown>): unknown[] {
-  const sources = [
+  const nested =
+    raw.field && typeof raw.field === "object"
+      ? (raw.field as Record<string, unknown>)
+      : raw.customField && typeof raw.customField === "object"
+        ? (raw.customField as Record<string, unknown>)
+        : null;
+
+  const candidates = [
     raw.picklistOptions,
     raw.options,
     raw.picklistImageOptions,
+    raw.values,
+    raw.optionLabels,
+    nested?.picklistOptions,
+    nested?.options,
+    nested?.picklistImageOptions,
   ];
-  for (const src of sources) {
+
+  for (const src of candidates) {
     if (Array.isArray(src) && src.length > 0) return src;
   }
   return [];
@@ -77,18 +90,35 @@ function fieldOptionSources(raw: Record<string, unknown>): unknown[] {
 export function mapCustomFieldOptions(
   rawOptions: unknown[]
 ): { label: string; value: string }[] {
-  return rawOptions.map((o) => {
-    if (typeof o === "string") return { label: o, value: o };
-    if (o && typeof o === "object") {
+  const seen = new Set<string>();
+  const out: { label: string; value: string }[] = [];
+
+  for (const o of rawOptions) {
+    let label: string;
+    let value: string;
+
+    if (typeof o === "string") {
+      label = o.trim();
+      value = label;
+    } else if (o && typeof o === "object") {
       const obj = o as Record<string, unknown>;
-      const label = String(obj.label ?? obj.name ?? obj.value ?? obj);
-      // HighLevel SINGLE_OPTIONS writes expect the display label.
-      const value = String(obj.label ?? obj.name ?? obj.value ?? obj);
-      return { label, value };
+      label = String(obj.label ?? obj.name ?? obj.text ?? obj.value ?? "").trim();
+      if (!label) continue;
+      // HighLevel SINGLE_OPTIONS writes expect the display label as field_value.
+      value = String(obj.label ?? obj.name ?? obj.text ?? obj.value ?? label).trim();
+    } else {
+      label = String(o).trim();
+      value = label;
     }
-    const s = String(o);
-    return { label: s, value: s };
-  });
+
+    if (!label) continue;
+    const dedupeKey = `${value}::${label}`;
+    if (seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
+    out.push({ label, value });
+  }
+
+  return out;
 }
 
 /** True when a raw HighLevel field definition has selectable options. */
@@ -98,19 +128,51 @@ export function isSelectableOpportunityField(raw: Record<string, unknown>): bool
   return fieldOptionSources(raw).length > 0;
 }
 
+function unwrapCustomFieldRaw(raw: unknown): Record<string, unknown> | null {
+  if (!raw || typeof raw !== "object") return null;
+  const rec = raw as Record<string, unknown>;
+  const nested = rec.customField ?? rec.field;
+  if (nested && typeof nested === "object") {
+    return nested as Record<string, unknown>;
+  }
+  return rec;
+}
+
 export function parseOpportunityCustomField(
   raw: Record<string, unknown>
 ): CrmOpportunityCustomField | null {
-  if (!raw.id) return null;
-  const options = mapCustomFieldOptions(fieldOptionSources(raw));
-  if (!isSelectableOpportunityField(raw) && options.length === 0) return null;
+  const field = unwrapCustomFieldRaw(raw);
+  if (!field?.id) return null;
+  const options = mapCustomFieldOptions(fieldOptionSources(field));
+  if (!isSelectableOpportunityField(field) && options.length === 0) return null;
   return {
-    id: String(raw.id),
-    key: raw.fieldKey ? String(raw.fieldKey) : raw.key ? String(raw.key) : null,
-    name: String(raw.name ?? raw.label ?? "Field"),
-    dataType: String(raw.dataType ?? raw.type ?? "unknown"),
+    id: String(field.id),
+    key: field.fieldKey ? String(field.fieldKey) : field.key ? String(field.key) : null,
+    name: String(field.name ?? field.label ?? "Field"),
+    dataType: String(field.dataType ?? field.type ?? "unknown"),
     options,
   };
+}
+
+function mergeOpportunityCustomField(
+  byId: Map<string, CrmOpportunityCustomField>,
+  parsed: CrmOpportunityCustomField | null
+): void {
+  if (!parsed) return;
+  const existing = byId.get(parsed.id);
+  if (!existing) {
+    byId.set(parsed.id, parsed);
+    return;
+  }
+  const options =
+    parsed.options.length >= existing.options.length ? parsed.options : existing.options;
+  byId.set(parsed.id, {
+    ...existing,
+    ...parsed,
+    key: parsed.key ?? existing.key,
+    name: parsed.name || existing.name,
+    options,
+  });
 }
 
 // Map our internal outcome → a HighLevel call status so the logged call card
@@ -486,34 +548,69 @@ export class HighLevelAdapter implements CrmAdapter {
     const byId = new Map<string, CrmOpportunityCustomField>();
 
     const ingest = (rawList: unknown[]) => {
-      for (const raw of rawList) {
-        if (!raw || typeof raw !== "object") continue;
-        const parsed = parseOpportunityCustomField(raw as Record<string, unknown>);
-        if (parsed) byId.set(parsed.id, parsed);
+      for (const item of rawList) {
+        const raw = unwrapCustomFieldRaw(item);
+        if (!raw) continue;
+        mergeOpportunityCustomField(byId, parseOpportunityCustomField(raw));
       }
     };
 
+    // Legacy list — often returns field metadata without picklist options populated.
     try {
       const data = await this.request<any>(
         `/locations/${this.locationId}/customFields?model=opportunity`
       );
-      ingest(data.customFields ?? []);
+      ingest(data.customFields ?? data.fields ?? []);
     } catch {
-      /* fall through to V2 */
+      /* fall through */
     }
 
-    if (byId.size === 0) {
+    // V2 list — includes options for SINGLE_OPTIONS / dropdown fields.
+    for (const path of [
+      `/custom-fields/object/opportunity?locationId=${this.locationId}`,
+      `/custom-fields/object-key/opportunity?locationId=${this.locationId}`,
+    ]) {
       try {
-        const v2 = await this.request<any>(
-          `/custom-fields/object/opportunity?locationId=${this.locationId}`
-        );
+        const v2 = await this.request<any>(path);
         ingest(v2.customFields ?? v2.fields ?? []);
       } catch {
-        /* no V2 fields */
+        /* try next source */
       }
     }
 
+    // Per-field detail when list endpoints omit options (common on legacy API).
+    const needsOptions = Array.from(byId.values()).filter(
+      (field) => field.options.length === 0 && isDropdownFieldType(field.dataType)
+    );
+    await Promise.all(
+      needsOptions.map(async (field) => {
+        const detail = await this.fetchOpportunityCustomFieldDetail(field.id);
+        if (detail?.options.length) {
+          mergeOpportunityCustomField(byId, detail);
+        }
+      })
+    );
+
     return Array.from(byId.values()).sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  /** Fetch a single field definition when list responses omit dropdown options. */
+  private async fetchOpportunityCustomFieldDetail(
+    fieldId: string
+  ): Promise<CrmOpportunityCustomField | null> {
+    for (const path of [
+      `/custom-fields/${fieldId}`,
+      `/locations/${this.locationId}/customFields/${fieldId}?model=opportunity`,
+    ]) {
+      try {
+        const data = await this.request<any>(path);
+        const raw = unwrapCustomFieldRaw(data);
+        if (raw) return parseOpportunityCustomField(raw);
+      } catch {
+        /* try next endpoint */
+      }
+    }
+    return null;
   }
 
   async moveContactToStage(input: MoveStageInput): Promise<void> {

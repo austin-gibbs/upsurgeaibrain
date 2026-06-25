@@ -55,7 +55,10 @@ export function HighLevelOpportunityFieldSettings({
     [fields, cfg]
   );
   const selectedField = fieldOptions.find(
-    (f) => f.id === cfg.opportunity_custom_field_id
+    (f) =>
+      f.id === cfg.opportunity_custom_field_id ||
+      (cfg.opportunity_custom_field_key &&
+        f.key === cfg.opportunity_custom_field_key)
   );
   const useManualField =
     fieldOptions.length === 0 && !loading && !cfg.opportunity_custom_field_id;
@@ -157,7 +160,33 @@ export function HighLevelOpportunityFieldSettings({
                 </option>
               ))}
             </Select>
+            {selectedField && selectedField.options.length === 0 && (
+              <p className="text-xs text-accent-amber-fg">
+                No dropdown values returned from HighLevel for this field. Click
+                Refresh, or enter the exact value manually below.
+              </p>
+            )}
           </div>
+        </div>
+      )}
+
+      {!loading && !useManualField && selectedField && selectedField.options.length === 0 && (
+        <div className="space-y-1.5">
+          <Label hint="exact dropdown label from HighLevel">Field value (manual)</Label>
+          <Input
+            value={cfg.opportunity_custom_field_value ?? ""}
+            onChange={(e) =>
+              onChange({
+                opportunity_custom_field_value: e.target.value.trim() || null,
+                opportunity_custom_field_value_label:
+                  e.target.value.trim() || null,
+                ...(e.target.value.trim()
+                  ? { opportunity_custom_field_enabled: true }
+                  : {}),
+              })
+            }
+            placeholder="Seller Outgoing AI Agent"
+          />
         </div>
       )}
 
