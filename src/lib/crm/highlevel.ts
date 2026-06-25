@@ -16,6 +16,7 @@ import type {
   HighLevelReauthFlagger,
   HighLevelTokenPersistor,
   LogCallInput,
+  LogCallResult,
   MoveStageInput,
 } from "./types";
 import {
@@ -267,34 +268,53 @@ export class HighLevelAdapter implements CrmAdapter {
   /**
    * Log a completed call to HighLevel.
    *
-   * Two layers, both best-effort but the NOTE is guaranteed (it's the back-compat
-   * path that has always worked):
+   * Two layers:
    *   1. A timeline NOTE with the AI summary + recording link (Notes tab).
    *   2. A PLAYABLE call entry in the Conversations/Call log, when a Call-type
    *      Conversation Provider is configured (HIGHLEVEL_CALL_PROVIDER_ID). This is
    *      the only way HighLevel renders a real call card with a recording player.
    *
-   * The playable step is wrapped so it can never fail the call log: the note
-   * already carries the recording link, and throwing here would make the caller
-   * (logCallToCrm) write a duplicate fallback note.
+   * Returns structured flags so callers can tell note-only vs playable call log.
    */
-  async logCall(input: LogCallInput): Promise<void> {
+  async logCall(input: LogCallInput): Promise<LogCallResult> {
     const recording = input.recordingUrl?.trim();
+    const warnings: string[] = [];
 
     const parts = [input.note ?? ""];
     if (recording) parts.push(`Recording: ${recording}`);
     await this.addNote(input.contactId, parts.filter(Boolean).join("\n\n"));
 
+    const result: LogCallResult = {
+      noteLogged: true,
+      recordingCallLogged: false,
+    };
+
+    if (!recording) {
+      return result;
+    }
+
     const providerId = process.env.HIGHLEVEL_CALL_PROVIDER_ID?.trim();
-    if (!providerId) return; // note-only mode (no Call conversation provider yet)
+    if (!providerId) {
+      warnings.push(
+        "playableCall: HIGHLEVEL_CALL_PROVIDER_ID is not set — only a note with recording link was written"
+      );
+      result.warnings = warnings;
+      return result;
+    }
 
     try {
       await this.logPlayableCall(input, providerId, recording);
+      result.recordingCallLogged = true;
+      return result;
     } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      warnings.push(`playableCall: ${msg}`);
       console.error(
         `[highlevel] playable call log failed for contact ${input.contactId} ` +
-          `(note still logged): ${e instanceof Error ? e.message : String(e)}`
+          `(note still logged): ${msg}`
       );
+      result.warnings = warnings;
+      return result;
     }
   }
 

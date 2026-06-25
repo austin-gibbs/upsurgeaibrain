@@ -47,8 +47,10 @@ export async function logCallToCrm(input: LogCallToCrmInput): Promise<CrmWriteFl
     crmErrors: [],
   };
 
+  const hasRecording = Boolean(input.recordingUrl?.trim());
+
   try {
-    await input.crm.logCall({
+    const result = await input.crm.logCall({
       contactId: input.contactId,
       phone: input.phone,
       isIncoming: false,
@@ -60,8 +62,13 @@ export async function logCallToCrm(input: LogCallToCrmInput): Promise<CrmWriteFl
       toNumber: input.toNumber,
       recordingUrl: input.recordingUrl ?? undefined,
     });
-    flags.noteLogged = true;
-    flags.recordingLogged = Boolean(input.recordingUrl?.trim());
+    flags.noteLogged = result.noteLogged;
+    // recording_logged means the native/playable call log path succeeded, not
+    // merely that a recording URL was appended to a text note.
+    flags.recordingLogged = hasRecording ? result.recordingCallLogged : false;
+    if (result.warnings?.length) {
+      flags.crmErrors.push(...result.warnings);
+    }
     return flags;
   } catch (e) {
     const err = formatCrmError(e);
@@ -73,7 +80,13 @@ export async function logCallToCrm(input: LogCallToCrmInput): Promise<CrmWriteFl
   try {
     await input.crm.addNote(input.contactId, fallbackNote);
     flags.noteLogged = true;
-    flags.recordingLogged = Boolean(input.recordingUrl?.trim());
+    // Fallback is note-only — never counts as a playable recording call log.
+    flags.recordingLogged = false;
+    if (hasRecording) {
+      flags.crmErrors.push(
+        "playableCall: primary logCall failed; only fallback note with recording link was written"
+      );
+    }
   } catch (e) {
     const err = formatCrmError(e);
     flags.crmErrors.push(`addNote: ${err}`);

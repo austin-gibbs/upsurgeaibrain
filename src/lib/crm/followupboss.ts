@@ -15,6 +15,7 @@ import type {
   CreateTaskInput,
   FubCredentials,
   LogCallInput,
+  LogCallResult,
 } from "./types";
 import { fetchWithTimeout, parseJsonResponse, retryAfterMs, sleep } from "@/lib/http";
 
@@ -219,7 +220,7 @@ export class FollowUpBossAdapter implements CrmAdapter {
     });
   }
 
-  async logCall(input: LogCallInput): Promise<void> {
+  async logCall(input: LogCallInput): Promise<LogCallResult> {
     const body: Record<string, unknown> = {
       personId: Number(input.contactId),
       phone: input.phone,
@@ -233,6 +234,10 @@ export class FollowUpBossAdapter implements CrmAdapter {
     if (input.toNumber) body.toNumber = input.toNumber;
     if (input.recordingUrl) body.recordingUrl = input.recordingUrl;
     await this.request(`/calls`, { method: "POST", body: JSON.stringify(body) });
+    return {
+      noteLogged: true,
+      recordingCallLogged: Boolean(input.recordingUrl?.trim()),
+    };
   }
 
   async createTask(input: CreateTaskInput): Promise<void> {

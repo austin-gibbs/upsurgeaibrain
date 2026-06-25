@@ -42,6 +42,19 @@ export interface LogCallInput {
   recordingUrl?: string;
 }
 
+/** Structured outcome from logCall — lets callers distinguish note vs playable recording. */
+export interface LogCallResult {
+  /** Timeline note or call-summary text landed in the CRM. */
+  noteLogged: boolean;
+  /**
+   * Native/playable call log with recording was created (FUB /calls, HL Conversations
+   * Call message). False when only a text note with a recording URL was written.
+   */
+  recordingCallLogged: boolean;
+  /** Non-fatal issues (e.g. HL note ok but playable call path failed). */
+  warnings?: string[];
+}
+
 export interface CrmUser {
   id: string;
   name: string;
@@ -97,7 +110,7 @@ export interface CrmAdapter {
   addNote(contactId: string, note: string): Promise<void>;
 
   /** Log a completed call (with recording) to the CRM timeline. */
-  logCall(input: LogCallInput): Promise<void>;
+  logCall(input: LogCallInput): Promise<LogCallResult>;
 
   createTask(input: CreateTaskInput): Promise<void>;
 

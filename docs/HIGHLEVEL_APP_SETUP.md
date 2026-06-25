@@ -60,8 +60,9 @@ of the URLs registered here (scheme, host, path — no trailing slash). A mismat
 
 ## 3. Add the Scopes
 
-In the **Scopes** section, add exactly these six (minimum needed for pipeline routing
-+ contact/opportunity moves). Request no more than these:
+In the **Scopes** section, add these ten scopes (minimum needed for pipeline
+routing, contact/opportunity moves, and playable call-log writeback). Request no
+more than these:
 
 ```
 contacts.readonly
@@ -70,6 +71,10 @@ opportunities.readonly
 opportunities.write
 locations.readonly
 users.readonly
+conversations.readonly
+conversations.write
+conversations/message.readonly
+conversations/message.write
 ```
 
 What each is for:
@@ -78,6 +83,13 @@ What each is for:
 - `contacts.readonly` / `contacts.write` — read the contact and write tags/notes.
 - `locations.readonly` — read pipeline + stage lists for the connected sub-account.
 - `users.readonly` — resolve assignable users (task assignment).
+- `conversations.readonly` / `conversations.write` — find or create the contact's
+  conversation thread.
+- `conversations/message.readonly` / `conversations/message.write` — log external
+  outbound calls with recording attachments (the playable call card in HighLevel).
+
+> **Reconnect required:** locations connected before the conversation scopes were
+> added must re-run **Connect via OAuth** so a new token is issued with them.
 
 ---
 
@@ -98,6 +110,7 @@ Next.js app, which runs the OAuth routes) and **Railway** (the worker):
 ```bash
 HIGHLEVEL_CLIENT_ID=<your client id>
 HIGHLEVEL_CLIENT_SECRET=<your client secret>
+HIGHLEVEL_CALL_PROVIDER_ID=<call conversation provider id>
 ```
 
 (These keys are already listed in `.env.example`.) Make sure each environment's
@@ -117,6 +130,58 @@ Never commit `.env.local`.
    automatically from then on.
 4. Confirm the **Pipeline routing** editor on the agent page now populates pipelines
    and stages from that sub-account.
+
+---
+
+## 7. Enable playable call logs (recording play button)
+
+HighLevel does not use a separate "calls" API like Follow Up Boss. To show a call
+card with a play button on the contact (similar to a team member placing the call),
+you need two things beyond OAuth:
+
+### A. Create a Call Conversation Provider in the sub-account
+
+1. In the connected HighLevel sub-account, go to **Settings → Conversation Providers**.
+2. Add a provider with **Type: Call** (name it e.g. `UpSurge AI Calls`).
+3. Copy the provider **ID** — this becomes `HIGHLEVEL_CALL_PROVIDER_ID`.
+
+Call providers log external calls only; they do not replace the location's voice/SIP
+connection.
+
+### B. Set the env var on Vercel and Railway
+
+```bash
+HIGHLEVEL_CALL_PROVIDER_ID=<provider id from step A>
+```
+
+After each analyzed call, UpSurge writes:
+1. A timeline **note** with the AI summary + recording link (always).
+2. A **Conversations Call message** with the recording attachment (play button),
+   when the provider ID is set and OAuth includes the conversation scopes above.
+
+Without `HIGHLEVEL_CALL_PROVIDER_ID`, contacts only get a note with a clickable
+recording URL — functionally logged, but not the same UX as FUB team call logs.
+
+### C. Verify writeback
+
+Use the diagnostic script against a contact that received a recent call:
+
+```bash
+set -a && source .env.local && set +a && npx tsx scripts/diagnose-hl-writeback.ts <contactUuid>
+```
+
+Confirm:
+- `HIGHLEVEL_CALL_PROVIDER_ID env: set`
+- Granted scopes include `conversations.*`
+- Call messages (`TYPE_CALL`) appear in the contact's conversation
+
+Check the `calls` row in Supabase after a test call:
+- `note_logged = true`
+- `recording_logged = true` (playable call log succeeded)
+- `crm_error` is null
+
+If the provider ID or scopes are missing, expect `recording_logged = false` and a
+`crm_error` mentioning `playableCall`.
 
 ---
 
@@ -145,5 +210,5 @@ Never commit `.env.local`.
 | Access level | Sub-Account (Location) |
 | Redirect (prod) | `https://upsurgeprosai.com/api/oauth/crm/callback` |
 | Redirect (local) | `http://localhost:3000/api/oauth/crm/callback` |
-| Scopes | `contacts.readonly contacts.write opportunities.readonly opportunities.write locations.readonly users.readonly` |
-| Env vars | `HIGHLEVEL_CLIENT_ID`, `HIGHLEVEL_CLIENT_SECRET` (Vercel + Railway + `.env.local`) |
+| Scopes | `contacts.readonly contacts.write opportunities.readonly opportunities.write locations.readonly users.readonly conversations.readonly conversations.write conversations/message.readonly conversations/message.write` |
+| Env vars | `HIGHLEVEL_CLIENT_ID`, `HIGHLEVEL_CLIENT_SECRET`, `HIGHLEVEL_CALL_PROVIDER_ID` (Vercel + Railway + `.env.local`) |
