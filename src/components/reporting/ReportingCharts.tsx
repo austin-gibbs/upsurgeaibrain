@@ -64,6 +64,26 @@ export function ReportingCharts({
     { name: "Inbound", value: data.kpis.inboundCalls, fill: CHART_COLORS.inbound },
     { name: "Outbound", value: data.kpis.outboundCalls, fill: CHART_COLORS.outbound },
   ];
+  const callsOverTimeData =
+    data.callsOverTime.length > 0
+      ? data.callsOverTime
+      : [{ date: "No data", inbound: 0, outbound: 0, total: 0 }];
+  const outcomeData =
+    data.outcomeBreakdown.length > 0
+      ? data.outcomeBreakdown.slice(0, 8)
+      : [{ outcome: "No data", count: 0 }];
+  const sentimentData =
+    data.sentimentBreakdown.length > 0
+      ? data.sentimentBreakdown
+      : [{ sentiment: "No data", count: 0 }];
+  const latencyData =
+    data.latencyOverTime.length > 0
+      ? data.latencyOverTime
+      : [{ date: "No data", p50Ms: 0, p90Ms: 0 }];
+  const disconnectionData =
+    data.disconnectionBreakdown.length > 0
+      ? data.disconnectionBreakdown
+      : [{ reason: "No data", count: 0 }];
 
   const heatmapMax = Math.max(...data.heatmap.map((h) => h.count), 1);
 
@@ -76,7 +96,7 @@ export function ReportingCharts({
           className="lg:col-span-2"
         >
           <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={data.callsOverTime}>
+            <AreaChart data={callsOverTimeData}>
               <defs>
                 <linearGradient id="inboundGrad" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="5%" stopColor={CHART_COLORS.inbound} stopOpacity={0.35} />
@@ -136,10 +156,10 @@ export function ReportingCharts({
         </ChartCard>
       )}
 
-      {visible.has("chartOutcomes") && data.outcomeBreakdown.length > 0 && (
+      {visible.has("chartOutcomes") && (
         <ChartCard title="Outcomes" description="Call result distribution">
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={data.outcomeBreakdown.slice(0, 8)} layout="vertical">
+            <BarChart data={outcomeData} layout="vertical">
               <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" />
               <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11 }} />
               <YAxis
@@ -155,19 +175,19 @@ export function ReportingCharts({
         </ChartCard>
       )}
 
-      {visible.has("chartSentiment") && data.sentimentBreakdown.length > 0 && (
+      {visible.has("chartSentiment") && (
         <ChartCard title="Sentiment" description="Caller sentiment from Retell analysis">
           <ResponsiveContainer width="100%" height="100%">
             <PieChart>
               <Pie
-                data={data.sentimentBreakdown}
+                data={sentimentData}
                 dataKey="count"
                 nameKey="sentiment"
                 cx="50%"
                 cy="50%"
                 outerRadius={90}
               >
-                {data.sentimentBreakdown.map((_, i) => (
+                {sentimentData.map((_, i) => (
                   <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
                 ))}
               </Pie>
@@ -229,14 +249,14 @@ export function ReportingCharts({
         </ChartCard>
       )}
 
-      {visible.has("chartLatency") && data.latencyOverTime.length > 0 && (
+      {visible.has("chartLatency") && (
         <ChartCard
           title="End-to-end latency"
           description="Daily p50 and p90 (ms)"
           className="lg:col-span-2"
         >
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={data.latencyOverTime}>
+            <LineChart data={latencyData}>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" />
               <XAxis dataKey="date" tick={{ fontSize: 11 }} />
               <YAxis tick={{ fontSize: 11 }} />
@@ -263,14 +283,14 @@ export function ReportingCharts({
         </ChartCard>
       )}
 
-      {visible.has("chartDisconnection") && data.disconnectionBreakdown.length > 0 && (
+      {visible.has("chartDisconnection") && (
         <ChartCard
           title="Disconnection reasons"
           description="Top reasons calls ended"
           className="lg:col-span-2"
         >
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={data.disconnectionBreakdown}>
+            <BarChart data={disconnectionData}>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" />
               <XAxis dataKey="reason" tick={{ fontSize: 10 }} />
               <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />

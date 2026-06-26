@@ -71,7 +71,7 @@ export function KpiGrid({
     },
     {
       id: "kpiVoicemail",
-      label: "Voicemail rate",
+      label: "No answer/VM rate",
       value: formatPercent(kpis.voicemailRate),
       icon: Voicemail,
       tone: "amber",

@@ -7,7 +7,6 @@ import { PageShell, type PageNav } from "@/components/TopNav";
 import {
   Button,
   Card,
-  EmptyState,
   Input,
   Label,
   PageGreeting,
@@ -114,8 +113,8 @@ function WorkspaceDetail({ params }: { params: { id: string } }) {
     const qs = new URLSearchParams({
       agentId,
       direction,
-      from: new Date(`${fromDate}T00:00:00`).toISOString(),
-      to: new Date(`${toDate}T23:59:59`).toISOString(),
+      from: fromDate,
+      to: toDate,
     });
     fetch(`/api/workspaces/${params.id}/reporting?${qs}`)
       .then((r) => r.json())
@@ -329,12 +328,6 @@ function WorkspaceDetail({ params }: { params: { id: string } }) {
             )}
           </Card>
 
-          {reporting?.retellErrors && (
-            <div className="mb-6 rounded-xl bg-accent-rose-bg px-4 py-3 text-sm text-accent-rose-fg">
-              Retell API: {reporting.retellErrors.join("; ")}
-            </div>
-          )}
-
           {loadingReporting && !reporting ? (
             <div className="space-y-4">
               <div className="grid gap-4 sm:grid-cols-3 lg:grid-cols-5">
@@ -344,11 +337,6 @@ function WorkspaceDetail({ params }: { params: { id: string } }) {
               </div>
               <Skeleton className="h-72 rounded-2xl" />
             </div>
-          ) : reporting && reporting.kpis.totalCalls === 0 ? (
-            <EmptyState
-              title="No calls in this range"
-              description="Calls will appear here once your Retell agents start handling inbound or outbound traffic."
-            />
           ) : reporting ? (
             <>
               <KpiGrid kpis={reporting.kpis} visible={widgets} />

@@ -140,10 +140,25 @@ function normalizeSentiment(raw: string | null): "positive" | "neutral" | "negat
   return "unknown";
 }
 
-function isConnected(row: NormalizedCallRow): boolean {
-  if (row.durationSeconds > 0) return true;
+function isNoAnswerOrVoicemail(row: NormalizedCallRow): boolean {
+  const outcome = (row.outcome ?? "").toLowerCase();
   const reason = (row.disconnectionReason ?? "").toLowerCase();
-  return !reason.includes("no_answer") && !reason.includes("not_connected");
+  return (
+    row.inVoicemail ||
+    outcome.includes("no_answer") ||
+    outcome.includes("voicemail") ||
+    reason.includes("no_answer") ||
+    reason.includes("not_connected") ||
+    reason.includes("voicemail") ||
+    reason.includes("busy") ||
+    reason.includes("failed") ||
+    reason.includes("error")
+  );
+}
+
+function isConnected(row: NormalizedCallRow): boolean {
+  if (isNoAnswerOrVoicemail(row)) return false;
+  return row.callSuccessful === true || row.durationSeconds > 0;
 }
 
 export function aggregateReporting(
@@ -153,7 +168,7 @@ export function aggregateReporting(
   const inbound = calls.filter((c) => c.direction === "inbound");
   const outbound = calls.filter((c) => c.direction === "outbound");
   const connected = calls.filter(isConnected);
-  const voicemails = calls.filter((c) => c.inVoicemail);
+  const voicemails = calls.filter(isNoAnswerOrVoicemail);
   const successful = calls.filter((c) => c.callSuccessful === true);
   const appointments = calls.filter(
     (c) => c.outcome === "appointment" || (c.outcome ?? "").includes("appointment")

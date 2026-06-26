@@ -23,7 +23,6 @@ export type ReportingResponse = ReportingAggregates & {
   agents: ReportingAgent[];
   range: { from: string; to: string };
   filters: { agentId: string; direction: string };
-  retellErrors?: string[];
   calls: (NormalizedCallRow & { crmUrl: string | null })[];
 };
 
@@ -73,7 +72,7 @@ export const WIDGET_LABELS: Record<DashboardWidgetId, string> = {
   kpiInbound: "Inbound calls",
   kpiOutbound: "Outbound calls",
   kpiAnswerRate: "Answer rate",
-  kpiVoicemail: "Voicemail rate",
+  kpiVoicemail: "No answer/VM rate",
   kpiSuccess: "Success rate",
   kpiAppointments: "Appointments",
   kpiDuration: "Avg duration",

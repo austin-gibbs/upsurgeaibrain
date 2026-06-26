@@ -13,8 +13,17 @@ export interface DbCallJoinRow {
   contact_email: string | null;
   to_number: string;
   outcome: string | null;
+  in_voicemail?: boolean | null;
+  summary?: string | null;
   completed_at: string | null;
   direction: string;
+}
+
+export interface StoredCallJoinRow extends DbCallJoinRow {
+  id: string;
+  raw_payload: unknown;
+  queued_at: string;
+  dialed_at: string | null;
 }
 
 export interface AgentMeta {
@@ -30,6 +39,39 @@ function str(v: unknown): string | null {
   return s || null;
 }
 
+function num(v: unknown): number | null {
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  if (typeof v === "string" && v.trim()) {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
+function bool(v: unknown): boolean | null {
+  if (typeof v === "boolean") return v;
+  return null;
+}
+
+function record(v: unknown): Record<string, unknown> {
+  return v && typeof v === "object" && !Array.isArray(v)
+    ? (v as Record<string, unknown>)
+    : {};
+}
+
+function rawCallFromPayload(raw: unknown): Record<string, unknown> {
+  const root = record(raw);
+  return record(root.call ?? root);
+}
+
+function analysisFromCall(call: Record<string, unknown>): Record<string, unknown> {
+  return record(call.call_analysis);
+}
+
+function customFromAnalysis(analysis: Record<string, unknown>): Record<string, unknown> {
+  return record(analysis.custom_analysis_data);
+}
+
 function extractOutcome(item: RetellCallListItem): string | null {
   const analysis = item.call_analysis;
   if (!analysis) return null;
@@ -38,6 +80,19 @@ function extractOutcome(item: RetellCallListItem): string | null {
     str(custom.call_outcome) ??
     str(analysis.call_outcome) ??
     (analysis.in_voicemail ? "no_answer_voicemail" : null)
+  );
+}
+
+function extractOutcomeFromRawCall(
+  call: Record<string, unknown>,
+  inVoicemail: boolean
+): string | null {
+  const analysis = analysisFromCall(call);
+  const custom = customFromAnalysis(analysis);
+  return (
+    str(custom.call_outcome) ??
+    str(analysis.call_outcome) ??
+    (inVoicemail ? "no_answer_voicemail" : null)
   );
 }
 
@@ -94,15 +149,81 @@ export function normalizeRetellCall(
     contactEmail: callerEmail,
     crmContactId: db?.crm_contact_id ?? null,
     recordingUrl: item.recording_url ?? null,
-    summary: analysis?.call_summary ?? null,
+    summary: db?.summary ?? analysis?.call_summary ?? null,
     outcome: db?.outcome ?? extractOutcome(item),
     callSuccessful: analysis?.call_successful ?? null,
     userSentiment: analysis?.user_sentiment ?? null,
-    inVoicemail: analysis?.in_voicemail === true,
+    inVoicemail: db?.in_voicemail ?? analysis?.in_voicemail === true,
     disconnectionReason: item.disconnection_reason ?? null,
     cost: item.call_cost?.combined_cost ?? 0,
     latencyP50Ms: item.latency?.e2e?.p50 ?? null,
     latencyP90Ms: item.latency?.e2e?.p90 ?? null,
+  };
+}
+
+export function normalizeStoredCall(
+  row: StoredCallJoinRow,
+  agentById: Map<string, AgentMeta>
+): NormalizedCallRow {
+  const call = rawCallFromPayload(row.raw_payload);
+  const analysis = analysisFromCall(call);
+  const custom = customFromAnalysis(analysis);
+  const cost = record(call.call_cost);
+  const latency = record(record(call.latency).e2e);
+  const agent = agentById.get(row.agent_id);
+  const direction: AgentDirection =
+    (str(call.direction) as AgentDirection | null) ??
+    (row.direction as AgentDirection) ??
+    agent?.direction ??
+    "outbound";
+  const inVoicemail =
+    row.in_voicemail ??
+    bool(analysis.in_voicemail) ??
+    bool(custom.in_voicemail) ??
+    false;
+  const durationMs =
+    num(call.duration_ms) ?? (num(cost.total_duration_seconds) ?? 0) * 1000;
+  const startTimestamp =
+    num(call.start_timestamp) ??
+    (row.completed_at ? new Date(row.completed_at).getTime() : null) ??
+    (row.dialed_at ? new Date(row.dialed_at).getTime() : null) ??
+    new Date(row.queued_at).getTime();
+  const fromNumber = str(call.from_number);
+  const toNumber = str(call.to_number) ?? row.to_number;
+
+  return {
+    retellCallId: str(call.call_id) ?? row.retell_call_id ?? row.id,
+    agentId: row.agent_id,
+    agentName: agent?.name ?? null,
+    direction,
+    startTimestamp,
+    completedAt:
+      row.completed_at ??
+      (num(call.end_timestamp) ? new Date(num(call.end_timestamp) as number).toISOString() : null),
+    durationSeconds: Math.round(durationMs / 1000),
+    fromNumber,
+    toNumber,
+    phone: extractPhone(
+      {
+        call_id: str(call.call_id) ?? row.retell_call_id ?? row.id,
+        from_number: fromNumber ?? undefined,
+        to_number: toNumber ?? undefined,
+      },
+      direction
+    ),
+    contactName: str(custom.caller_full_name) ?? row.contact_name,
+    contactEmail: str(custom.caller_email) ?? row.contact_email,
+    crmContactId: row.crm_contact_id,
+    recordingUrl: str(call.recording_url),
+    summary: row.summary ?? str(analysis.call_summary),
+    outcome: row.outcome ?? extractOutcomeFromRawCall(call, inVoicemail),
+    callSuccessful: bool(analysis.call_successful),
+    userSentiment: str(analysis.user_sentiment),
+    inVoicemail,
+    disconnectionReason: str(call.disconnection_reason),
+    cost: num(cost.combined_cost) ?? 0,
+    latencyP50Ms: num(latency.p50),
+    latencyP90Ms: num(latency.p90),
   };
 }
 

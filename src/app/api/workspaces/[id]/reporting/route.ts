@@ -1,43 +1,190 @@
 // =====================================================================
-// GET /api/workspaces/:id/reporting — hybrid Retell + DB reporting data.
-// Query: agentId (uuid | "all"), direction (all|inbound|outbound), from, to (ISO dates)
+// GET /api/workspaces/:id/reporting — DB-backed Retell reporting data.
+// Query: agentId (uuid | "all"), direction (all|inbound|outbound), from, to (YYYY-MM-DD)
 // =====================================================================
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase/server";
-import { getRetellClientForAgent } from "@/lib/retell/client";
 import { aggregateReporting } from "@/lib/reporting/aggregate";
 import {
-  buildAgentRetellMap,
-  buildDbCallMap,
-  groupAgentsByRetellKey,
-  normalizeRetellCall,
   type AgentMeta,
-  type DbCallJoinRow,
+  normalizeStoredCall,
+  type StoredCallJoinRow,
 } from "@/lib/reporting/normalize";
 import { crmContactUrl } from "@/lib/crm/url";
-import type { Agent, AgentDirection, Workspace } from "@/types";
+import type { AgentDirection, Workspace } from "@/types";
 
 export const runtime = "nodejs";
 
 const DEFAULT_DAYS = 30;
+const PAGE_SIZE = 1000;
 
-function parseDateRange(fromParam: string | null, toParam: string | null): {
-  fromMs: number;
-  toMs: number;
+type ReportingCallRow = StoredCallJoinRow & {
+  contact_id: string | null;
+};
+
+function ymdInTz(date: Date, timezone: string): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
+}
+
+function addDaysYmd(ymd: string, days: number): string {
+  const [y, m, d] = ymd.split("-").map(Number);
+  const date = new Date(Date.UTC(y, m - 1, d + days, 12, 0, 0));
+  return date.toISOString().slice(0, 10);
+}
+
+function localMidnightUtc(ymd: string, timezone: string): Date {
+  const [y, m, d] = ymd.split("-").map(Number);
+  const guess = Date.UTC(y, m - 1, d, 0, 0, 0);
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone,
+    hour12: false,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  })
+    .formatToParts(new Date(guess))
+    .reduce<Record<string, string>>((acc, p) => {
+      acc[p.type] = p.value;
+      return acc;
+    }, {});
+  const hour = parts.hour === "24" ? 0 : Number(parts.hour);
+  const localAsUtc = Date.UTC(
+    Number(parts.year),
+    Number(parts.month) - 1,
+    Number(parts.day),
+    hour,
+    Number(parts.minute),
+    Number(parts.second)
+  );
+  const offset = localAsUtc - guess;
+  return new Date(guess - offset);
+}
+
+function ymdFromParam(
+  param: string | null,
+  fallback: string,
+  timezone: string
+): string {
+  if (!param) return fallback;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(param)) return param;
+  const parsed = new Date(param);
+  if (Number.isNaN(parsed.getTime())) return fallback;
+  return ymdInTz(parsed, timezone);
+}
+
+function parseDateRange(
+  fromParam: string | null,
+  toParam: string | null,
+  timezone: string
+): {
   fromIso: string;
   toIso: string;
+  toExclusiveIso: string;
 } {
   const now = new Date();
-  const to = toParam ? new Date(toParam) : now;
-  const from = fromParam
-    ? new Date(fromParam)
-    : new Date(now.getTime() - DEFAULT_DAYS * 86_400_000);
+  const fallbackTo = ymdInTz(now, timezone);
+  const fallbackFrom = addDaysYmd(fallbackTo, -DEFAULT_DAYS);
+  const fromYmd = ymdFromParam(fromParam, fallbackFrom, timezone);
+  const toYmd = ymdFromParam(toParam, fallbackTo, timezone);
+  const from = localMidnightUtc(fromYmd, timezone);
+  const toExclusive = localMidnightUtc(addDaysYmd(toYmd, 1), timezone);
   return {
-    fromMs: from.getTime(),
-    toMs: to.getTime(),
     fromIso: from.toISOString(),
-    toIso: to.toISOString(),
+    toIso: toExclusive.toISOString(),
+    toExclusiveIso: toExclusive.toISOString(),
   };
+}
+
+async function loadReportingCalls({
+  db,
+  workspaceId,
+  agentIds,
+  direction,
+  fromIso,
+  toExclusiveIso,
+}: {
+  db: ReturnType<typeof createServerClient>;
+  workspaceId: string;
+  agentIds: string[];
+  direction: "all" | AgentDirection;
+  fromIso: string;
+  toExclusiveIso: string;
+}): Promise<ReportingCallRow[]> {
+  const rows: ReportingCallRow[] = [];
+  for (let offset = 0; ; offset += PAGE_SIZE) {
+    let query = db
+      .from("calls")
+      .select(
+        "id, retell_call_id, agent_id, contact_id, to_number, outcome, in_voicemail, " +
+          "summary, raw_payload, completed_at, dialed_at, queued_at, direction, " +
+          "crm_contact_id, contact_name, contact_email"
+      )
+      .eq("workspace_id", workspaceId)
+      .eq("status", "completed")
+      .gte("completed_at", fromIso)
+      .lt("completed_at", toExclusiveIso)
+      .in("agent_id", agentIds);
+
+    if (direction !== "all") query = query.eq("direction", direction);
+
+    const { data, error } = await query
+      .order("completed_at", { ascending: false })
+      .range(offset, offset + PAGE_SIZE - 1)
+      .returns<ReportingCallRow[]>();
+    if (error) throw new Error(`calls query failed: ${error.message}`);
+    if (data?.length) rows.push(...data);
+    if (!data || data.length < PAGE_SIZE) break;
+  }
+  return rows;
+}
+
+async function fillContactFallbacks(
+  db: ReturnType<typeof createServerClient>,
+  rows: ReportingCallRow[]
+): Promise<ReportingCallRow[]> {
+  const contactIds = [
+    ...new Set(
+      rows
+        .filter((row) => row.contact_id && (!row.crm_contact_id || !row.contact_name || !row.contact_email))
+        .map((row) => row.contact_id as string)
+    ),
+  ];
+  if (contactIds.length === 0) return rows;
+
+  const contacts = new Map<
+    string,
+    { id: string; crm_contact_id: string; full_name: string | null; email: string | null }
+  >();
+  for (let i = 0; i < contactIds.length; i += 500) {
+    const { data } = await db
+      .from("contacts")
+      .select("id, crm_contact_id, full_name, email")
+      .in("id", contactIds.slice(i, i + 500))
+      .returns<
+        { id: string; crm_contact_id: string; full_name: string | null; email: string | null }[]
+      >();
+    for (const contact of data ?? []) contacts.set(contact.id, contact);
+  }
+
+  return rows.map((row) => {
+    if (!row.contact_id) return row;
+    const contact = contacts.get(row.contact_id);
+    if (!contact) return row;
+    return {
+      ...row,
+      crm_contact_id: row.crm_contact_id ?? contact.crm_contact_id,
+      contact_name: row.contact_name ?? contact.full_name,
+      contact_email: row.contact_email ?? contact.email,
+    };
+  });
 }
 
 export async function GET(
@@ -55,10 +202,6 @@ export async function GET(
   const directionParam = (url.searchParams.get("direction") ?? "all") as
     | "all"
     | AgentDirection;
-  const { fromMs, toMs, fromIso, toIso } = parseDateRange(
-    url.searchParams.get("from"),
-    url.searchParams.get("to")
-  );
 
   const { data: workspace, error: wsErr } = await db
     .from("workspaces")
@@ -70,17 +213,21 @@ export async function GET(
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
 
+  const { fromIso, toIso, toExclusiveIso } = parseDateRange(
+    url.searchParams.get("from"),
+    url.searchParams.get("to"),
+    workspace.timezone
+  );
+
   const { data: agentsRaw } = await db
     .from("agents")
-    .select("id, name, direction, retell_agent_id, retell_credentials_encrypted, status")
+    .select("id, name, direction, retell_agent_id, status")
     .eq("workspace_id", params.id)
     .order("created_at", { ascending: true });
 
-  const agents = (agentsRaw ?? []) as Array<
-    AgentMeta & { retell_credentials_encrypted: string | null; status: string }
-  >;
+  const agents = (agentsRaw ?? []) as Array<AgentMeta & { status: string }>;
 
-  let targetAgents = agents.filter((a) => a.retell_agent_id);
+  let targetAgents = [...agents];
   if (agentIdParam !== "all") {
     targetAgents = targetAgents.filter((a) => a.id === agentIdParam);
   }
@@ -112,148 +259,22 @@ export async function GET(
     });
   }
 
-  const retellAgentIds = targetAgents
-    .map((a) => a.retell_agent_id)
-    .filter((id): id is string => Boolean(id));
-
-  const filterCriteria: {
-    agent_id: string[];
-    call_status: Array<"ended">;
-    start_timestamp: { lower_threshold: number; upper_threshold: number };
-    direction?: AgentDirection[];
-  } = {
-    agent_id: retellAgentIds,
-    call_status: ["ended"],
-    start_timestamp: {
-      lower_threshold: fromMs,
-      upper_threshold: toMs,
-    },
-  };
-  if (directionParam !== "all") {
-    filterCriteria.direction = [directionParam];
-  }
-
-  const groups = groupAgentsByRetellKey(
-    targetAgents.map((a) => ({
-      ...a,
-      retell_credentials_encrypted: a.retell_credentials_encrypted,
-    }))
+  const targetAgentIds = targetAgents.map((a) => a.id);
+  const callRows = await fillContactFallbacks(
+    db,
+    await loadReportingCalls({
+      db,
+      workspaceId: params.id,
+      agentIds: targetAgentIds,
+      direction: directionParam,
+      fromIso,
+      toExclusiveIso,
+    })
   );
 
-  const retellItems: import("@/lib/retell/client").RetellCallListItem[] = [];
-  const retellErrors: string[] = [];
-
-  for (const [, groupAgents] of groups) {
-    const sample = groupAgents[0];
-    const groupRetellAgentIds = groupAgents
-      .map((a) => a.retell_agent_id)
-      .filter((id): id is string => Boolean(id));
-    if (groupRetellAgentIds.length === 0) continue;
-
-    // Each Retell API key only sees its own agents. Passing another account's
-    // agent_id in filter_criteria makes v3/list-calls return 400.
-    const groupFilterCriteria = {
-      ...filterCriteria,
-      agent_id: groupRetellAgentIds,
-    };
-
-    try {
-      const client = getRetellClientForAgent(sample as Agent);
-      const items = await client.listCalls(
-        { filter_criteria: groupFilterCriteria, sort_order: "descending", limit: 1000 },
-        10
-      );
-      retellItems.push(...items);
-    } catch (e) {
-      retellErrors.push(
-        e instanceof Error ? e.message : "Retell list-calls failed"
-      );
-    }
-  }
-
-  const retellCallIds = retellItems.map((i) => i.call_id).filter(Boolean);
-  let dbRows: DbCallJoinRow[] = [];
-
-  if (retellCallIds.length > 0) {
-    const { data: calls, error: callsErr } = await db
-      .from("calls")
-      .select(
-        "retell_call_id, agent_id, contact_id, to_number, outcome, completed_at, direction"
-      )
-      .eq("workspace_id", params.id)
-      .in("retell_call_id", retellCallIds.slice(0, 500))
-      .returns<
-        {
-          retell_call_id: string | null;
-          agent_id: string;
-          contact_id: string | null;
-          to_number: string;
-          outcome: string | null;
-          completed_at: string | null;
-          direction: string;
-        }[]
-      >();
-
-    if (callsErr) {
-      console.error("calls join fetch failed", callsErr.message);
-    }
-
-    const callRows = calls ?? [];
-
-    dbRows = callRows.map((call) => ({
-      retell_call_id: call.retell_call_id,
-      agent_id: call.agent_id,
-      crm_contact_id: null,
-      contact_name: null,
-      contact_email: null,
-      to_number: call.to_number,
-      outcome: call.outcome,
-      completed_at: call.completed_at,
-      direction: call.direction,
-    }));
-
-    const missingContactIds = callRows
-      .filter((c) => c.contact_id)
-      .map((c) => c.contact_id as string);
-
-    if (missingContactIds.length > 0) {
-      const { data: contacts } = await db
-        .from("contacts")
-        .select("id, crm_contact_id, full_name")
-        .in("id", missingContactIds.slice(0, 500))
-        .returns<{ id: string; crm_contact_id: string; full_name: string | null }[]>();
-
-      const contactMap = new Map((contacts ?? []).map((c) => [c.id, c]));
-      dbRows = dbRows.map((row) => {
-        if (row.crm_contact_id) return row;
-        const call = callRows.find((c) => c.retell_call_id === row.retell_call_id);
-        if (!call?.contact_id) return row;
-        const contact = contactMap.get(call.contact_id);
-        if (!contact) return row;
-        return {
-          ...row,
-          crm_contact_id: contact.crm_contact_id,
-          contact_name: contact.full_name,
-          contact_email: null,
-        };
-      });
-    }
-  }
-
-  const agentByRetellId = buildAgentRetellMap(agents);
   const agentById = new Map(agents.map((a) => [a.id, a]));
-  const dbByRetellId = buildDbCallMap(dbRows);
-
-  const normalized = retellItems
-    .map((item) => {
-      const row = normalizeRetellCall(item, agentByRetellId, dbByRetellId);
-      if (!row) return null;
-      if (!row.agentName && row.agentId) {
-        row.agentName = agentById.get(row.agentId)?.name ?? null;
-      }
-      return row;
-    })
-    .filter((row): row is NonNullable<typeof row> => row != null)
+  const normalized = callRows
+    .map((row) => normalizeStoredCall(row, agentById))
     .sort((a, b) => (b.startTimestamp ?? 0) - (a.startTimestamp ?? 0));
 
   const aggregates = aggregateReporting(normalized, workspace.timezone);
@@ -284,7 +305,6 @@ export async function GET(
     })),
     range: { from: fromIso, to: toIso },
     filters: { agentId: agentIdParam, direction: directionParam },
-    retellErrors: retellErrors.length ? retellErrors : undefined,
     ...aggregates,
     calls: callsWithUrls,
   });
