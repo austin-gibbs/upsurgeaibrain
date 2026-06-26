@@ -145,10 +145,22 @@ export async function GET(
 
   for (const [, groupAgents] of groups) {
     const sample = groupAgents[0];
+    const groupRetellAgentIds = groupAgents
+      .map((a) => a.retell_agent_id)
+      .filter((id): id is string => Boolean(id));
+    if (groupRetellAgentIds.length === 0) continue;
+
+    // Each Retell API key only sees its own agents. Passing another account's
+    // agent_id in filter_criteria makes v3/list-calls return 400.
+    const groupFilterCriteria = {
+      ...filterCriteria,
+      agent_id: groupRetellAgentIds,
+    };
+
     try {
       const client = getRetellClientForAgent(sample as Agent);
       const items = await client.listCalls(
-        { filter_criteria: filterCriteria, sort_order: "descending", limit: 1000 },
+        { filter_criteria: groupFilterCriteria, sort_order: "descending", limit: 1000 },
         10
       );
       retellItems.push(...items);

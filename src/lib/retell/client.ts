@@ -49,7 +49,8 @@ export interface ListCallsInput {
   filter_criteria?: ListCallsFilterCriteria;
   limit?: number;
   sort_order?: "ascending" | "descending";
-  pagination_key?: string;
+  /** Offset for v3 list-calls pagination. Do not combine with pagination_key. */
+  skip?: number;
 }
 
 /**
@@ -83,14 +84,25 @@ function toV3FilterCriteria(
       out.start_timestamp = {
         type: "range",
         op: "bt",
-        value: [lower_threshold, upper_threshold],
+        value: [
+          Math.floor(lower_threshold),
+          Math.floor(upper_threshold),
+        ],
       };
     } else if (lower_threshold !== undefined) {
       // NumberFilter: greater-than-or-equal (op "ge", not "gte").
-      out.start_timestamp = { type: "number", op: "ge", value: lower_threshold };
+      out.start_timestamp = {
+        type: "number",
+        op: "ge",
+        value: Math.floor(lower_threshold),
+      };
     } else if (upper_threshold !== undefined) {
       // NumberFilter: less-than-or-equal (op "le", not "lte").
-      out.start_timestamp = { type: "number", op: "le", value: upper_threshold };
+      out.start_timestamp = {
+        type: "number",
+        op: "le",
+        value: Math.floor(upper_threshold),
+      };
     }
   }
 
@@ -220,7 +232,8 @@ export class RetellClient {
         filter_criteria: toV3FilterCriteria(input.filter_criteria),
         limit: input.limit ?? 1000,
         sort_order: input.sort_order ?? "descending",
-        ...(input.pagination_key ? { pagination_key: input.pagination_key } : {}),
+        // v3 rejects bodies that include both skip and pagination_key; use skip only.
+        ...(input.skip ? { skip: input.skip } : {}),
       }),
       timeoutMs: READ_TIMEOUT_MS,
     });
@@ -247,15 +260,14 @@ export class RetellClient {
     maxPages = 10
   ): Promise<RetellCallListItem[]> {
     const all: RetellCallListItem[] = [];
-    let paginationKey: string | undefined;
+    const limit = input.limit ?? 1000;
     for (let page = 0; page < maxPages; page++) {
       const result = await this.listCallsPage({
         ...input,
-        pagination_key: paginationKey,
+        skip: page * limit,
       });
       all.push(...result.items);
-      if (!result.has_more || !result.pagination_key) break;
-      paginationKey = result.pagination_key;
+      if (!result.has_more || result.items.length < limit) break;
     }
     return all;
   }
