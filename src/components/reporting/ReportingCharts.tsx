@@ -25,14 +25,14 @@ import type { ReportingResponse, DashboardWidgetId } from "./types";
 const CHART_COLORS = {
   inbound: "#0ea5e9",
   outbound: "#8b5cf6",
-  total: "#2563eb",
+  total: "#0a84ff",
   mint: "#10b981",
   amber: "#f59e0b",
   rose: "#f43f5e",
   slate: "#64748b",
 };
 
-const PIE_COLORS = ["#2563eb", "#10b981", "#f59e0b", "#f43f5e", "#8b5cf6", "#64748b"];
+const PIE_COLORS = ["#0a84ff", "#10b981", "#f59e0b", "#f43f5e", "#8b5cf6", "#64748b"];
 
 function ChartCard({
   title,
@@ -87,7 +87,7 @@ export function ReportingCharts({
                   <stop offset="95%" stopColor={CHART_COLORS.outbound} stopOpacity={0} />
                 </linearGradient>
               </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" />
               <XAxis dataKey="date" tick={{ fontSize: 11 }} />
               <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
               <Tooltip />
@@ -140,7 +140,7 @@ export function ReportingCharts({
         <ChartCard title="Outcomes" description="Call result distribution">
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={data.outcomeBreakdown.slice(0, 8)} layout="vertical">
-              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" />
               <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11 }} />
               <YAxis
                 type="category"
@@ -216,8 +216,8 @@ export function ReportingCharts({
                         style={{
                           backgroundColor:
                             count === 0
-                              ? "#f1f5f9"
-                              : `rgba(37, 99, 235, ${0.15 + intensity * 0.85})`,
+                              ? "var(--chart-empty)"
+                              : `rgba(10, 132, 255, ${0.15 + intensity * 0.85})`,
                         }}
                       />
                     );
@@ -237,7 +237,7 @@ export function ReportingCharts({
         >
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={data.latencyOverTime}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" />
               <XAxis dataKey="date" tick={{ fontSize: 11 }} />
               <YAxis tick={{ fontSize: 11 }} />
               <Tooltip />
@@ -271,7 +271,7 @@ export function ReportingCharts({
         >
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={data.disconnectionBreakdown}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" />
               <XAxis dataKey="reason" tick={{ fontSize: 10 }} />
               <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
               <Tooltip />

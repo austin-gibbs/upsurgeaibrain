@@ -1,19 +1,19 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import Link from "next/link";
-import { ArrowLeft, SlidersHorizontal } from "lucide-react";
-import { PageShell } from "@/components/TopNav";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { SlidersHorizontal } from "lucide-react";
+import { PageShell, type PageNav } from "@/components/TopNav";
 import {
   Button,
   Card,
   EmptyState,
   Input,
   Label,
+  PageGreeting,
   Segmented,
   Select,
   Skeleton,
-  Tabs,
 } from "@/components/ui";
 import { KpiGrid } from "@/components/reporting/KpiGrid";
 import { ReportingCharts } from "@/components/reporting/ReportingCharts";
@@ -69,7 +69,17 @@ export default function WorkspaceDetailPage({
 }: {
   params: { id: string };
 }) {
-  const [tab, setTab] = useState<"dashboard" | "operations">("dashboard");
+  return (
+    <Suspense fallback={null}>
+      <WorkspaceDetail params={params} />
+    </Suspense>
+  );
+}
+
+function WorkspaceDetail({ params }: { params: { id: string } }) {
+  const searchParams = useSearchParams();
+  const tab: "dashboard" | "operations" =
+    searchParams.get("tab") === "operations" ? "operations" : "dashboard";
   const [opsData, setOpsData] = useState<OpsDetail | null>(null);
   const [reporting, setReporting] = useState<ReportingResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -165,9 +175,11 @@ export default function WorkspaceDetailPage({
     [reporting, agentId]
   );
 
+  const crumb = tab === "operations" ? "Operations" : "Dashboard";
+
   if (error && !opsData) {
     return (
-      <PageShell>
+      <PageShell nav={{ workspaceId: params.id, active: tab, crumb }}>
         <Card className="p-5 text-sm text-accent-rose-fg">{error}</Card>
       </PageShell>
     );
@@ -175,7 +187,7 @@ export default function WorkspaceDetailPage({
 
   if (!opsData) {
     return (
-      <PageShell>
+      <PageShell nav={{ workspaceId: params.id, active: tab, crumb }}>
         <Skeleton className="mb-4 h-8 w-48" />
         <Skeleton className="h-64 w-full" />
       </PageShell>
@@ -184,39 +196,28 @@ export default function WorkspaceDetailPage({
 
   const { workspace } = opsData;
 
+  const nav: PageNav = {
+    workspaceId: params.id,
+    workspaceName: workspace.name,
+    workspaceMeta: `${CRM_LABEL[workspace.crm_provider]} · ${workspace.timezone}`,
+    agents: opsData.agents.map((a) => ({
+      id: a.id,
+      name: a.name,
+      status: a.status,
+      direction: a.direction,
+    })),
+    active: tab,
+    crumb,
+  };
+
   return (
-    <PageShell>
-      <Link
-        href="/"
-        className="mb-6 inline-flex items-center gap-1.5 text-sm text-ink-500 transition-colors hover:text-ink-700"
-      >
-        <ArrowLeft className="h-4 w-4" />
-        Workspaces
-      </Link>
-
-      <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-ink-900 sm:text-3xl">
-            {workspace.name}
-          </h1>
-          <p className="mt-1.5 text-sm text-ink-500">
-            {CRM_LABEL[workspace.crm_provider]} · {workspace.timezone}
-          </p>
-        </div>
-      </div>
-
-      <Tabs
-        items={[
-          { id: "dashboard", label: "Dashboard" },
-          { id: "operations", label: "Operations" },
-        ]}
-        active={tab}
-        onSelect={(v) => setTab(v as "dashboard" | "operations")}
-      />
-      <div className="mb-2" />
-
+    <PageShell nav={nav}>
       {tab === "dashboard" && (
         <>
+          <PageGreeting
+            title="Dashboard"
+            subtitle="Reporting across every agent in this workspace."
+          />
           <Card className="mb-6 space-y-4 p-5">
             <div className="flex flex-wrap items-end gap-4">
               <div className="min-w-[180px] flex-1 space-y-1.5">
@@ -317,7 +318,7 @@ export default function WorkspaceDetailPage({
                       className={`rounded-xl border px-3 py-1.5 text-xs font-medium transition-all ${
                         widgets.has(id)
                           ? "border-brand-500 bg-accent-sky-bg text-accent-sky-fg"
-                          : "border-ink-200/80 bg-white text-ink-500"
+                          : "border-ink-200/80 bg-surface text-ink-500"
                       }`}
                     >
                       {WIDGET_LABELS[id]}

@@ -19,7 +19,8 @@
     "db:apply-0010": "node scripts/apply-0010.mjs",
     "db:verify-schema": "node scripts/verify-schema.mjs",
     "worker": "tsx watch worker/index.ts",
-    "worker:prod": "tsx worker/index.ts"
+    "worker:prod": "tsx worker/index.ts",
+    "report:fulfillment": "tsx scripts/fulfillment-report.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.5.2",

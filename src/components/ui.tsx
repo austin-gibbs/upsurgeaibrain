@@ -30,7 +30,7 @@ export function Button({
     primary:
       "bg-brand-gradient text-white shadow-soft hover:shadow-card hover:brightness-105",
     secondary:
-      "bg-white text-ink-700 border border-ink-200/80 shadow-soft hover:bg-ink-50 hover:shadow-card",
+      "bg-surface text-ink-700 border border-ink-200/80 shadow-soft hover:bg-ink-50 hover:shadow-card",
     danger: "bg-accent-rose-fg text-white shadow-soft hover:brightness-110",
     ghost: "bg-transparent text-ink-600 hover:bg-ink-100/80",
   };
@@ -51,7 +51,7 @@ export const Input = React.forwardRef<
     <input
       ref={ref}
       className={cn(
-        "w-full rounded-xl border border-ink-200/80 bg-white px-4 py-2.5 text-sm text-ink-900 shadow-soft placeholder:text-ink-400 transition-colors focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20",
+        "w-full rounded-xl border border-ink-200/80 bg-surface px-4 py-2.5 text-sm text-ink-900 shadow-soft placeholder:text-ink-400 transition-colors focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20",
         className
       )}
       {...props}
@@ -68,7 +68,7 @@ export const Select = React.forwardRef<
     <select
       ref={ref}
       className={cn(
-        "w-full rounded-xl border border-ink-200/80 bg-white px-4 py-2.5 text-sm text-ink-900 shadow-soft transition-colors focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20",
+        "w-full rounded-xl border border-ink-200/80 bg-surface px-4 py-2.5 text-sm text-ink-900 shadow-soft transition-colors focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20",
         className
       )}
       {...props}
@@ -105,7 +105,7 @@ export function Card({
   return (
     <div
       className={cn(
-        "rounded-2xl border border-ink-200/50 bg-white shadow-card",
+        "rounded-2xl border border-ink-200/50 bg-surface shadow-card",
         hover && "transition-shadow duration-200 hover:shadow-lifted",
         className
       )}
@@ -268,7 +268,7 @@ export function Segmented<T extends string>({
           className={cn(
             "rounded-lg px-3.5 py-1.5 text-xs font-medium transition-all duration-200",
             value === opt.value
-              ? "bg-white text-ink-900 shadow-pill"
+              ? "bg-surface text-ink-900 shadow-pill"
               : "text-ink-500 hover:text-ink-700"
           )}
         >
@@ -332,6 +332,53 @@ export function Tabs({
           {item.label}
         </button>
       ))}
+    </div>
+  );
+}
+
+/* ------------------------------ SubTabs ------------------------------ */
+// Underline-style in-page tabs that swap the content container below them.
+export function SubTabs<T extends string>({
+  items,
+  active,
+  onSelect,
+  className,
+}: {
+  items: { id: T; label: string; badge?: React.ReactNode }[];
+  active: T;
+  onSelect: (id: T) => void;
+  className?: string;
+}) {
+  return (
+    <div
+      className={cn(
+        "mb-6 flex gap-0.5 overflow-x-auto border-b border-ink-200/60",
+        className
+      )}
+    >
+      {items.map((item) => {
+        const isActive = item.id === active;
+        return (
+          <button
+            key={item.id}
+            type="button"
+            onClick={() => onSelect(item.id)}
+            className={cn(
+              "-mb-px flex items-center gap-2 whitespace-nowrap border-b-2 px-3.5 py-2.5 text-sm font-medium transition-colors",
+              isActive
+                ? "border-brand-500 font-semibold text-brand-700"
+                : "border-transparent text-ink-500 hover:text-ink-800"
+            )}
+          >
+            {item.label}
+            {item.badge !== undefined && item.badge !== null && (
+              <span className="rounded-full bg-accent-sky-bg px-2 py-0.5 text-[11px] font-semibold text-accent-sky-fg">
+                {item.badge}
+              </span>
+            )}
+          </button>
+        );
+      })}
     </div>
   );
 }

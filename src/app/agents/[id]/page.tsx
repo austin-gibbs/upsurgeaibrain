@@ -40,6 +40,7 @@ import {
   IconBadge,
   Segmented,
   Select,
+  SubTabs,
   cn,
 } from "@/components/ui";
 
@@ -88,6 +89,9 @@ export default function AgentDetailPage({
   const [saving, setSaving] = useState(false);
   const [actionMsg, setActionMsg] = useState<string | null>(null);
   const [taskActionMsg, setTaskActionMsg] = useState<string | null>(null);
+  const [agentTab, setAgentTab] = useState<
+    "overview" | "call" | "crm" | "tasks" | "history"
+  >("overview");
 
   const [direction, setDirection] = useState<Direction>("outbound");
   const [retellId, setRetellId] = useState("");
@@ -473,17 +477,24 @@ export default function AgentDetailPage({
     ? Boolean(agent.retell_agent_id && agent.has_retell_credentials)
     : Boolean(agent.retell_agent_id && agent.retell_from_number);
 
+  const navCtx = {
+    workspaceId: agent.workspace_id,
+    active: "agent" as const,
+    activeAgentId: agent.id,
+    crumb: agent.name,
+  };
+
   return (
-    <PageShell>
+    <PageShell nav={navCtx}>
       <Link
-        href={`/workspaces/${agent.workspace_id}`}
-        className="mb-6 inline-flex items-center gap-1.5 text-sm text-ink-500 transition-colors hover:text-ink-700"
+        href={`/workspaces/${agent.workspace_id}?tab=operations`}
+        className="mb-4 inline-flex items-center gap-1.5 text-sm text-ink-500 transition-colors hover:text-ink-700"
       >
         <ArrowLeft className="h-4 w-4" />
         Workspace
       </Link>
 
-      <div className="mb-8 flex flex-wrap items-start justify-between gap-4">
+      <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
         <div className="flex items-center gap-4">
           <IconBadge icon={Phone} tone="sky" className="h-12 w-12 rounded-2xl" />
           <div>
@@ -525,7 +536,20 @@ export default function AgentDetailPage({
         </p>
       )}
 
-      <div className="grid gap-6 lg:grid-cols-3">
+      <SubTabs
+        items={[
+          { id: "overview", label: "Overview" },
+          { id: "call", label: "Call & Cadence" },
+          { id: "crm", label: "CRM & Integrations" },
+          { id: "tasks", label: "Tasks & Automations" },
+          { id: "history", label: "Call History" },
+        ]}
+        active={agentTab}
+        onSelect={(v) => setAgentTab(v)}
+      />
+
+      {agentTab === "overview" && (
+      <div className="grid gap-6 lg:grid-cols-2">
         <Card className="space-y-5 p-6 lg:col-span-1">
           <div className="flex items-center gap-2">
             <Settings className="h-4 w-4 text-ink-400" />
@@ -598,8 +622,12 @@ export default function AgentDetailPage({
             </p>
           )}
         </Card>
+      </div>
+      )}
 
-        <Card className="space-y-5 p-6 lg:col-span-1">
+      {agentTab === "crm" && (
+      <div className="space-y-6">
+        <Card className="space-y-5 p-6">
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <KeyRound className="h-4 w-4 text-ink-400" />
@@ -705,10 +733,9 @@ export default function AgentDetailPage({
             </p>
           )}
         </Card>
-      </div>
 
       {isInbound && (
-        <Card className="mt-6 space-y-5 p-6">
+        <Card className="space-y-5 p-6">
           <SectionHeader
             title="Retell credentials"
             description="Stored encrypted. Leave fields blank to keep current values."
@@ -741,9 +768,12 @@ export default function AgentDetailPage({
           </Button>
         </Card>
       )}
+      </div>
+      )}
 
-      {!isInbound && (
-        <Card className="mt-6 space-y-5 p-6">
+      {agentTab === "call" &&
+        (!isInbound ? (
+        <Card className="space-y-5 p-6">
           <SectionHeader
             title="Call settings"
             description={`Dialing rules for this agent. Times use workspace timezone (${workspaceTimezone}).`}
@@ -756,10 +786,15 @@ export default function AgentDetailPage({
             Save call settings
           </Button>
         </Card>
-      )}
+        ) : (
+          <Card className="p-6 text-sm text-ink-500">
+            Inbound agents don&apos;t use a dialing cadence or call window.
+          </Card>
+        ))}
 
-      {!isInbound && (
-        <Card className="mt-6 space-y-5 p-6">
+      {agentTab === "tasks" &&
+        (!isInbound ? (
+        <Card className="space-y-5 p-6">
           <SectionHeader
             title="Tasks & automations"
             description="Post-call CRM tasks, HighLevel workflow webhooks, poll-stage routing, opportunity custom fields, and outcome-based pipeline routing."
@@ -824,8 +859,14 @@ export default function AgentDetailPage({
             </p>
           )}
         </Card>
-      )}
+        ) : (
+          <Card className="p-6 text-sm text-ink-500">
+            Tasks &amp; automations apply to outbound agents.
+          </Card>
+        ))}
 
+      {agentTab === "history" && (
+      <>
       <SectionHeader
         title="Recent calls"
         description={
@@ -890,6 +931,8 @@ export default function AgentDetailPage({
             </table>
           </div>
         </Card>
+      )}
+      </>
       )}
     </PageShell>
   );

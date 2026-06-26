@@ -157,9 +157,11 @@ export default function NewAgentPage({
   }
 
   return (
-    <PageShell>
+    <PageShell
+      nav={{ workspaceId: params.id, active: "new-agent", crumb: "Add agent" }}
+    >
       <Link
-        href={`/workspaces/${params.id}`}
+        href={`/workspaces/${params.id}?tab=operations`}
         className="mb-6 inline-flex items-center gap-1.5 text-sm text-ink-500 transition-colors hover:text-ink-700"
       >
         <ArrowLeft className="h-4 w-4" />

@@ -14,6 +14,7 @@ loadEnv({ path: ".env.local" });
 import { createClient } from "@supabase/supabase-js";
 import { decryptJson } from "@/lib/crypto";
 import { getCrmAdapterForAgent } from "@/lib/crm";
+import { resolveHighLevelCallProviderId } from "@/lib/crm/highlevel";
 import type { Agent, Workspace, Contact } from "@/types";
 
 const CONTACT_UUID = process.argv[2] ?? "c353f465-4527-479d-ae49-8a9a853b56d7";
@@ -51,6 +52,11 @@ async function main() {
   if (!encrypted) throw new Error("no HighLevel credentials on agent or workspace");
   const creds = decryptJson<any>(encrypted);
   console.log(`HighLevel locationId: ${creds.locationId}`);
+  console.log(
+    `Resolved call provider: ${
+      resolveHighLevelCallProviderId(creds.locationId, creds.callProviderId) ? "set" : "MISSING"
+    }`
+  );
 
   // Decode the (JWT) access token payload to surface GRANTED scopes — this tells
   // us whether a reconnect is needed for conversations call logging. No secret
@@ -62,7 +68,8 @@ async function main() {
     const scopes: string[] = payload?.oauthMeta?.scopes ?? payload?.scope?.split?.(" ") ?? [];
     const convoScopes = scopes.filter((s) => s.startsWith("conversations"));
     console.log(`Granted scopes (${scopes.length}); conversations: ${JSON.stringify(convoScopes)}`);
-    console.log(`HIGHLEVEL_CALL_PROVIDER_ID env: ${process.env.HIGHLEVEL_CALL_PROVIDER_ID?.trim() ? "set" : "MISSING"}`);
+    console.log(`HIGHLEVEL_CALL_PROVIDER_IDS env: ${process.env.HIGHLEVEL_CALL_PROVIDER_IDS?.trim() ? "set" : "MISSING"}`);
+    console.log(`HIGHLEVEL_CALL_PROVIDER_ID fallback env: ${process.env.HIGHLEVEL_CALL_PROVIDER_ID?.trim() ? "set" : "MISSING"}`);
   } catch {
     console.log("(could not decode token scopes)");
   }

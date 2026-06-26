@@ -1,0 +1,916 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>UpSurge — Workspace Redesign Mockup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    color-scheme:light;
+    /* Electric blue brand ramp */
+    --brand-50:#e8f1ff; --brand-100:#cfe2ff; --brand-200:#a6caff;
+    --brand-500:#0a84ff; --brand-600:#0a6fe0; --brand-700:#0a55ad;
+    /* Neutral ink ramp (light) */
+    --ink-50:#f5f7fb; --ink-100:#eef1f7; --ink-200:#e2e7f0; --ink-300:#cbd2e0;
+    --ink-400:#8b96ab; --ink-500:#5f6b80; --ink-600:#46526a; --ink-700:#2e394e;
+    --ink-800:#19212f; --ink-900:#0a0e17;
+    /* Semantic surfaces */
+    --bg:#ffffff; --surface:#ffffff; --surface-2:#f3f6fb;
+    --topbar-bg:rgba(255,255,255,.72); --text:var(--ink-900);
+    /* Accents */
+    --mint-bg:#ecfdf5; --mint-fg:#059669; --mint-icon:#10b981;
+    --sky-bg:#e8f1ff; --sky-fg:#0a6fe0; --sky-icon:#0a84ff;
+    --violet-bg:#eef0ff; --violet-fg:#4f57d2; --violet-icon:#6366f1;
+    --amber-bg:#fffbeb; --amber-fg:#d97706; --amber-icon:#f59e0b;
+    --rose-bg:#fff1f2; --rose-fg:#e11d48; --rose-icon:#f43f5e;
+    --border:rgba(10,14,23,0.08);
+    --shadow-soft:0 1px 2px rgba(10,14,23,0.04),0 4px 16px rgba(10,14,23,0.05);
+    --shadow-card:0 1px 3px rgba(10,14,23,0.04),0 8px 24px rgba(10,14,23,0.07);
+    --shadow-lifted:0 2px 4px rgba(10,14,23,0.05),0 12px 32px rgba(10,14,23,0.10);
+    --brand-gradient:linear-gradient(135deg,#0a6bff 0%,#22b3ff 100%);
+  }
+  html[data-theme="dark"] {
+    color-scheme:dark;
+    --brand-50:#10243f; --brand-100:#173354; --brand-200:#1f4f86;
+    --brand-500:#2f9bff; --brand-600:#1f8bff; --brand-700:#9cc8ff;
+    --ink-50:#0b0d11; --ink-100:#13151b; --ink-200:#272b36; --ink-300:#3a4051;
+    --ink-400:#7e8799; --ink-500:#9aa3b5; --ink-600:#b4bccd; --ink-700:#ccd3df;
+    --ink-800:#e4e8ef; --ink-900:#f4f6fa;
+    --bg:#0b0d11; --surface:#1a1d25; --surface-2:#22262f;
+    --topbar-bg:rgba(11,13,17,.72); --text:var(--ink-900);
+    --mint-bg:rgba(16,185,129,.15); --mint-fg:#34d399; --mint-icon:#34d399;
+    --sky-bg:rgba(10,132,255,.16); --sky-fg:#5aa9ff; --sky-icon:#2f9bff;
+    --violet-bg:rgba(99,102,241,.18); --violet-fg:#a3abff; --violet-icon:#818cf8;
+    --amber-bg:rgba(245,158,11,.16); --amber-fg:#fbbf24; --amber-icon:#fbbf24;
+    --rose-bg:rgba(244,63,94,.16); --rose-fg:#fb7185; --rose-icon:#fb7185;
+    --border:rgba(255,255,255,0.09);
+    --shadow-soft:0 1px 2px rgba(0,0,0,.5),0 4px 16px rgba(0,0,0,.45);
+    --shadow-card:0 1px 3px rgba(0,0,0,.5),0 8px 24px rgba(0,0,0,.55);
+    --shadow-lifted:0 2px 4px rgba(0,0,0,.5),0 16px 40px rgba(0,0,0,.6);
+  }
+  * { box-sizing:border-box; }
+  html,body { margin:0; padding:0; }
+  body {
+    background:var(--bg); color:var(--text);
+    transition:background-color .25s ease, color .25s ease;
+    font-family:'Inter',system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased; font-feature-settings:"cv02","cv03","cv04","cv11";
+    font-size:14px; line-height:1.5;
+  }
+  ::selection { background:var(--brand-100); color:var(--brand-700); }
+  *::-webkit-scrollbar { width:8px; height:8px; }
+  *::-webkit-scrollbar-thumb { background:var(--ink-300); border-radius:9999px; }
+  a { color:inherit; text-decoration:none; }
+  button { font-family:inherit; cursor:pointer; border:none; background:none; }
+  input,select { font-family:inherit; font-size:13px; }
+
+  /* ============ APP SHELL ============ */
+  .app { display:grid; grid-template-columns:264px 1fr; min-height:100vh; }
+
+  /* ---- Left rail ---- */
+  .rail {
+    background:var(--surface); border-right:1px solid var(--border);
+    display:flex; flex-direction:column; position:sticky; top:0; height:100vh;
+  }
+  .rail-brand { display:flex; align-items:center; gap:10px; padding:16px 18px 12px; }
+  .brand-mark {
+    width:30px; height:30px; border-radius:9px; background:var(--brand-gradient);
+    display:flex; align-items:center; justify-content:center; color:#fff;
+    box-shadow:var(--shadow-soft);
+  }
+  .brand-name { font-weight:700; font-size:14px; letter-spacing:-.01em; }
+  .brand-sub { font-size:10px; font-weight:600; color:var(--ink-400); letter-spacing:.08em; }
+
+  .ws-switch {
+    margin:4px 12px 8px; padding:10px 12px; border:1px solid var(--border);
+    border-radius:11px; background:var(--surface-2); cursor:pointer;
+    display:flex; align-items:center; gap:10px; transition:.15s;
+  }
+  .ws-switch:hover { background:var(--surface); box-shadow:var(--shadow-soft); }
+  .ws-avatar {
+    width:28px; height:28px; border-radius:8px; flex-shrink:0;
+    background:var(--violet-bg); color:var(--violet-fg);
+    display:flex; align-items:center; justify-content:center; font-weight:700; font-size:12px;
+  }
+  .ws-meta { min-width:0; flex:1; }
+  .ws-title { font-weight:600; font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .ws-detail { font-size:11px; color:var(--ink-400); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+
+  .rail-scroll { flex:1; overflow-y:auto; padding:6px 12px; }
+  .rail-section-label {
+    display:flex; align-items:center; justify-content:space-between;
+    padding:14px 10px 6px; font-size:10.5px; font-weight:700; letter-spacing:.07em;
+    color:var(--ink-400); text-transform:uppercase;
+  }
+  .rail-add {
+    width:20px; height:20px; border-radius:6px; color:var(--ink-400);
+    display:flex; align-items:center; justify-content:center; transition:.15s;
+  }
+  .rail-add:hover { background:var(--brand-50); color:var(--brand-600); }
+
+  .nav-item {
+    display:flex; align-items:center; gap:10px; padding:8px 10px; border-radius:9px;
+    color:var(--ink-600); font-weight:500; font-size:13px; cursor:pointer;
+    transition:.13s; margin-bottom:1px; position:relative;
+  }
+  .nav-item:hover { background:var(--surface-2); color:var(--ink-900); }
+  .nav-item.active { background:var(--brand-50); color:var(--brand-700); font-weight:600; }
+  .nav-item.active::before {
+    content:""; position:absolute; left:-12px; top:8px; bottom:8px; width:3px;
+    border-radius:0 3px 3px 0; background:var(--brand-500);
+  }
+  .nav-icon { width:18px; height:18px; flex-shrink:0; color:currentColor; opacity:.85; }
+  .nav-item.active .nav-icon { opacity:1; }
+  .nav-label { flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+
+  .agent-nav .nav-label { display:flex; flex-direction:column; line-height:1.2; }
+  .agent-nav .an-name { font-size:13px; }
+  .agent-nav .an-sub { font-size:10.5px; color:var(--ink-400); font-weight:500; }
+  .nav-item.active .an-sub { color:var(--brand-500); }
+  .dot { width:7px; height:7px; border-radius:50%; flex-shrink:0; }
+  .dot-active { background:var(--mint-icon); box-shadow:0 0 0 3px var(--mint-bg); }
+  .dot-paused { background:var(--amber-icon); box-shadow:0 0 0 3px var(--amber-bg); }
+  .dot-draft  { background:var(--ink-300); box-shadow:0 0 0 3px var(--ink-100); }
+
+  .rail-foot { border-top:1px solid var(--border); padding:10px 14px; }
+  .acct { display:flex; align-items:center; gap:10px; }
+  .acct-avatar {
+    width:30px; height:30px; border-radius:50%; background:var(--brand-gradient);
+    display:flex; align-items:center; justify-content:center; color:#fff; font-weight:600; font-size:12px;
+  }
+  .acct-name { font-weight:600; font-size:12.5px; }
+  .acct-role { font-size:11px; color:var(--ink-400); }
+
+  /* ---- Main content ---- */
+  .main { min-width:0; display:flex; flex-direction:column; }
+  .topbar {
+    display:flex; align-items:center; justify-content:space-between;
+    padding:14px 28px; border-bottom:1px solid var(--border); background:var(--topbar-bg);
+    backdrop-filter:blur(8px); position:sticky; top:0; z-index:20; transition:background-color .25s ease, border-color .25s ease;
+  }
+  .crumb { display:flex; align-items:center; gap:8px; font-size:13px; color:var(--ink-400); }
+  .crumb b { color:var(--ink-800); font-weight:600; }
+  .crumb svg { width:14px; height:14px; }
+  .topbar-actions { display:flex; align-items:center; gap:10px; }
+  .icon-btn {
+    width:34px; height:34px; border-radius:9px; border:1px solid var(--border);
+    background:var(--surface); color:var(--ink-500); display:flex; align-items:center; justify-content:center; transition:.15s;
+  }
+  .icon-btn:hover { color:var(--ink-800); box-shadow:var(--shadow-soft); }
+  .card,.tile,.tbl-wrap,.control,.rail,.btn-ghost,.icon-btn,.segmented,.seg.active {
+    transition:background-color .25s ease, border-color .25s ease, color .25s ease, box-shadow .15s ease;
+  }
+  /* theme toggle */
+  .theme-toggle { position:relative; }
+  .theme-toggle .tt-moon { display:none; }
+  html[data-theme="dark"] .theme-toggle .tt-sun { display:none; }
+  html[data-theme="dark"] .theme-toggle .tt-moon { display:inline-flex; }
+  .theme-toggle:hover { color:var(--brand-500); border-color:var(--brand-200); }
+
+  .content { padding:26px 28px 60px; max-width:1180px; width:100%; margin:0 auto; }
+  .view { display:none; }
+  .view.active { display:block; animation:fade .22s ease; }
+  @keyframes fade { from{opacity:0;transform:translateY(4px);} to{opacity:1;transform:none;} }
+
+  /* ---- Page head ---- */
+  .page-head { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; margin-bottom:20px; }
+  .page-title { font-size:24px; font-weight:700; letter-spacing:-.02em; margin:0; }
+  .page-sub { color:var(--ink-500); font-size:13.5px; margin-top:3px; }
+
+  /* ---- Sub-tabs ---- */
+  .subtabs { display:flex; gap:2px; border-bottom:1px solid var(--border); margin-bottom:22px; overflow-x:auto; }
+  .subtab {
+    padding:10px 14px; font-size:13.5px; font-weight:500; color:var(--ink-500);
+    border-bottom:2px solid transparent; margin-bottom:-1px; white-space:nowrap; transition:.13s;
+  }
+  .subtab:hover { color:var(--ink-800); }
+  .subtab.active { color:var(--brand-700); border-bottom-color:var(--brand-500); font-weight:600; }
+  .subpane { display:none; }
+  .subpane.active { display:block; animation:fade .2s ease; }
+
+  /* ---- Cards ---- */
+  .card { background:var(--surface); border:1px solid var(--border); border-radius:14px; box-shadow:var(--shadow-soft); }
+  .card-pad { padding:20px; }
+  .card-head { display:flex; align-items:center; gap:12px; margin-bottom:4px; }
+  .card-head .ico { width:34px; height:34px; border-radius:10px; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+  .card-title { font-size:15px; font-weight:600; letter-spacing:-.01em; }
+  .card-desc { font-size:12.5px; color:var(--ink-500); margin-top:1px; }
+  .grid { display:grid; gap:16px; }
+  .g2 { grid-template-columns:repeat(2,1fr); }
+  .g3 { grid-template-columns:repeat(3,1fr); }
+  .stack > * + * { margin-top:16px; }
+
+  .ico.sky{background:var(--sky-bg);color:var(--sky-fg);} .ico.mint{background:var(--mint-bg);color:var(--mint-fg);}
+  .ico.violet{background:var(--violet-bg);color:var(--violet-fg);} .ico.amber{background:var(--amber-bg);color:var(--amber-fg);}
+  .ico.rose{background:var(--rose-bg);color:var(--rose-fg);}
+  .ico svg,.nav-icon svg,.icon-btn svg,.brand-mark svg{width:18px;height:18px;}
+
+  /* ---- Form bits ---- */
+  .field { margin-bottom:14px; }
+  .field:last-child { margin-bottom:0; }
+  label.lbl { display:block; font-size:12.5px; font-weight:600; color:var(--ink-700); margin-bottom:6px; }
+  label.lbl .hint { font-weight:400; color:var(--ink-400); margin-left:6px; }
+  .control {
+    width:100%; padding:9px 12px; border:1px solid var(--ink-200); border-radius:10px;
+    background:var(--surface); color:var(--ink-900); transition:.15s; outline:none;
+  }
+  .control:focus { border-color:var(--brand-500); box-shadow:0 0 0 3px var(--brand-50); }
+  .control::placeholder { color:var(--ink-400); }
+  .mono { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+
+  .btn {
+    display:inline-flex; align-items:center; gap:7px; padding:9px 15px; border-radius:10px;
+    font-weight:600; font-size:13px; transition:.15s; white-space:nowrap;
+  }
+  .btn svg { width:15px; height:15px; }
+  .btn-primary { background:var(--brand-500); color:#fff; box-shadow:var(--shadow-soft); }
+  .btn-primary:hover { background:var(--brand-600); }
+  .btn-ghost { background:var(--surface); color:var(--ink-700); border:1px solid var(--ink-200); }
+  .btn-ghost:hover { box-shadow:var(--shadow-soft); border-color:var(--ink-300); }
+  .btn-sm { padding:6px 11px; font-size:12.5px; border-radius:9px; }
+  .btn-disabled { opacity:.45; pointer-events:none; }
+
+  .badge {
+    display:inline-flex; align-items:center; gap:5px; padding:3px 9px; border-radius:999px;
+    font-size:11.5px; font-weight:600; line-height:1.4;
+  }
+  .b-green{background:var(--mint-bg);color:var(--mint-fg);} .b-amber{background:var(--amber-bg);color:var(--amber-fg);}
+  .b-red{background:var(--rose-bg);color:var(--rose-fg);} .b-blue{background:var(--sky-bg);color:var(--sky-fg);}
+  .b-slate{background:var(--ink-100);color:var(--ink-600);} .b-violet{background:var(--violet-bg);color:var(--violet-fg);}
+
+  .segmented { display:inline-flex; padding:3px; background:var(--ink-100); border-radius:11px; gap:2px; }
+  .seg { padding:6px 14px; border-radius:8px; font-size:12.5px; font-weight:600; color:var(--ink-500); transition:.13s; }
+  .seg.active { background:var(--surface); color:var(--ink-900); box-shadow:var(--shadow-soft); }
+
+  /* ---- Stat tiles ---- */
+  .tiles { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:14px; }
+  .tile { background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:16px; box-shadow:var(--shadow-soft); }
+  .tile-row { display:flex; align-items:center; justify-content:space-between; }
+  .tile-label { font-size:11px; font-weight:600; letter-spacing:.05em; text-transform:uppercase; color:var(--ink-400); }
+  .tile-val { font-size:26px; font-weight:700; letter-spacing:-.02em; margin-top:8px; }
+  .tile .ico { width:30px; height:30px; border-radius:9px; }
+
+  /* ---- Table ---- */
+  .tbl-wrap { border:1px solid var(--border); border-radius:14px; overflow:hidden; background:var(--surface); box-shadow:var(--shadow-soft); }
+  table { width:100%; border-collapse:collapse; }
+  thead th {
+    text-align:left; font-size:10.5px; font-weight:700; letter-spacing:.05em; text-transform:uppercase;
+    color:var(--ink-400); padding:11px 16px; border-bottom:1px solid var(--border); background:var(--surface-2);
+  }
+  tbody td { padding:12px 16px; border-bottom:1px solid var(--border); font-size:13px; }
+  tbody tr:last-child td { border-bottom:none; }
+  tbody tr:hover { background:var(--surface-2); }
+  .c-name { font-weight:600; }
+  .c-sub { font-size:11.5px; color:var(--ink-400); }
+
+  .toolbar { display:flex; align-items:center; gap:12px; justify-content:space-between; flex-wrap:wrap; margin-bottom:14px; }
+  .search { position:relative; }
+  .search svg { position:absolute; left:11px; top:50%; transform:translateY(-50%); width:15px; height:15px; color:var(--ink-400); }
+  .search input { padding-left:32px; min-width:240px; }
+
+  .info {
+    padding:11px 14px; border-radius:11px; font-size:12.5px; display:flex; gap:9px; align-items:flex-start;
+  }
+  .info svg { width:16px; height:16px; flex-shrink:0; margin-top:1px; }
+  .info-mint{background:var(--mint-bg);color:var(--mint-fg);} .info-amber{background:var(--amber-bg);color:var(--amber-fg);}
+  .info-sky{background:var(--sky-bg);color:var(--sky-fg);} .info-rose{background:var(--rose-bg);color:var(--rose-fg);}
+
+  .row-between { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+  .muted { color:var(--ink-500); }
+  .divider { height:1px; background:var(--border); margin:18px 0; }
+  .save-bar { display:flex; justify-content:flex-end; margin-top:16px; }
+
+  .chart-placeholder {
+    height:220px; border-radius:12px; background:
+      linear-gradient(180deg,rgba(10,132,255,.10),rgba(10,132,255,.02)),
+      repeating-linear-gradient(90deg,transparent,transparent 58px,var(--border) 58px,var(--border) 59px);
+    display:flex; align-items:flex-end; gap:10px; padding:18px; border:1px dashed var(--ink-200);
+  }
+  .bar { flex:1; background:var(--brand-gradient); border-radius:6px 6px 0 0; opacity:.85; }
+
+  .pill-note { font-size:11.5px; color:var(--ink-400); }
+  .kv { display:flex; gap:6px; align-items:center; font-size:12px; color:var(--ink-500); }
+
+  /* cadence rows */
+  .cad-row { display:flex; align-items:center; gap:12px; padding:10px 12px; border:1px solid var(--border); border-radius:11px; margin-bottom:8px; background:var(--surface-2); }
+  .cad-label { font-size:12.5px; color:var(--ink-600); min-width:96px; }
+  .cad-row input { width:80px; }
+  .cad-arrow { font-size:12px; color:var(--ink-400); }
+  .trash { margin-left:auto; color:var(--ink-400); width:30px; height:30px; border-radius:8px; display:flex; align-items:center; justify-content:center; }
+  .trash:hover { background:var(--rose-bg); color:var(--rose-fg); }
+
+  /* stage map */
+  .map-row { display:grid; grid-template-columns:1fr 18px 1.3fr; gap:10px; align-items:center; padding:10px 0; border-bottom:1px solid var(--border); }
+  .map-row:last-child { border-bottom:none; }
+
+  /* modal */
+  .modal-back { position:fixed; inset:0; background:rgba(15,23,42,.42); display:none; align-items:center; justify-content:center; z-index:60; padding:20px; }
+  .modal-back.open { display:flex; animation:fade .15s ease; }
+  .modal { width:100%; max-width:440px; background:var(--surface); border-radius:16px; box-shadow:var(--shadow-lifted); padding:22px; }
+  .modal h3 { margin:0 0 4px; font-size:17px; }
+
+  @media (max-width:880px){ .app{grid-template-columns:1fr;} .rail{display:none;} .g2,.g3{grid-template-columns:1fr;} }
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- ================= LEFT RAIL ================= -->
+  <aside class="rail">
+    <div class="rail-brand">
+      <div class="brand-mark">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M4 13a8 8 0 0 1 16 0M8 13a4 4 0 0 1 8 0M12 13v6" stroke-linecap="round"/></svg>
+      </div>
+      <div><div class="brand-name">UpSurge</div><div class="brand-sub">AI VOICE</div></div>
+    </div>
+
+    <div class="ws-switch" title="Switch workspace">
+      <div class="ws-avatar">DG</div>
+      <div class="ws-meta">
+        <div class="ws-title">Diamond Group Realty</div>
+        <div class="ws-detail">HighLevel · America/Los_Angeles</div>
+      </div>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--ink-400)" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg>
+    </div>
+
+    <div class="rail-scroll">
+      <div class="rail-section-label">Workspace</div>
+      <div class="nav-item active" data-view="dashboard">
+        <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg></span>
+        <span class="nav-label">Dashboard</span>
+      </div>
+      <div class="nav-item" data-view="operations">
+        <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h4l3 8 4-16 3 8h4"/></svg></span>
+        <span class="nav-label">Operations</span>
+      </div>
+
+      <div class="rail-section-label">
+        Agents
+        <span class="rail-add" title="Add agent" onclick="addAgent(event)">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 5v14M5 12h14" stroke-linecap="round"/></svg>
+        </span>
+      </div>
+      <div id="agentNav">
+        <div class="nav-item agent-nav" data-view="agent" data-agent="seller">
+          <span class="dot dot-active"></span>
+          <span class="nav-label"><span class="an-name">Seller Outgoing</span><span class="an-sub">Outbound · active</span></span>
+        </div>
+        <div class="nav-item agent-nav" data-view="agent" data-agent="buyer">
+          <span class="dot dot-active"></span>
+          <span class="nav-label"><span class="an-name">Buyer Concierge</span><span class="an-sub">Inbound · active</span></span>
+        </div>
+        <div class="nav-item agent-nav" data-view="agent" data-agent="probate">
+          <span class="dot dot-draft"></span>
+          <span class="nav-label"><span class="an-name">Probate Outreach</span><span class="an-sub">Outbound · draft</span></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="rail-foot">
+      <div class="acct">
+        <div class="acct-avatar">OP</div>
+        <div style="flex:1"><div class="acct-name">Operator</div><div class="acct-role">Platform admin</div></div>
+        <span class="icon-btn" style="width:30px;height:30px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-2.9 1.2 2 2 0 1 1-4 0 1.7 1.7 0 0 0-2.9-1.2l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0-1.2-2.9 2 2 0 1 1 0-4 1.7 1.7 0 0 0 1.2-2.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 2.9-1.2 2 2 0 1 1 4 0 1.7 1.7 0 0 0 2.9 1.2l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0 .3 1.9Z"/></svg></span>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ================= MAIN ================= -->
+  <div class="main">
+    <div class="topbar">
+      <div class="crumb">
+        <b>Diamond Group Realty</b>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>
+        <span id="crumbLeaf">Dashboard</span>
+      </div>
+      <div class="topbar-actions">
+        <button class="icon-btn theme-toggle" id="themeToggle" onclick="toggleTheme()" title="Toggle light / dark" aria-label="Toggle light or dark theme">
+          <span class="tt-sun"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" stroke-linecap="round"/></svg></span>
+          <span class="tt-moon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></svg></span>
+        </button>
+        <span class="icon-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg></span>
+        <span class="icon-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10 21a2 2 0 0 0 4 0"/></svg></span>
+      </div>
+    </div>
+
+    <div class="content">
+
+      <!-- ===== DASHBOARD (unchanged) ===== -->
+      <section class="view active" id="view-dashboard">
+        <div class="page-head">
+          <div>
+            <h1 class="page-title">Dashboard</h1>
+            <div class="page-sub">Reporting across agents · this is your existing dashboard, left untouched.</div>
+          </div>
+          <span class="badge b-slate">Unchanged</span>
+        </div>
+
+        <div class="card card-pad" style="margin-bottom:20px;">
+          <div class="grid" style="grid-template-columns:1.4fr 1.4fr 1fr 1fr auto auto; align-items:end; gap:14px;">
+            <div class="field" style="margin:0"><label class="lbl">Agent</label><select class="control"><option>All agents</option><option>Seller Outgoing</option><option>Buyer Concierge</option></select></div>
+            <div class="field" style="margin:0"><label class="lbl">Direction</label>
+              <div class="segmented"><span class="seg active">All</span><span class="seg">Inbound</span><span class="seg">Outbound</span></div>
+            </div>
+            <div class="field" style="margin:0"><label class="lbl">From</label><input class="control" type="date" value="2026-05-26"></div>
+            <div class="field" style="margin:0"><label class="lbl">To</label><input class="control" type="date" value="2026-06-25"></div>
+            <button class="btn btn-ghost">Refresh</button>
+            <button class="btn btn-ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M7 12h10M10 18h4"/></svg>Customize</button>
+          </div>
+        </div>
+
+        <div class="tiles" style="margin-bottom:14px;">
+          <div class="tile"><div class="tile-row"><span class="tile-label">Total calls</span><span class="ico sky"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3 19.5 19.5 0 0 1-6-6 19.8 19.8 0 0 1-3-8.6A2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 2 .7 2.9a2 2 0 0 1-.5 2.1L8.1 9.9a16 16 0 0 0 6 6l1.2-1.2a2 2 0 0 1 2.1-.4c.9.3 1.9.6 2.9.7a2 2 0 0 1 1.7 2Z"/></svg></span></div><div class="tile-val">50</div></div>
+          <div class="tile"><div class="tile-row"><span class="tile-label">Inbound</span><span class="ico mint"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 17 17 7M7 7h10v10"/></svg></span></div><div class="tile-val">0</div></div>
+          <div class="tile"><div class="tile-row"><span class="tile-label">Outbound</span><span class="ico violet"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 7 7 17M17 17H7V7"/></svg></span></div><div class="tile-val">50</div></div>
+          <div class="tile"><div class="tile-row"><span class="tile-label">Answer rate</span><span class="ico mint"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6 9 17l-5-5"/></svg></span></div><div class="tile-val">100%</div></div>
+          <div class="tile"><div class="tile-row"><span class="tile-label">Voicemail</span><span class="ico amber"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="14" r="4"/><circle cx="18" cy="14" r="4"/><path d="M6 18h12"/></svg></span></div><div class="tile-val">70%</div></div>
+          <div class="tile"><div class="tile-row"><span class="tile-label">Success rate</span><span class="ico sky"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="1"/></svg></span></div><div class="tile-val">0%</div></div>
+          <div class="tile"><div class="tile-row"><span class="tile-label">Appointments</span><span class="ico mint"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg></span></div><div class="tile-val">0</div></div>
+          <div class="tile"><div class="tile-row"><span class="tile-label">Avg duration</span><span class="ico violet"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span></div><div class="tile-val">36s</div></div>
+          <div class="tile"><div class="tile-row"><span class="tile-label">Total cost</span><span class="ico amber"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></span></div><div class="tile-val">$615.10</div></div>
+          <div class="tile"><div class="tile-row"><span class="tile-label">Positive sentiment</span><span class="ico rose"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M8 14s1.5 2 4 2 4-2 4-2M9 9h.01M15 9h.01"/></svg></span></div><div class="tile-val">0%</div></div>
+        </div>
+
+        <div class="card card-pad">
+          <div class="card-title">Calls over time</div>
+          <div class="card-desc" style="margin-bottom:14px;">Daily inbound and outbound volume</div>
+          <div class="chart-placeholder">
+            <div class="bar" style="height:30%"></div><div class="bar" style="height:55%"></div><div class="bar" style="height:40%"></div>
+            <div class="bar" style="height:72%"></div><div class="bar" style="height:48%"></div><div class="bar" style="height:88%"></div>
+            <div class="bar" style="height:62%"></div><div class="bar" style="height:35%"></div><div class="bar" style="height:78%"></div>
+            <div class="bar" style="height:52%"></div><div class="bar" style="height:67%"></div><div class="bar" style="height:44%"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== OPERATIONS ===== -->
+      <section class="view" id="view-operations">
+        <div class="page-head">
+          <div>
+            <h1 class="page-title">Operations</h1>
+            <div class="page-sub">Run, monitor, and queue calls for this workspace.</div>
+          </div>
+          <div style="display:flex; gap:10px; align-items:center;">
+            <label class="kv" style="cursor:pointer;"><input type="checkbox"> Run test <span class="pill-note">(ignores call windows)</span></label>
+            <button class="btn btn-primary"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 3 14 9-14 9V3Z"/></svg>Run poll</button>
+            <span class="badge b-green"><span class="dot dot-active"></span>active</span>
+          </div>
+        </div>
+
+        <div class="subtabs" data-tabs="ops">
+          <div class="subtab active" data-pane="ops-overview">Overview</div>
+          <div class="subtab" data-pane="ops-queue">Call queue <span class="badge b-blue" style="margin-left:4px;">84</span></div>
+          <div class="subtab" data-pane="ops-schedule">Schedule</div>
+          <div class="subtab" data-pane="ops-outcomes">Outcomes</div>
+        </div>
+
+        <!-- Ops: Overview -->
+        <div class="subpane active" id="ops-overview">
+          <div class="tiles" style="margin-bottom:18px;">
+            <div class="tile"><div class="tile-row"><span class="tile-label">Agents</span><span class="ico sky"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="2"/><path d="M12 7v4M8 16h.01M16 16h.01"/></svg></span></div><div class="tile-val">3</div></div>
+            <div class="tile"><div class="tile-row"><span class="tile-label">Enrolled contacts</span><span class="ico mint"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.9"/></svg></span></div><div class="tile-val">159</div></div>
+            <div class="tile"><div class="tile-row"><span class="tile-label">Enroll tag</span><span class="ico violet"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.6 13.4 12 22l-9-9V3h10l7.6 7.6a2 2 0 0 1 0 2.8Z"/><circle cx="7.5" cy="7.5" r="1"/></svg></span></div><div class="tile-val mono" style="font-size:14px;margin-top:14px;">upsurgecallflowai</div></div>
+          </div>
+
+          <div class="grid g2" style="margin-bottom:18px;">
+            <div class="card card-pad">
+              <div class="card-head"><span class="ico sky"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3 19.5 19.5 0 0 1-6-6 19.8 19.8 0 0 1-3-8.6A2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 2 .7 2.9a2 2 0 0 1-.5 2.1L8.1 9.9a16 16 0 0 0 6 6l1.2-1.2a2 2 0 0 1 2.1-.4c.9.3 1.9.6 2.9.7a2 2 0 0 1 1.7 2Z"/></svg></span>
+                <div><div class="card-title">Test call</div><div class="card-desc">Dial any number now. Runs instantly, ignores call windows, isolated from the live queue and CRM.</div></div>
+              </div>
+              <div style="margin-top:14px;">
+                <div class="field"><label class="lbl">Agent</label><select class="control"><option>Seller Outgoing</option><option>Probate Outreach</option></select></div>
+                <div class="field"><label class="lbl">Phone number <span class="hint">E.164, e.g. +15551234567</span></label><input class="control mono" placeholder="+15551234567"></div>
+                <button class="btn btn-primary"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3 19.5 19.5 0 0 1-6-6 19.8 19.8 0 0 1-3-8.6A2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 2 .7 2.9a2 2 0 0 1-.5 2.1L8.1 9.9a16 16 0 0 0 6 6l1.2-1.2a2 2 0 0 1 2.1-.4c.9.3 1.9.6 2.9.7a2 2 0 0 1 1.7 2Z"/></svg>Place test call</button>
+              </div>
+            </div>
+
+            <div class="card card-pad">
+              <div class="card-head"><span class="ico amber"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h10M4 18h7"/></svg></span>
+                <div><div class="card-title">Operations scope</div><div class="card-desc">Filter schedules, queue actions, and contacts by outbound agent.</div></div>
+              </div>
+              <div style="margin-top:14px;">
+                <div class="field"><label class="lbl">Outbound agent</label><select class="control"><option>Seller Outgoing — active</option><option>Probate Outreach — draft</option></select></div>
+                <div style="display:flex; flex-wrap:wrap; gap:8px; margin-top:4px;">
+                  <span class="badge b-green"><span class="dot dot-active"></span>active</span>
+                  <span class="badge b-slate mono">sellercallqueue</span>
+                  <span class="badge b-slate">09:00–19:00 PT</span>
+                  <span class="badge b-blue">159 enrolled</span>
+                  <span class="badge b-amber">84 in queue</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card card-pad info info-mint" style="display:flex;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg>
+            <div>Last poll enqueued <b>84 dials</b> across 1 active outbound agent · scanned 159 · 84 eligible. Calls drip every 30s inside the 9am–7pm PT window.</div>
+          </div>
+        </div>
+
+        <!-- Ops: Queue -->
+        <div class="subpane" id="ops-queue">
+          <div class="toolbar">
+            <div class="muted"><b style="color:var(--ink-900)">84</b> in queue · 83 waiting · 1 on call</div>
+            <button class="btn btn-ghost btn-sm"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg>Refresh</button>
+          </div>
+          <div class="tbl-wrap">
+            <table>
+              <thead><tr><th style="width:50px">#</th><th>Contact</th><th>Agent</th><th>Status</th><th>Scheduled</th></tr></thead>
+              <tbody>
+                <tr><td class="mono c-sub">45</td><td><div class="c-name">Raul Nunez</div><div class="c-sub mono">+16614586099</div></td><td>Seller Outgoing</td><td><span class="badge b-amber">On call</span></td><td>2:43 PM</td></tr>
+                <tr><td class="mono c-sub">46</td><td><div class="c-name">Myrna Lee-Arcos</div><div class="c-sub mono">+16613784378</div></td><td>Seller Outgoing</td><td><span class="badge b-blue">Waiting</span></td><td>2:43 PM</td></tr>
+                <tr><td class="mono c-sub">47</td><td><div class="c-name">Myrick Thomas Therion</div><div class="c-sub mono">+16612298268</div></td><td>Seller Outgoing</td><td><span class="badge b-blue">Waiting</span></td><td>2:44 PM</td></tr>
+                <tr><td class="mono c-sub">48</td><td><div class="c-name">Curt Wayman</div><div class="c-sub mono">+16618089089</div></td><td>Seller Outgoing</td><td><span class="badge b-blue">Waiting</span></td><td>2:45 PM</td></tr>
+                <tr><td class="mono c-sub">49</td><td><div class="c-name">Della Frome</div><div class="c-sub mono">+16615550114</div></td><td>Seller Outgoing</td><td><span class="badge b-blue">Waiting</span></td><td>2:45 PM</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="pill-note" style="margin-top:10px;">Contacts are removed automatically after the call finishes and CRM write-back completes. Auto-refreshes every 10s.</div>
+        </div>
+
+        <!-- Ops: Schedule -->
+        <div class="subpane" id="ops-schedule">
+          <div class="toolbar">
+            <div class="muted"><b style="color:var(--ink-900)">158</b> upcoming · 1 finished</div>
+            <div style="display:flex; gap:10px; align-items:center;">
+              <div class="search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg><input class="control" placeholder="Search name or number"></div>
+              <select class="control" style="width:auto"><option>Seller Outgoing</option><option>Probate Outreach</option></select>
+            </div>
+          </div>
+
+          <div class="card card-pad info info-sky" style="display:flex; margin-bottom:14px;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3 8-8"/><path d="M20 12v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h9"/></svg>
+            <div style="flex:1; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+              <span><b>2 contacts</b> selected</span>
+              <span style="display:flex; gap:8px;">
+                <button class="btn btn-ghost btn-sm">Clear</button>
+                <button class="btn btn-primary btn-sm"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 3 14 9-14 9V3Z"/></svg>Queue calls now</button>
+              </span>
+            </div>
+          </div>
+
+          <div class="tbl-wrap">
+            <table>
+              <thead><tr><th style="width:40px"><input type="checkbox"></th><th>Contact</th><th>Attempts</th><th>Last call</th><th>Next call</th><th style="text-align:right">Test</th></tr></thead>
+              <tbody>
+                <tr><td><input type="checkbox" checked></td><td><div class="c-name">Daisy Hawkins</div><div class="c-sub mono">+16617928422</div></td><td>0 / 20</td><td class="c-sub">never</td><td><span class="badge b-blue">Fri, Jun 26 · 9:00 AM PT</span><div class="pill-note" style="margin-top:3px;">tomorrow · first in line</div></td><td style="text-align:right"><button class="btn btn-ghost btn-sm">Call now</button></td></tr>
+                <tr><td><input type="checkbox" checked></td><td><div class="c-name">Claudia Amigh</div><div class="c-sub mono">+16613042068</div></td><td>0 / 20</td><td class="c-sub">never</td><td><span class="badge b-blue">Fri, Jun 26 · 9:00 AM PT</span><div class="pill-note" style="margin-top:3px;">tomorrow · #2 in line</div></td><td style="text-align:right"><button class="btn btn-ghost btn-sm">Call now</button></td></tr>
+                <tr><td><input type="checkbox"></td><td><div class="c-name">Owen Brandt</div><div class="c-sub mono">+16615552201</div></td><td>3 / 20</td><td class="c-sub">Jun 23</td><td><span class="badge b-slate">Jun 27 · 9:00 AM PT</span><div class="pill-note" style="margin-top:3px;">cadence gap 4d</div></td><td style="text-align:right"><button class="btn btn-ghost btn-sm">Call now</button></td></tr>
+                <tr><td><input type="checkbox" disabled></td><td><div class="c-name">Priya Nadel</div><div class="c-sub mono">+16615559980</div></td><td>2 / 20</td><td class="c-sub">Jun 22</td><td><span class="badge b-green">Appointment booked</span><div class="pill-note" style="margin-top:3px;">terminal · removed from flow</div></td><td style="text-align:right"><button class="btn btn-ghost btn-sm btn-disabled">Call now</button></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Ops: Outcomes -->
+        <div class="subpane" id="ops-outcomes">
+          <div class="card card-pad">
+            <div class="card-head"><span class="ico violet"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.6 13.4 12 22l-9-9V3h10l7.6 7.6a2 2 0 0 1 0 2.8Z"/><circle cx="7.5" cy="7.5" r="1"/></svg></span>
+              <div><div class="card-title">Outcome taxonomy</div><div class="card-desc">How call outcomes map to CRM tags. Terminal outcomes remove the contact from the flow.</div></div>
+            </div>
+            <div class="divider"></div>
+            <div class="stack" style="--gap:0;">
+              <div class="row-between"><div><span style="font-weight:600">Appointment</span> <span class="c-sub mono" style="margin-left:8px">upsurge-appointment</span></div><span class="badge b-red">terminal</span></div>
+              <div class="divider" style="margin:12px 0"></div>
+              <div class="row-between"><div><span style="font-weight:600">Not interested</span> <span class="c-sub mono" style="margin-left:8px">upsurge-not-interested</span></div><span class="badge b-red">terminal</span></div>
+              <div class="divider" style="margin:12px 0"></div>
+              <div class="row-between"><div><span style="font-weight:600">Do not disturb</span> <span class="c-sub mono" style="margin-left:8px">upsurge-dnd</span></div><span class="badge b-red">terminal</span></div>
+              <div class="divider" style="margin:12px 0"></div>
+              <div class="row-between"><div><span style="font-weight:600">Callback requested</span> <span class="c-sub mono" style="margin-left:8px">upsurge-callback</span></div><span class="badge b-slate">re-enrolls</span></div>
+              <div class="divider" style="margin:12px 0"></div>
+              <div class="row-between"><div><span style="font-weight:600">Voicemail</span> <span class="c-sub mono" style="margin-left:8px">upsurge-voicemail</span></div><span class="badge b-slate">re-enrolls</span></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== AGENT DETAIL ===== -->
+      <section class="view" id="view-agent">
+        <div class="crumb" style="margin-bottom:14px; font-size:12.5px;">
+          <span class="nav-icon" style="width:14px;height:14px;color:var(--ink-400)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m15 18-6-6 6-6"/></svg></span>
+          <span class="muted" style="cursor:pointer" onclick="go('operations')">Operations</span>
+        </div>
+
+        <div class="page-head">
+          <div style="display:flex; gap:14px; align-items:center;">
+            <span class="ico sky" style="width:46px;height:46px;border-radius:13px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3 19.5 19.5 0 0 1-6-6 19.8 19.8 0 0 1-3-8.6A2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 2 .7 2.9a2 2 0 0 1-.5 2.1L8.1 9.9a16 16 0 0 0 6 6l1.2-1.2a2 2 0 0 1 2.1-.4c.9.3 1.9.6 2.9.7a2 2 0 0 1 1.7 2Z"/></svg></span>
+            <div>
+              <h1 class="page-title" id="agentTitle">AI Agent | Seller Outgoing</h1>
+              <div style="display:flex; gap:8px; align-items:center; margin-top:5px;">
+                <span class="badge b-green"><span class="dot dot-active"></span>active</span>
+                <span class="badge b-blue">Outbound</span>
+                <span class="c-sub mono">agent_2b2f5bf9e17e53da8ac28734df</span>
+              </div>
+            </div>
+          </div>
+          <div style="display:flex; gap:8px;">
+            <button class="btn btn-ghost" onclick="openModal()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>Duplicate</button>
+            <button class="btn btn-ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg>Pause</button>
+          </div>
+        </div>
+
+        <div class="subtabs" data-tabs="agent">
+          <div class="subtab active" data-pane="ag-overview">Overview</div>
+          <div class="subtab" data-pane="ag-call">Call &amp; Cadence</div>
+          <div class="subtab" data-pane="ag-crm">CRM &amp; Integrations</div>
+          <div class="subtab" data-pane="ag-tasks">Tasks &amp; Automations</div>
+          <div class="subtab" data-pane="ag-history">Call History</div>
+        </div>
+
+        <!-- Agent: Overview -->
+        <div class="subpane active" id="ag-overview">
+          <div class="grid g2">
+            <div class="card card-pad">
+              <div class="card-head"><span class="ico sky"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="2"/><path d="M12 7v4"/></svg></span><div class="card-title">Agent type</div></div>
+              <div style="margin-top:14px;">
+                <div class="field"><label class="lbl">Direction</label><div class="segmented"><span class="seg active">Outbound</span><span class="seg">Inbound</span></div></div>
+                <div class="field"><label class="lbl">Enrollment tag <span class="hint">CRM tag that enrolls contacts</span></label><input class="control mono" value="sellercallqueue"></div>
+                <div class="save-bar"><button class="btn btn-ghost btn-sm">Save type</button></div>
+              </div>
+            </div>
+
+            <div class="card card-pad">
+              <div class="card-head"><span class="ico violet"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3 19.5 19.5 0 0 1-6-6 19.8 19.8 0 0 1-3-8.6A2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 2 .7 2.9a2 2 0 0 1-.5 2.1L8.1 9.9a16 16 0 0 0 6 6l1.2-1.2a2 2 0 0 1 2.1-.4c.9.3 1.9.6 2.9.7a2 2 0 0 1 1.7 2Z"/></svg></span><div class="card-title">Retell linkage</div></div>
+              <div style="margin-top:14px;">
+                <div class="field"><label class="lbl">Retell agent ID</label><input class="control mono" value="agent_2b2f5bf9e17e53da8ac28734df"></div>
+                <div class="field"><label class="lbl">From-number <span class="hint">E.164</span></label><input class="control mono" value="+16616907781"></div>
+                <div class="save-bar"><button class="btn btn-ghost btn-sm">Save linkage</button></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="tiles" style="margin-top:18px;">
+            <div class="tile"><span class="tile-label">Enrolled</span><div class="tile-val">159</div></div>
+            <div class="tile"><span class="tile-label">In queue</span><div class="tile-val">84</div></div>
+            <div class="tile"><span class="tile-label">Calls (30d)</span><div class="tile-val">312</div></div>
+            <div class="tile"><span class="tile-label">Appointments</span><div class="tile-val">11</div></div>
+            <div class="tile"><span class="tile-label">Answer rate</span><div class="tile-val">100%</div></div>
+          </div>
+        </div>
+
+        <!-- Agent: Call & Cadence -->
+        <div class="subpane" id="ag-call">
+          <div class="card card-pad" style="margin-bottom:18px;">
+            <div class="card-head"><span class="ico sky"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span>
+              <div><div class="card-title">Call settings</div><div class="card-desc">Dialing rules for this agent. Times use the workspace timezone (America/Los_Angeles).</div></div>
+            </div>
+            <div class="divider"></div>
+            <div class="grid g3">
+              <div class="field"><label class="lbl">Max calls per day</label><input class="control" value="400"></div>
+              <div class="field"><label class="lbl">Max total calls <span class="hint">blank = ∞</span></label><input class="control" placeholder="unlimited"></div>
+              <div class="field"><label class="lbl">Max attempts per contact</label><input class="control" value="20"></div>
+              <div class="field"><label class="lbl">Drip spacing (seconds)</label><input class="control" value="30"></div>
+              <div class="field"><label class="lbl">Call window start</label><input class="control" type="time" value="09:00"></div>
+              <div class="field"><label class="lbl">Call window end</label><input class="control" type="time" value="19:00"></div>
+              <div class="field"><label class="lbl">Daily run at <span class="hint">when the poll fires</span></label><input class="control" type="time" value="09:00"></div>
+            </div>
+            <div class="info info-amber" style="margin-top:6px;">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg>
+              <div>A hard 9am–7pm ET guard always applies on top of this window — calls can never dial outside business hours even if these times are widened.</div>
+            </div>
+            <div class="save-bar"><button class="btn btn-primary btn-sm">Save call settings</button></div>
+          </div>
+
+          <div class="card card-pad">
+            <div class="card-head" style="justify-content:space-between;">
+              <div style="display:flex; gap:12px; align-items:center;">
+                <span class="ico mint"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 2v4M16 2v4M3 10h18"/><rect x="3" y="4" width="18" height="18" rx="2"/></svg></span>
+                <div><div class="card-title">Cadence day-gaps</div><div class="card-desc">Days to wait after each attempt before the next dial. Attempt 1 can be 0 (same day).</div></div>
+              </div>
+              <select class="control" style="width:auto"><option>Apply preset…</option><option>Aggressive (0,1,1,2,3)</option><option>Standard (1,2,3,5,7)</option><option>Gentle (2,4,7,10)</option></select>
+            </div>
+            <div class="divider"></div>
+            <div class="cad-row"><span class="cad-label">After attempt 1</span><input class="control" value="1"><span class="cad-arrow">day → attempt 2</span><span class="trash"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="15" height="15"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/></svg></span></div>
+            <div class="cad-row"><span class="cad-label">After attempt 2</span><input class="control" value="1"><span class="cad-arrow">day → attempt 3</span><span class="trash"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="15" height="15"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/></svg></span></div>
+            <div class="cad-row"><span class="cad-label">After attempt 3</span><input class="control" value="1"><span class="cad-arrow">day → attempt 4</span><span class="trash"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="15" height="15"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/></svg></span></div>
+            <div class="cad-row"><span class="cad-label">After attempt 4</span><input class="control" value="1"><span class="cad-arrow">day → attempt 5</span><span class="trash"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="15" height="15"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/></svg></span></div>
+            <button class="btn btn-ghost btn-sm" style="margin-top:6px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>Add gap</button>
+            <div class="save-bar"><button class="btn btn-primary btn-sm">Save cadence</button></div>
+          </div>
+        </div>
+
+        <!-- Agent: CRM & Integrations -->
+        <div class="subpane" id="ag-crm">
+          <div class="card card-pad">
+            <div class="card-head"><span class="ico amber"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="7.5" cy="15.5" r="4.5"/><path d="m10.5 12.5 6-6M14 5l3 3M18 9l2-2-3-3-2 2"/></svg></span>
+              <div><div class="card-title">CRM connection</div><div class="card-desc">Where this agent reads contacts and writes outcomes back.</div></div>
+            </div>
+            <div class="divider"></div>
+            <div class="info info-mint" style="margin-bottom:16px;">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6 9 17l-5-5"/></svg>
+              <div>Credentials stored (encrypted) · OAuth connection healthy. Token auto-refreshes.</div>
+            </div>
+            <div class="grid g2">
+              <div class="field"><label class="lbl">Provider</label><select class="control"><option>HighLevel</option><option>Follow Up Boss</option></select></div>
+              <div class="field"><label class="lbl">Connection</label>
+                <div style="display:flex; gap:8px;">
+                  <a class="btn btn-ghost" style="flex:1; justify-content:center;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 12a3 3 0 0 0 3 3h3a3 3 0 0 0 0-6M15 12a3 3 0 0 0-3-3H9a3 3 0 0 0 0 6"/></svg>Reconnect via OAuth</a>
+                </div>
+              </div>
+              <div class="field"><label class="lbl">Access token <span class="hint">leave blank to keep current</span></label><input class="control mono" type="password" placeholder="eyJ…"></div>
+              <div class="field"><label class="lbl">Location ID <span class="hint">leave blank to keep current</span></label><input class="control mono" placeholder="loc_…"></div>
+            </div>
+            <div class="info info-sky" style="margin-top:6px;">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg>
+              <div>OAuth keeps the HighLevel token fresh automatically. Pasting an access token works too, but it expires and stops syncing.</div>
+            </div>
+            <div class="save-bar" style="gap:8px;">
+              <button class="btn btn-ghost btn-sm">Use workspace connection</button>
+              <button class="btn btn-primary btn-sm">Save CRM</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Agent: Tasks & Automations -->
+        <div class="subpane" id="ag-tasks">
+          <div class="stack">
+            <div class="card card-pad">
+              <div class="card-head"><span class="ico sky"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3 8-8"/><path d="M20 12v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h9"/></svg></span>
+                <div style="flex:1"><div class="card-title">Follow-up tasks</div><div class="card-desc">Create a CRM task after qualifying calls.</div></div>
+                <span class="segmented"><span class="seg active">On</span><span class="seg">Off</span></span>
+              </div>
+              <div class="divider"></div>
+              <div class="grid g2">
+                <div class="field"><label class="lbl">Task name template</label><input class="control" value="Follow up with {contact_name}"></div>
+                <div class="field"><label class="lbl">Task type</label><select class="control"><option>Call</option><option>Email</option><option>Text</option></select></div>
+                <div class="field"><label class="lbl">Assignee(s) <span class="hint">from CRM users</span></label><select class="control"><option>Austin G. (1)</option><option>Team — Sales (1,17)</option></select></div>
+                <div class="field"><label class="lbl">Due offset (minutes)</label><input class="control" value="60"></div>
+                <div class="field"><label class="lbl">Only for outcomes</label><input class="control" placeholder="callback, appointment (blank = all)"></div>
+              </div>
+            </div>
+
+            <div class="card card-pad">
+              <div class="card-head"><span class="ico violet"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12h16M12 4l8 8-8 8"/></svg></span>
+                <div style="flex:1"><div class="card-title">Post-call webhook <span class="badge b-violet" style="margin-left:6px;">HighLevel</span></div><div class="card-desc">Fire a HighLevel workflow webhook after the call is processed.</div></div>
+                <span class="segmented"><span class="seg active">On</span><span class="seg">Off</span></span>
+              </div>
+              <div class="divider"></div>
+              <div class="grid g2">
+                <div class="field"><label class="lbl">Webhook URL</label><input class="control mono" placeholder="https://services.leadconnectorhq.com/hooks/…"></div>
+                <div class="field"><label class="lbl">Fire mode</label><select class="control"><option>Async (fire and forget)</option><option>Sync (await response)</option></select></div>
+                <div class="field"><label class="lbl">Only for outcomes</label><input class="control" placeholder="appointment (blank = all)"></div>
+              </div>
+            </div>
+
+            <div class="card card-pad">
+              <div class="card-head" style="justify-content:space-between;">
+                <div style="display:flex; gap:12px; align-items:center;">
+                  <span class="ico mint"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v4H4zM4 10h10v4H4zM4 16h7v4H4z"/></svg></span>
+                  <div><div class="card-title">Opportunity field mapping <span class="badge b-violet" style="margin-left:6px;">HighLevel</span></div><div class="card-desc">Write call data into HighLevel opportunity fields.</div></div>
+                </div>
+                <button class="btn btn-ghost btn-sm"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg>Refresh fields</button>
+              </div>
+              <div class="divider"></div>
+              <div class="map-row"><select class="control"><option>Outcome</option></select><span style="text-align:center;color:var(--ink-400)">→</span><select class="control"><option>opportunity.call_outcome</option></select></div>
+              <div class="map-row"><select class="control"><option>Call summary</option></select><span style="text-align:center;color:var(--ink-400)">→</span><select class="control"><option>opportunity.last_call_notes</option></select></div>
+              <button class="btn btn-ghost btn-sm" style="margin-top:10px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>Add mapping</button>
+            </div>
+
+            <div class="card card-pad">
+              <div class="card-head" style="justify-content:space-between;">
+                <div style="display:flex; gap:12px; align-items:center;">
+                  <span class="ico amber"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="6" height="18" rx="1"/><rect x="10" y="3" width="6" height="13" rx="1"/><rect x="17" y="3" width="4" height="8" rx="1"/></svg></span>
+                  <div><div class="card-title">Pipeline stage routing <span class="badge b-violet" style="margin-left:6px;">HighLevel</span></div><div class="card-desc">Move the contact's opportunity to a stage based on the call outcome — no hand-built workflow needed.</div></div>
+                </div>
+                <div style="display:flex; gap:8px;">
+                  <select class="control" style="width:auto"><option>Apply preset…</option></select>
+                  <button class="btn btn-ghost btn-sm">Refresh pipelines</button>
+                </div>
+              </div>
+              <div class="divider"></div>
+              <div class="field"><label class="lbl">Pipeline</label><select class="control"><option>Seller Pipeline</option><option>Buyer Pipeline</option></select></div>
+              <div class="map-row"><span class="badge b-green" style="justify-self:start">Appointment</span><span style="text-align:center;color:var(--ink-400)">→</span><select class="control"><option>Appointment Booked</option></select></div>
+              <div class="map-row"><span class="badge b-blue" style="justify-self:start">Callback</span><span style="text-align:center;color:var(--ink-400)">→</span><select class="control"><option>Nurture</option></select></div>
+              <div class="map-row"><span class="badge b-red" style="justify-self:start">Not interested</span><span style="text-align:center;color:var(--ink-400)">→</span><select class="control"><option>Closed Lost</option></select></div>
+            </div>
+
+            <div class="save-bar"><button class="btn btn-primary btn-sm">Save tasks &amp; automations</button></div>
+          </div>
+        </div>
+
+        <!-- Agent: Call History -->
+        <div class="subpane" id="ag-history">
+          <div class="toolbar"><div class="card-title" style="font-size:14px;">Calls from this agent</div><div class="muted">312 calls · last 30 days</div></div>
+          <div class="tbl-wrap">
+            <table>
+              <thead><tr><th>#</th><th>Date</th><th>Duration</th><th>To</th><th>Status</th><th>Outcome</th><th>Task</th><th>Summary</th></tr></thead>
+              <tbody>
+                <tr><td class="mono c-sub">3</td><td class="c-sub">Jun 24, 2:41 PM</td><td>1m 12s</td><td class="mono">+16614586099</td><td><span class="badge b-green">completed</span></td><td>Appointment</td><td><span class="badge b-green">✓</span></td><td class="c-sub">Booked a listing consult for Thu 10am.</td></tr>
+                <tr><td class="mono c-sub">2</td><td class="c-sub">Jun 23, 3:02 PM</td><td>0m 41s</td><td class="mono">+16613784378</td><td><span class="badge b-green">completed</span></td><td>Callback</td><td class="c-sub">—</td><td class="c-sub">Asked to be called back next week.</td></tr>
+                <tr><td class="mono c-sub">1</td><td class="c-sub">Jun 22, 9:18 AM</td><td>0m 08s</td><td class="mono">+16612298268</td><td><span class="badge b-green">completed</span></td><td>Voicemail</td><td class="c-sub">—</td><td class="c-sub">Left voicemail, no answer.</td></tr>
+                <tr><td class="mono c-sub">—</td><td class="c-sub">Jun 21, 4:55 PM</td><td>—</td><td class="mono">+16618089089</td><td><span class="badge b-red">failed</span></td><td class="c-sub">—</td><td class="c-sub">—</td><td class="c-sub">Carrier rejected — invalid number.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+    </div>
+  </div>
+</div>
+
+<!-- Duplicate modal -->
+<div class="modal-back" id="dupModal" onclick="if(event.target===this)closeModal()">
+  <div class="modal">
+    <h3>Duplicate agent</h3>
+    <div class="card-desc" style="margin-bottom:16px;">Copy settings from <b>Seller Outgoing</b>. The new agent starts as draft.</div>
+    <div class="field"><label class="lbl">Agent name</label><input class="control" placeholder="Copy of Seller Outgoing"></div>
+    <div class="field"><label class="lbl">Enrollment tag</label><input class="control mono" placeholder="sellercallqueue-2"></div>
+    <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:18px;">
+      <button class="btn btn-ghost btn-sm" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary btn-sm" onclick="closeModal()">Duplicate agent</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  const agentData = {
+    seller:  { title:"AI Agent | Seller Outgoing", dir:"Outbound", status:"active", dot:"dot-active", b:"b-green" },
+    buyer:   { title:"AI Agent | Buyer Concierge", dir:"Inbound",  status:"active", dot:"dot-active", b:"b-green" },
+    probate: { title:"AI Agent | Probate Outreach", dir:"Outbound", status:"draft", dot:"dot-draft", b:"b-slate" },
+  };
+  const crumbLeaf = document.getElementById('crumbLeaf');
+
+  function setActiveNav(view, agent){
+    document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
+    if(view==='agent'){
+      const el=document.querySelector(`.nav-item[data-agent="${agent}"]`);
+      if(el) el.classList.add('active');
+    } else {
+      const el=document.querySelector(`.nav-item[data-view="${view}"]:not([data-agent])`);
+      if(el) el.classList.add('active');
+    }
+  }
+
+  function showView(view){
+    document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
+    document.getElementById('view-'+view).classList.add('active');
+    document.querySelector('.content').scrollTo?.(0,0);
+    window.scrollTo(0,0);
+  }
+
+  function go(view, agent){
+    showView(view);
+    setActiveNav(view, agent);
+    if(view==='agent' && agent){
+      const d=agentData[agent];
+      document.getElementById('agentTitle').textContent=d.title;
+      crumbLeaf.textContent=d.title.replace('AI Agent | ','');
+    } else {
+      crumbLeaf.textContent = view.charAt(0).toUpperCase()+view.slice(1);
+    }
+  }
+
+  document.querySelectorAll('.nav-item[data-view]').forEach(item=>{
+    item.addEventListener('click',()=>go(item.dataset.view, item.dataset.agent));
+  });
+
+  // sub-tabs
+  document.querySelectorAll('.subtabs').forEach(group=>{
+    group.querySelectorAll('.subtab').forEach(tab=>{
+      tab.addEventListener('click',()=>{
+        group.querySelectorAll('.subtab').forEach(t=>t.classList.remove('active'));
+        tab.classList.add('active');
+        const scope = tab.closest('.view');
+        scope.querySelectorAll('.subpane').forEach(p=>p.classList.remove('active'));
+        scope.querySelector('#'+tab.dataset.pane).classList.add('active');
+      });
+    });
+  });
+
+  // segmented toggles (visual)
+  document.querySelectorAll('.segmented').forEach(seg=>{
+    seg.querySelectorAll('.seg').forEach(s=>{
+      s.addEventListener('click',()=>{ seg.querySelectorAll('.seg').forEach(x=>x.classList.remove('active')); s.classList.add('active'); });
+    });
+  });
+
+  // add agent (demo)
+  let addCount=0;
+  function addAgent(e){
+    e.stopPropagation();
+    addCount++;
+    const id='new'+addCount;
+    agentData[id]={ title:"AI Agent | New Agent "+addCount, dir:"Outbound", status:"draft", dot:"dot-draft", b:"b-slate" };
+    const div=document.createElement('div');
+    div.className='nav-item agent-nav';
+    div.dataset.view='agent'; div.dataset.agent=id;
+    div.innerHTML='<span class="dot dot-draft"></span><span class="nav-label"><span class="an-name">New Agent '+addCount+'</span><span class="an-sub">Outbound · draft</span></span>';
+    div.addEventListener('click',()=>go('agent',id));
+    document.getElementById('agentNav').appendChild(div);
+    go('agent',id);
+  }
+
+  // light / dark theme toggle
+  function toggleTheme(){
+    const html=document.documentElement;
+    html.setAttribute('data-theme', html.getAttribute('data-theme')==='dark' ? 'light' : 'dark');
+  }
+
+  function openModal(){ document.getElementById('dupModal').classList.add('open'); }
+  function closeModal(){ document.getElementById('dupModal').classList.remove('open'); }
+</script>
+</body>
+</html>

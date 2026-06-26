@@ -176,6 +176,8 @@ export interface FubCredentials {
 export interface HighLevelCredentials {
   accessToken: string;
   locationId: string;
+  /** Optional location-specific Call Conversation Provider ID for playable call logs. */
+  callProviderId?: string;
   /** OAuth refresh token. Present when connected via OAuth; absent for a
    *  legacy hand-pasted static token (which then can't be auto-refreshed). */
   refreshToken?: string;

@@ -110,7 +110,8 @@ Next.js app, which runs the OAuth routes) and **Railway** (the worker):
 ```bash
 HIGHLEVEL_CLIENT_ID=<your client id>
 HIGHLEVEL_CLIENT_SECRET=<your client secret>
-HIGHLEVEL_CALL_PROVIDER_ID=<call conversation provider id>
+HIGHLEVEL_CALL_PROVIDER_IDS={"<location id>":"<call conversation provider id>"}
+HIGHLEVEL_CALL_PROVIDER_ID=<optional fallback provider id>
 ```
 
 (These keys are already listed in `.env.example`.) Make sure each environment's
@@ -143,7 +144,8 @@ you need two things beyond OAuth:
 
 1. In the connected HighLevel sub-account, go to **Settings → Conversation Providers**.
 2. Add a provider with **Type: Call** (name it e.g. `UpSurge AI Calls`).
-3. Copy the provider **ID** — this becomes `HIGHLEVEL_CALL_PROVIDER_ID`.
+3. Copy the provider **ID** — this becomes the value for that location in
+   `HIGHLEVEL_CALL_PROVIDER_IDS`.
 
 Call providers log external calls only; they do not replace the location's voice/SIP
 connection.
@@ -151,7 +153,7 @@ connection.
 ### B. Set the env var on Vercel and Railway
 
 ```bash
-HIGHLEVEL_CALL_PROVIDER_ID=<provider id from step A>
+HIGHLEVEL_CALL_PROVIDER_IDS={"<location id>":"<provider id from step A>"}
 ```
 
 After each analyzed call, UpSurge writes:
@@ -159,8 +161,13 @@ After each analyzed call, UpSurge writes:
 2. A **Conversations Call message** with the recording attachment (play button),
    when the provider ID is set and OAuth includes the conversation scopes above.
 
-Without `HIGHLEVEL_CALL_PROVIDER_ID`, contacts only get a note with a clickable
-recording URL — functionally logged, but not the same UX as FUB team call logs.
+Without a matching provider id, contacts only get a note with a clickable recording
+URL — functionally logged, but not the same UX as FUB team call logs.
+
+`HIGHLEVEL_CALL_PROVIDER_ID` is still supported as a fallback for older
+single-location installs. Multi-location deployments should use
+`HIGHLEVEL_CALL_PROVIDER_IDS` because HighLevel provider access is scoped to the
+sub-account where the provider is installed.
 
 ### C. Verify writeback
 
@@ -171,7 +178,8 @@ set -a && source .env.local && set +a && npx tsx scripts/diagnose-hl-writeback.t
 ```
 
 Confirm:
-- `HIGHLEVEL_CALL_PROVIDER_ID env: set`
+- `HIGHLEVEL_CALL_PROVIDER_IDS` has an entry for the location, or the fallback
+  `HIGHLEVEL_CALL_PROVIDER_ID env` is set
 - Granted scopes include `conversations.*`
 - Call messages (`TYPE_CALL`) appear in the contact's conversation
 
@@ -182,6 +190,16 @@ Check the `calls` row in Supabase after a test call:
 
 If the provider ID or scopes are missing, expect `recording_logged = false` and a
 `crm_error` mentioning `playableCall`.
+
+To replay missed playable recordings after fixing provider access, run:
+
+```bash
+npx tsx scripts/backfill-hl-recordings.ts --agent-id <agentUuid> --dry-run
+npx tsx scripts/backfill-hl-recordings.ts --agent-id <agentUuid> --apply
+```
+
+The backfill script only creates missing HighLevel call messages. It first checks
+for an existing message with the same recording attachment, so it is safe to rerun.
 
 ---
 
@@ -211,4 +229,4 @@ If the provider ID or scopes are missing, expect `recording_logged = false` and 
 | Redirect (prod) | `https://upsurgeprosai.com/api/oauth/crm/callback` |
 | Redirect (local) | `http://localhost:3000/api/oauth/crm/callback` |
 | Scopes | `contacts.readonly contacts.write opportunities.readonly opportunities.write locations.readonly users.readonly conversations.readonly conversations.write conversations/message.readonly conversations/message.write` |
-| Env vars | `HIGHLEVEL_CLIENT_ID`, `HIGHLEVEL_CLIENT_SECRET`, `HIGHLEVEL_CALL_PROVIDER_ID` (Vercel + Railway + `.env.local`) |
+| Env vars | `HIGHLEVEL_CLIENT_ID`, `HIGHLEVEL_CLIENT_SECRET`, `HIGHLEVEL_CALL_PROVIDER_IDS` or fallback `HIGHLEVEL_CALL_PROVIDER_ID` (Vercel + Railway + `.env.local`) |

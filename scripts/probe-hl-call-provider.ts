@@ -11,6 +11,7 @@ loadEnv({ path: ".env.local" });
 import { createClient } from "@supabase/supabase-js";
 import { decryptJson } from "@/lib/crypto";
 import { getCrmAdapterForAgent } from "@/lib/crm";
+import { resolveHighLevelCallProviderId } from "@/lib/crm/highlevel";
 import type { Agent, Workspace } from "@/types";
 
 const AGENT_ID = "3c3110ff-a610-48c2-aa98-f680c8c9b9fc";
@@ -20,7 +21,8 @@ async function main() {
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !serviceKey) throw new Error("Missing Supabase env vars");
 
-  console.log(`HIGHLEVEL_CALL_PROVIDER_ID env: ${process.env.HIGHLEVEL_CALL_PROVIDER_ID?.trim() ? "set" : "MISSING"}`);
+  console.log(`HIGHLEVEL_CALL_PROVIDER_IDS env: ${process.env.HIGHLEVEL_CALL_PROVIDER_IDS?.trim() ? "set" : "MISSING"}`);
+  console.log(`HIGHLEVEL_CALL_PROVIDER_ID fallback env: ${process.env.HIGHLEVEL_CALL_PROVIDER_ID?.trim() ? "set" : "MISSING"}`);
 
   const supabase = createClient(url, serviceKey);
   const { data: agent } = await supabase
@@ -39,9 +41,14 @@ async function main() {
 
   const encrypted = agent.crm_credentials_encrypted ?? workspace.crm_credentials_encrypted;
   if (!encrypted) throw new Error("no HL credentials on agent or workspace");
-  const creds = decryptJson<{ locationId: string; accessToken: string }>(encrypted);
+  const creds = decryptJson<{ locationId: string; accessToken: string; callProviderId?: string }>(encrypted);
   console.log(`Agent: ${agent.name}`);
   console.log(`Location ID: ${creds.locationId}`);
+  console.log(
+    `Resolved call provider: ${
+      resolveHighLevelCallProviderId(creds.locationId, creds.callProviderId) ? "set" : "MISSING"
+    }`
+  );
   console.log(`CRM status: ${agent.crm_status ?? "connected (null)"}`);
 
   const crm = getCrmAdapterForAgent(agent, workspace) as any;

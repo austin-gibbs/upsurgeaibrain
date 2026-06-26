@@ -2,14 +2,122 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * Theme tokens. Values are RGB channel triplets ("r g b") so Tailwind can
+ * inject alpha via the `/<opacity>` modifier (e.g. border-ink-200/50). Accent
+ * surfaces keep full color strings (they carry their own alpha in dark mode and
+ * are never used with Tailwind opacity modifiers). Palette is lifted straight
+ * from design/workspace-redesign-mockup.html.
+ */
 :root {
   color-scheme: light;
-  --bg-page: #f7f8fb;
-  --bg-card: #ffffff;
-  --text-primary: #0f172a;
-  --text-secondary: #64748b;
-  --border-subtle: rgba(15, 23, 42, 0.06);
-  --ring-focus: #2f6bff;
+
+  /* Electric blue brand ramp */
+  --brand-50: 232 241 255;
+  --brand-100: 207 226 255;
+  --brand-200: 166 202 255;
+  --brand-500: 10 132 255;
+  --brand-600: 10 111 224;
+  --brand-700: 10 85 173;
+
+  /* Neutral ink ramp */
+  --ink-50: 245 247 251;
+  --ink-100: 238 241 247;
+  --ink-200: 226 231 240;
+  --ink-300: 203 210 224;
+  --ink-400: 139 150 171;
+  --ink-500: 95 107 128;
+  --ink-600: 70 82 106;
+  --ink-700: 46 57 78;
+  --ink-800: 25 33 47;
+  --ink-900: 10 14 23;
+
+  /* Semantic surfaces */
+  --surface: 255 255 255;
+  --surface-2: 243 246 251;
+  --bg: 255 255 255;
+  --text: 10 14 23;
+
+  /* Accents (full colors) */
+  --mint-bg: #ecfdf5;
+  --mint-fg: #059669;
+  --mint-icon: #10b981;
+  --sky-bg: #e8f1ff;
+  --sky-fg: #0a6fe0;
+  --sky-icon: #0a84ff;
+  --violet-bg: #eef0ff;
+  --violet-fg: #4f57d2;
+  --violet-icon: #6366f1;
+  --amber-bg: #fffbeb;
+  --amber-fg: #d97706;
+  --amber-icon: #f59e0b;
+  --rose-bg: #fff1f2;
+  --rose-fg: #e11d48;
+  --rose-icon: #f43f5e;
+
+  /* Gradients + shadows + chart helpers */
+  --brand-gradient: linear-gradient(135deg, #0a6bff 0%, #22b3ff 100%);
+  --insight-gradient: linear-gradient(135deg, #0a55ad 0%, #0a84ff 50%, #22b3ff 100%);
+  --page-gradient: linear-gradient(180deg, #f5f7fb 0%, #eef1f7 100%);
+  --shadow-soft: 0 1px 2px rgba(10, 14, 23, 0.04), 0 4px 16px rgba(10, 14, 23, 0.05);
+  --shadow-card: 0 1px 3px rgba(10, 14, 23, 0.04), 0 8px 24px rgba(10, 14, 23, 0.07);
+  --shadow-lifted: 0 2px 4px rgba(10, 14, 23, 0.05), 0 12px 32px rgba(10, 14, 23, 0.1);
+  --shadow-pill: 0 1px 2px rgba(10, 14, 23, 0.06);
+  --chart-grid: #e2e8f0;
+  --chart-empty: #f1f5f9;
+}
+
+html[data-theme="dark"] {
+  color-scheme: dark;
+
+  --brand-50: 16 36 63;
+  --brand-100: 23 51 84;
+  --brand-200: 31 79 134;
+  --brand-500: 47 155 255;
+  --brand-600: 31 139 255;
+  --brand-700: 156 200 255;
+
+  --ink-50: 11 13 17;
+  --ink-100: 19 21 27;
+  --ink-200: 39 43 54;
+  --ink-300: 58 64 81;
+  --ink-400: 126 135 153;
+  --ink-500: 154 163 181;
+  --ink-600: 180 188 205;
+  --ink-700: 204 211 223;
+  --ink-800: 228 232 239;
+  --ink-900: 244 246 250;
+
+  --surface: 26 29 37;
+  --surface-2: 34 38 47;
+  --bg: 11 13 17;
+  --text: 244 246 250;
+
+  --mint-bg: rgba(16, 185, 129, 0.15);
+  --mint-fg: #34d399;
+  --mint-icon: #34d399;
+  --sky-bg: rgba(10, 132, 255, 0.16);
+  --sky-fg: #5aa9ff;
+  --sky-icon: #2f9bff;
+  --violet-bg: rgba(99, 102, 241, 0.18);
+  --violet-fg: #a3abff;
+  --violet-icon: #818cf8;
+  --amber-bg: rgba(245, 158, 11, 0.16);
+  --amber-fg: #fbbf24;
+  --amber-icon: #fbbf24;
+  --rose-bg: rgba(244, 63, 94, 0.16);
+  --rose-fg: #fb7185;
+  --rose-icon: #fb7185;
+
+  --brand-gradient: linear-gradient(135deg, #0a6bff 0%, #22b3ff 100%);
+  --insight-gradient: linear-gradient(135deg, #0a55ad 0%, #0a84ff 50%, #22b3ff 100%);
+  --page-gradient: linear-gradient(180deg, #0b0d11 0%, #0b0d11 100%);
+  --shadow-soft: 0 1px 2px rgba(0, 0, 0, 0.5), 0 4px 16px rgba(0, 0, 0, 0.45);
+  --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.5), 0 8px 24px rgba(0, 0, 0, 0.55);
+  --shadow-lifted: 0 2px 4px rgba(0, 0, 0, 0.5), 0 16px 40px rgba(0, 0, 0, 0.6);
+  --shadow-pill: 0 1px 2px rgba(0, 0, 0, 0.5);
+  --chart-grid: rgba(255, 255, 255, 0.1);
+  --chart-empty: #13151b;
 }
 
 html,
@@ -19,33 +127,34 @@ body {
 }
 
 body {
-  background-color: var(--bg-page);
-  color: var(--text-primary);
+  background-color: rgb(var(--bg));
+  color: rgb(var(--text));
+  transition: background-color 0.25s ease, color 0.25s ease;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   font-feature-settings: "cv02", "cv03", "cv04", "cv11";
 }
 
 ::selection {
-  background-color: #d9e6ff;
-  color: #1842b4;
+  background-color: rgb(var(--brand-100));
+  color: rgb(var(--brand-700));
 }
 
 *:focus-visible {
-  outline: 2px solid var(--ring-focus);
+  outline: 2px solid rgb(var(--brand-500));
   outline-offset: 2px;
 }
 
 /* Thin scrollbars for the app chrome */
 * {
   scrollbar-width: thin;
-  scrollbar-color: #cdd4e0 transparent;
+  scrollbar-color: rgb(var(--ink-300)) transparent;
 }
 *::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 *::-webkit-scrollbar-thumb {
-  background: #cdd4e0;
+  background: rgb(var(--ink-300));
   border-radius: 9999px;
 }

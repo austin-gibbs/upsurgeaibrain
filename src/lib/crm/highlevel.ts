@@ -35,6 +35,36 @@ const API_VERSION = "2021-07-28";
 const CONVERSATIONS_API_VERSION = "2021-04-15";
 const MAX_429_RETRIES = 2;
 
+/**
+ * Resolve the Call Conversation Provider used for playable call logs.
+ *
+ * HighLevel provider access is scoped to the installed sub-account/location. A
+ * single global provider id works only while every connected location has that
+ * provider installed; multi-tenant deployments need a per-location override.
+ */
+export function resolveHighLevelCallProviderId(
+  locationId: string,
+  credentialProviderId?: string | null
+): string | null {
+  const fromCreds = credentialProviderId?.trim();
+  if (fromCreds) return fromCreds;
+
+  const rawMap = process.env.HIGHLEVEL_CALL_PROVIDER_IDS?.trim();
+  if (rawMap) {
+    try {
+      const parsed = JSON.parse(rawMap) as Record<string, unknown>;
+      const mapped = parsed[locationId];
+      if (typeof mapped === "string" && mapped.trim()) return mapped.trim();
+    } catch {
+      console.warn(
+        "[highlevel] HIGHLEVEL_CALL_PROVIDER_IDS is not valid JSON; falling back to HIGHLEVEL_CALL_PROVIDER_ID"
+      );
+    }
+  }
+
+  return process.env.HIGHLEVEL_CALL_PROVIDER_ID?.trim() || null;
+}
+
 /** Build the customFields array for HighLevel opportunity create/update bodies. */
 export function buildOpportunityCustomFieldsPayload(
   customFields?: OpportunityCustomFieldInput[]
@@ -205,6 +235,7 @@ export class HighLevelAdapter implements CrmAdapter {
   readonly provider = "highlevel" as const;
   private token: string;
   private locationId: string;
+  private callProviderId?: string;
   private refreshToken?: string;
   private expiresAt?: number;
   private onTokensRefreshed?: HighLevelTokenPersistor;
@@ -217,6 +248,7 @@ export class HighLevelAdapter implements CrmAdapter {
   ) {
     this.token = creds.accessToken;
     this.locationId = creds.locationId;
+    this.callProviderId = creds.callProviderId;
     this.refreshToken = creds.refreshToken;
     this.expiresAt = creds.expiresAt;
     this.onTokensRefreshed = onTokensRefreshed;
@@ -435,10 +467,10 @@ export class HighLevelAdapter implements CrmAdapter {
       return result;
     }
 
-    const providerId = process.env.HIGHLEVEL_CALL_PROVIDER_ID?.trim();
+    const providerId = resolveHighLevelCallProviderId(this.locationId, this.callProviderId);
     if (!providerId) {
       warnings.push(
-        "playableCall: HIGHLEVEL_CALL_PROVIDER_ID is not set — only a note with recording link was written"
+        `playableCall: no HighLevel Call Conversation Provider is configured for location ${this.locationId} — set callProviderId on the stored credentials, HIGHLEVEL_CALL_PROVIDER_IDS for this location, or HIGHLEVEL_CALL_PROVIDER_ID as a fallback`
       );
       result.warnings = warnings;
       return result;

@@ -1,36 +1,45 @@
 import type { Config } from "tailwindcss";
 
+// Colors are backed by CSS variables defined in src/app/globals.css so the
+// whole app re-themes between light/dark by flipping html[data-theme]. Brand /
+// ink / surface use RGB channel triplets (rgb(var(--x) / <alpha-value>)) so the
+// `/<opacity>` modifier keeps working; accent surfaces are plain colors.
 const config: Config = {
+  darkMode: ["selector", '[data-theme="dark"]'],
   content: ["./src/**/*.{ts,tsx}", "./src/app/globals.css"],
   theme: {
     extend: {
       colors: {
         brand: {
-          50: "#eef4ff",
-          100: "#d9e6ff",
-          200: "#b8d0ff",
-          500: "#2f6bff",
-          600: "#1f54e6",
-          700: "#1842b4",
+          50: "rgb(var(--brand-50) / <alpha-value>)",
+          100: "rgb(var(--brand-100) / <alpha-value>)",
+          200: "rgb(var(--brand-200) / <alpha-value>)",
+          500: "rgb(var(--brand-500) / <alpha-value>)",
+          600: "rgb(var(--brand-600) / <alpha-value>)",
+          700: "rgb(var(--brand-700) / <alpha-value>)",
         },
         ink: {
-          50: "#f7f8fb",
-          100: "#f1f3f8",
-          200: "#e4e8f0",
-          300: "#cdd4e0",
-          400: "#94a0b4",
-          500: "#64748b",
-          600: "#475569",
-          700: "#334155",
-          800: "#1e293b",
-          900: "#0f172a",
+          50: "rgb(var(--ink-50) / <alpha-value>)",
+          100: "rgb(var(--ink-100) / <alpha-value>)",
+          200: "rgb(var(--ink-200) / <alpha-value>)",
+          300: "rgb(var(--ink-300) / <alpha-value>)",
+          400: "rgb(var(--ink-400) / <alpha-value>)",
+          500: "rgb(var(--ink-500) / <alpha-value>)",
+          600: "rgb(var(--ink-600) / <alpha-value>)",
+          700: "rgb(var(--ink-700) / <alpha-value>)",
+          800: "rgb(var(--ink-800) / <alpha-value>)",
+          900: "rgb(var(--ink-900) / <alpha-value>)",
+        },
+        surface: {
+          DEFAULT: "rgb(var(--surface) / <alpha-value>)",
+          2: "rgb(var(--surface-2) / <alpha-value>)",
         },
         accent: {
-          mint: { bg: "#ecfdf5", fg: "#059669", icon: "#10b981" },
-          sky: { bg: "#eff6ff", fg: "#2563eb", icon: "#3b82f6" },
-          violet: { bg: "#f5f3ff", fg: "#7c3aed", icon: "#8b5cf6" },
-          amber: { bg: "#fffbeb", fg: "#d97706", icon: "#f59e0b" },
-          rose: { bg: "#fff1f2", fg: "#e11d48", icon: "#f43f5e" },
+          mint: { bg: "var(--mint-bg)", fg: "var(--mint-fg)", icon: "var(--mint-icon)" },
+          sky: { bg: "var(--sky-bg)", fg: "var(--sky-fg)", icon: "var(--sky-icon)" },
+          violet: { bg: "var(--violet-bg)", fg: "var(--violet-fg)", icon: "var(--violet-icon)" },
+          amber: { bg: "var(--amber-bg)", fg: "var(--amber-fg)", icon: "var(--amber-icon)" },
+          rose: { bg: "var(--rose-bg)", fg: "var(--rose-fg)", icon: "var(--rose-icon)" },
         },
       },
       borderRadius: {
@@ -39,19 +48,15 @@ const config: Config = {
         "3xl": "1.75rem",
       },
       boxShadow: {
-        soft: "0 1px 2px rgba(15, 23, 42, 0.04), 0 4px 16px rgba(15, 23, 42, 0.04)",
-        card: "0 1px 3px rgba(15, 23, 42, 0.03), 0 8px 24px rgba(15, 23, 42, 0.06)",
-        lifted:
-          "0 2px 4px rgba(15, 23, 42, 0.04), 0 12px 32px rgba(15, 23, 42, 0.08)",
-        pill: "0 1px 2px rgba(15, 23, 42, 0.06)",
+        soft: "var(--shadow-soft)",
+        card: "var(--shadow-card)",
+        lifted: "var(--shadow-lifted)",
+        pill: "var(--shadow-pill)",
       },
       backgroundImage: {
-        "brand-gradient":
-          "linear-gradient(135deg, #2f6bff 0%, #10b981 100%)",
-        "insight-gradient":
-          "linear-gradient(135deg, #1f54e6 0%, #0ea5e9 50%, #10b981 100%)",
-        "page-gradient":
-          "linear-gradient(180deg, #f7f8fb 0%, #f1f3f8 100%)",
+        "brand-gradient": "var(--brand-gradient)",
+        "insight-gradient": "var(--insight-gradient)",
+        "page-gradient": "var(--page-gradient)",
       },
       fontFamily: {
         sans: ["var(--font-inter)", "system-ui", "sans-serif"],

@@ -45,7 +45,7 @@ export default function DashboardPage() {
   }, []);
 
   return (
-    <PageShell>
+    <PageShell nav={{ active: "workspaces", crumb: "Workspaces" }}>
       <div className="mb-8 flex flex-wrap items-start justify-between gap-4">
         <PageGreeting
           title="Workspaces"

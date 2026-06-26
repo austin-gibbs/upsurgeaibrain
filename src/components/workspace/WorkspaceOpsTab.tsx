@@ -28,6 +28,7 @@ import {
   Button,
   Label,
   Select,
+  SubTabs,
 } from "@/components/ui";
 import { dailyWindowCapacity } from "@/lib/engine/cadence";
 import {
@@ -302,6 +303,9 @@ export function WorkspaceOpsTab({
   workspaceId: string;
   onRefresh: () => void;
 }) {
+  const [opsTab, setOpsTab] = useState<
+    "overview" | "queue" | "schedule" | "outcomes"
+  >("overview");
   const [query, setQuery] = useState("");
   const [runTest, setRunTest] = useState(false);
   const [running, setRunning] = useState(false);
@@ -774,6 +778,58 @@ export function WorkspaceOpsTab({
 
   return (
     <>
+      <div className="mb-5 flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight text-ink-900">
+            Operations
+          </h1>
+          <p className="mt-1 text-sm text-ink-500">
+            Run, monitor, and queue calls for this workspace.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-3">
+          <Label className="flex cursor-pointer items-center gap-2 font-normal text-ink-600">
+            <input
+              type="checkbox"
+              checked={runTest}
+              onChange={(e) => setRunTest(e.target.checked)}
+              className="h-4 w-4 rounded border-ink-300 text-brand-600 focus:ring-brand-500"
+            />
+            Run test{" "}
+            <span className="text-xs text-ink-400">(ignores call windows)</span>
+          </Label>
+          <Button onClick={runPoll} disabled={running || !canRun}>
+            {running ? "Running…" : "Run poll"}
+          </Button>
+          <StatusBadge status={workspace.is_active ? "active" : "paused"} />
+        </div>
+      </div>
+
+      {runMessage && (
+        <div
+          className={`mb-5 rounded-xl px-4 py-3 text-sm ${
+            runMessage.type === "success"
+              ? "bg-accent-mint-bg text-accent-mint-fg"
+              : "bg-accent-rose-bg text-accent-rose-fg"
+          }`}
+        >
+          {runMessage.text}
+        </div>
+      )}
+
+      <SubTabs
+        items={[
+          { id: "overview", label: "Overview" },
+          { id: "queue", label: "Call queue", badge: queueSummary.total || undefined },
+          { id: "schedule", label: "Schedule" },
+          { id: "outcomes", label: "Outcomes" },
+        ]}
+        active={opsTab}
+        onSelect={(v) => setOpsTab(v)}
+      />
+
+      {opsTab === "overview" && (
+        <div className="space-y-6">
       {outboundAgents.length > 1 && (
         <Card className="mb-6 p-5">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
@@ -818,39 +874,6 @@ export function WorkspaceOpsTab({
             </div>
           )}
         </Card>
-      )}
-
-      <div className="mb-6 flex flex-wrap items-center justify-end gap-4">
-        <div className="flex flex-col items-end gap-1">
-          <Label className="flex cursor-pointer items-center gap-2 font-normal text-ink-600">
-            <input
-              type="checkbox"
-              checked={runTest}
-              onChange={(e) => setRunTest(e.target.checked)}
-              className="h-4 w-4 rounded border-ink-300 text-brand-600 focus:ring-brand-500"
-            />
-            Run Test
-          </Label>
-          {runTest && (
-            <span className="text-xs text-ink-400">Ignores call windows for this run.</span>
-          )}
-        </div>
-        <Button onClick={runPoll} disabled={running || !canRun}>
-          {running ? "Running…" : "Run poll"}
-        </Button>
-        <StatusBadge status={workspace.is_active ? "active" : "paused"} />
-      </div>
-
-      {runMessage && (
-        <div
-          className={`mb-6 rounded-xl px-4 py-3 text-sm ${
-            runMessage.type === "success"
-              ? "bg-accent-mint-bg text-accent-mint-fg"
-              : "bg-accent-rose-bg text-accent-rose-fg"
-          }`}
-        >
-          {runMessage.text}
-        </div>
       )}
 
       <div className="mb-10 grid gap-5 sm:grid-cols-3">
@@ -1023,7 +1046,10 @@ export function WorkspaceOpsTab({
           );
         })}
       </div>
+        </div>
+      )}
 
+      {opsTab === "queue" && (
       <div className="mb-10">
         <SectionHeader
           title="Call queue"
@@ -1070,7 +1096,7 @@ export function WorkspaceOpsTab({
               </div>
               <div className="max-h-80 overflow-y-auto">
                 <table className="w-full text-sm">
-                  <thead className="sticky top-0 z-10 bg-white">
+                  <thead className="sticky top-0 z-10 bg-surface">
                     <tr className="border-b border-ink-100 text-left text-xs font-medium uppercase tracking-wide text-ink-400">
                       <th className="px-5 py-3 w-12">#</th>
                       <th className="px-5 py-3">Contact</th>
@@ -1111,7 +1137,9 @@ export function WorkspaceOpsTab({
           )}
         </Card>
       </div>
+      )}
 
+      {opsTab === "schedule" && (
       <div className="mb-10">
         <SectionHeader
           title="Call schedule"
@@ -1161,7 +1189,7 @@ export function WorkspaceOpsTab({
           </p>
         )}
         {selectedIds.size > 0 && (
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-ink-200/50 bg-white px-4 py-3 shadow-card">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-ink-200/50 bg-surface px-4 py-3 shadow-card">
             <span className="text-sm font-medium text-ink-700">
               {selectedIds.size} contact{selectedIds.size === 1 ? "" : "s"} selected
             </span>
@@ -1207,7 +1235,7 @@ export function WorkspaceOpsTab({
           ) : (
             <div className="max-h-[34rem] overflow-y-auto">
               <table className="w-full text-sm">
-                <thead className="sticky top-0 z-10 bg-white">
+                <thead className="sticky top-0 z-10 bg-surface">
                   <tr className="border-b border-ink-100 text-left text-xs font-medium uppercase tracking-wide text-ink-400">
                     <th className="w-10 px-5 py-3">
                       <input
@@ -1313,7 +1341,10 @@ export function WorkspaceOpsTab({
           )}
         </Card>
       </div>
+      )}
 
+      {opsTab === "outcomes" && (
+      <div className="mb-10">
       <SectionHeader
         title="Outcome taxonomy"
         description="Tags applied to contacts based on call outcomes."
@@ -1332,10 +1363,12 @@ export function WorkspaceOpsTab({
           </div>
         ))}
       </Card>
+      </div>
+      )}
 
       {duplicateSource && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-ink-900/40 p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
           onClick={closeDuplicateDialog}
         >
           <Card
