@@ -1,12 +1,18 @@
 // =====================================================================
 // GET/POST /api/cron/drain-queue
-// Redis-independent failover: when the Railway worker heartbeat is stale,
-// claim due call_queue_entries and place calls directly via placeCall.
+// Redis-independent failover: claim due call_queue_entries and place calls
+// directly via placeCall when either:
+//   - the Railway worker heartbeat is stale (worker dead), or
+//   - dial stall is detected (zombie worker: heartbeat ok but overdue pending
+//     rows and no recent dials during an open call window).
 // Protect with CRON_SECRET. Runs every minute via Vercel Cron.
 // =====================================================================
 import { NextRequest, NextResponse } from "next/server";
 import { bearerMatches } from "@/lib/secure";
-import { isHeartbeatStale, heartbeatAgeMs } from "@/lib/engine/heartbeat";
+import {
+  checkDialStalls,
+  resolveFailoverDrainTrigger,
+} from "@/lib/engine/dial-watchdog";
 import { drainDueDials } from "@/lib/engine/drain";
 
 export const runtime = "nodejs";
@@ -22,22 +28,32 @@ async function handle(req: NextRequest) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  const stale = await isHeartbeatStale();
-  const heartbeatAgeSec = await heartbeatAgeMs().then((ms) =>
-    ms == null ? null : Math.round(ms / 1000)
-  );
+  const stallCheck = await checkDialStalls();
+  const trigger = resolveFailoverDrainTrigger({
+    heartbeatStale: stallCheck.heartbeatStale,
+    stalledAgentCount: stallCheck.stalled.length,
+  });
 
-  if (!stale) {
+  if (!trigger) {
     return NextResponse.json({
       skipped: "worker_healthy",
-      heartbeatAgeSec,
+      heartbeatAgeSec: stallCheck.heartbeatAgeSec,
+      stalledAgents: 0,
     });
   }
 
   const result = await drainDueDials();
   return NextResponse.json({
     failover: true,
-    heartbeatAgeSec,
+    trigger,
+    heartbeatAgeSec: stallCheck.heartbeatAgeSec,
+    stalledAgents: stallCheck.stalled.length,
+    stalled: stallCheck.stalled.map((s) => ({
+      agentId: s.agentId,
+      agentName: s.agentName,
+      workspaceName: s.workspaceName,
+      overduePending: s.overduePending,
+    })),
     ...result,
   });
 }

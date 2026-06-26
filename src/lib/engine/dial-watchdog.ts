@@ -37,6 +37,30 @@ export function shouldAlertDialStall(params: {
 }
 
 /**
+ * Whether the Postgres-backed drain cron should take over dialing.
+ * Triggers on stale heartbeat (worker dead) OR dial stall (zombie worker:
+ * heartbeat fresh but overdue pending rows and no recent dials in-window).
+ */
+export function shouldTriggerFailoverDrain(params: {
+  heartbeatStale: boolean;
+  stalledAgentCount: number;
+}): boolean {
+  if (params.heartbeatStale) return true;
+  return params.stalledAgentCount > 0;
+}
+
+export type FailoverDrainTrigger = "heartbeat_stale" | "dial_stall";
+
+export function resolveFailoverDrainTrigger(params: {
+  heartbeatStale: boolean;
+  stalledAgentCount: number;
+}): FailoverDrainTrigger | null {
+  if (params.heartbeatStale) return "heartbeat_stale";
+  if (params.stalledAgentCount > 0) return "dial_stall";
+  return null;
+}
+
+/**
  * Scan active outbound agents for stalled dialing: open window + overdue pending
  * queue rows + no recent dials (or stale worker heartbeat).
  */
@@ -156,6 +180,6 @@ export function formatDialStallAlert(result: DialWatchdogResult): string {
     );
   }
 
-  lines.push("", "Failover crons should drain the queue if heartbeat remains stale.");
+  lines.push("", "Failover drain cron should take over until dials resume.");
   return lines.join("\n");
 }

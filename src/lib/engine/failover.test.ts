@@ -8,7 +8,11 @@ import {
   HEARTBEAT_STALE_MS,
 } from "./heartbeat";
 import { drainCapacityPerTick } from "./drain";
-import { shouldAlertDialStall } from "./dial-watchdog";
+import {
+  shouldAlertDialStall,
+  shouldTriggerFailoverDrain,
+  resolveFailoverDrainTrigger,
+} from "./dial-watchdog";
 
 describe("isHeartbeatStaleAt", () => {
   const now = Date.parse("2026-06-25T22:30:00.000Z");
@@ -94,6 +98,52 @@ describe("shouldAlertDialStall", () => {
         heartbeatStale: false,
       }),
       false
+    );
+  });
+});
+
+describe("shouldTriggerFailoverDrain", () => {
+  it("triggers when heartbeat is stale", () => {
+    assert.equal(
+      shouldTriggerFailoverDrain({ heartbeatStale: true, stalledAgentCount: 0 }),
+      true
+    );
+  });
+
+  it("triggers on dial stall even when heartbeat is fresh (zombie worker)", () => {
+    assert.equal(
+      shouldTriggerFailoverDrain({ heartbeatStale: false, stalledAgentCount: 2 }),
+      true
+    );
+  });
+
+  it("does not trigger when heartbeat is fresh and no stalled agents", () => {
+    assert.equal(
+      shouldTriggerFailoverDrain({ heartbeatStale: false, stalledAgentCount: 0 }),
+      false
+    );
+  });
+});
+
+describe("resolveFailoverDrainTrigger", () => {
+  it("prefers heartbeat_stale when both conditions hold", () => {
+    assert.equal(
+      resolveFailoverDrainTrigger({ heartbeatStale: true, stalledAgentCount: 3 }),
+      "heartbeat_stale"
+    );
+  });
+
+  it("returns dial_stall for zombie worker case", () => {
+    assert.equal(
+      resolveFailoverDrainTrigger({ heartbeatStale: false, stalledAgentCount: 1 }),
+      "dial_stall"
+    );
+  });
+
+  it("returns null when no failover needed", () => {
+    assert.equal(
+      resolveFailoverDrainTrigger({ heartbeatStale: false, stalledAgentCount: 0 }),
+      null
     );
   });
 });
