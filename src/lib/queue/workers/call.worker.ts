@@ -116,18 +116,25 @@ export function startCallWorker(): Worker<CallJob> {
     console.error(`[call.worker] job ${job?.id} failed:`, err.message);
     // On final attempt, mark any orphaned call row failed.
     if (job && job.attemptsMade >= (job.opts.attempts ?? 1)) {
-      const supabase = createServiceClient();
-      await supabase
-        .from("calls")
-        .update({ status: "failed", error_message: err.message })
-        .eq("agent_id", job.data.agentId)
-        .eq("contact_id", job.data.contactId)
-        .eq("status", "queued");
-      await failQueueEntry(supabase, {
-        agentId: job.data.agentId,
-        contactId: job.data.contactId,
-        errorMessage: err.message,
-      });
+      try {
+        const supabase = createServiceClient();
+        await supabase
+          .from("calls")
+          .update({ status: "failed", error_message: err.message })
+          .eq("agent_id", job.data.agentId)
+          .eq("contact_id", job.data.contactId)
+          .eq("status", "queued");
+        await failQueueEntry(supabase, {
+          agentId: job.data.agentId,
+          contactId: job.data.contactId,
+          errorMessage: err.message,
+        });
+      } catch (cleanupErr) {
+        console.error(
+          `[call.worker] failed-job cleanup error for ${job.id}:`,
+          cleanupErr instanceof Error ? cleanupErr.message : cleanupErr
+        );
+      }
     }
   });
 

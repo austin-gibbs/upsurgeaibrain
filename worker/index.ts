@@ -7,6 +7,8 @@
 // Starts the BullMQ workers (poll + call) and a 60s scheduler tick that
 // enqueues daily polls. This is the always-on backend that replaces n8n.
 // =====================================================================
+process.env.UPSURGE_WORKER = "true";
+
 import { config as loadEnv } from "dotenv";
 loadEnv({ path: ".env.local" });
 import { createServer, type Server } from "node:http";
@@ -16,8 +18,20 @@ import { tickScheduler } from "@/lib/engine/scheduler";
 import { reconcileStuckCalls } from "@/lib/engine/reconcile";
 import { resyncCallQueue } from "@/lib/queue/sweeper";
 import { getRedis } from "@/lib/queue/connection";
+import { writeHeartbeat } from "@/lib/engine/heartbeat";
 
 const BOOTED_AT = Date.now();
+
+function installCrashGuards(): void {
+  process.on("unhandledRejection", (reason) => {
+    console.error("[worker] unhandledRejection — exiting for restart:", reason);
+    process.exit(1);
+  });
+  process.on("uncaughtException", (err) => {
+    console.error("[worker] uncaughtException — exiting for restart:", err);
+    process.exit(1);
+  });
+}
 
 // Lightweight health endpoint so the hosting platform (Railway/Render/Fly) can
 // detect a dead worker and restart it. Pings Redis so "up" means the engine can
@@ -49,6 +63,7 @@ function startHealthServer(): Server {
 }
 
 async function main() {
+  installCrashGuards();
   console.log("[worker] starting Upsurge engine…");
 
   if (!process.env.REDIS_URL && process.env.NODE_ENV === "production") {
@@ -58,6 +73,20 @@ async function main() {
   const healthServer = startHealthServer();
   const pollWorker = startPollWorker();
   const callWorker = startCallWorker();
+
+  // Heartbeat for Vercel failover crons — written every 30s to Postgres.
+  let heartbeatTimer: NodeJS.Timeout | null = setInterval(async () => {
+    try {
+      await writeHeartbeat();
+    } catch (e) {
+      console.error("[heartbeat] write error:", e);
+    }
+  }, 30_000);
+  try {
+    await writeHeartbeat();
+  } catch (e) {
+    console.error("[heartbeat] initial write error:", e);
+  }
 
   // Internal scheduler: tick every minute. (Disable and use external cron
   // instead by setting USE_EXTERNAL_CRON=true.)
@@ -107,6 +136,8 @@ async function main() {
 
   const shutdown = async () => {
     console.log("[worker] shutting down…");
+    if (heartbeatTimer) clearInterval(heartbeatTimer);
+    heartbeatTimer = null;
     if (timer) clearInterval(timer);
     if (reconcileTimer) clearInterval(reconcileTimer);
     reconcileTimer = null;

@@ -624,6 +624,21 @@ export type Database = {
           },
         ]
       }
+      engine_heartbeat: {
+        Row: {
+          id: string
+          last_seen_at: string
+        }
+        Insert: {
+          id?: string
+          last_seen_at?: string
+        }
+        Update: {
+          id?: string
+          last_seen_at?: string
+        }
+        Relationships: []
+      }
       organization_members: {
         Row: {
           created_at: string

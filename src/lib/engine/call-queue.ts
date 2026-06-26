@@ -66,6 +66,67 @@ export async function upsertQueueEntry(
   if (error) throw new Error(error.message);
 }
 
+export interface ClaimedQueueEntry {
+  id: string;
+  agent_id: string;
+  contact_id: string;
+  workspace_id: string;
+  queue_day: string;
+  position: number;
+  scheduled_for: string | null;
+  bullmq_job_id: string | null;
+}
+
+/**
+ * Atomically move a pending row to `dialing` before placing a call.
+ * Returns null when another executor already claimed the row.
+ */
+export async function claimQueueEntry(
+  supabase: DbClient,
+  params: { id: string }
+): Promise<ClaimedQueueEntry | null> {
+  const { data, error } = await supabase
+    .from("call_queue_entries")
+    .update({
+      status: "dialing",
+      started_at: new Date().toISOString(),
+    })
+    .eq("id", params.id)
+    .eq("status", "pending")
+    .select(
+      "id, agent_id, contact_id, workspace_id, queue_day, position, scheduled_for, bullmq_job_id"
+    )
+    .maybeSingle<ClaimedQueueEntry>();
+
+  if (error) throw new Error(error.message);
+  return data;
+}
+
+/** Revert a claim when dialing is deferred (e.g. outside call window). */
+export async function revertQueueClaim(
+  supabase: DbClient,
+  params: { id: string; scheduledFor?: string }
+): Promise<void> {
+  const patch: {
+    status: "pending";
+    started_at: null;
+    call_id: null;
+    scheduled_for?: string;
+  } = {
+    status: "pending",
+    started_at: null,
+    call_id: null,
+  };
+  if (params.scheduledFor) patch.scheduled_for = params.scheduledFor;
+
+  const { error } = await supabase
+    .from("call_queue_entries")
+    .update(patch)
+    .eq("id", params.id)
+    .eq("status", "dialing");
+  if (error) throw new Error(error.message);
+}
+
 /** Mark the queue entry as actively dialing once Retell accepts the call. */
 export async function markQueueDialing(
   supabase: DbClient,

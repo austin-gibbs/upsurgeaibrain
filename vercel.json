@@ -3,6 +3,18 @@
     {
       "path": "/api/admin/reconcile-stuck-calls?olderThanMinutes=1&limit=250",
       "schedule": "*/2 * * * *"
+    },
+    {
+      "path": "/api/cron/drain-queue",
+      "schedule": "*/1 * * * *"
+    },
+    {
+      "path": "/api/cron/poll-fallback",
+      "schedule": "*/1 * * * *"
+    },
+    {
+      "path": "/api/cron/dial-watchdog",
+      "schedule": "*/5 * * * *"
     }
   ]
 }

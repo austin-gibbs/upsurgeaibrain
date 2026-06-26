@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -10,6 +10,7 @@ import {
   Plus,
   LogOut,
   AudioLines,
+  Home,
   Search,
   Bell,
   ChevronDown,
@@ -52,6 +53,14 @@ export type PageNav = {
 const CRM_LABEL: Record<string, string> = {
   followupboss: "Follow Up Boss",
   highlevel: "HighLevel",
+};
+
+type WorkspaceOption = {
+  id: string;
+  name: string;
+  timezone: string;
+  crm_provider: string;
+  is_active: boolean;
 };
 
 function initials(name: string): string {
@@ -132,6 +141,187 @@ function NavItem({
       />
       <span className="flex-1 truncate">{label}</span>
     </Link>
+  );
+}
+
+/* -------------------------- Workspace switcher ------------------------- */
+function WorkspaceSwitcher({
+  workspaceId,
+  workspaceName,
+  workspaceMeta,
+}: {
+  workspaceId: string;
+  workspaceName: string;
+  workspaceMeta?: string;
+}) {
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [open, setOpen] = useState(false);
+  const [workspaces, setWorkspaces] = useState<WorkspaceOption[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/workspaces")
+      .then((r) => r.json())
+      .then((d) => {
+        if (cancelled) return;
+        if (d.error) {
+          setError(d.error);
+          setWorkspaces([]);
+          return;
+        }
+        setWorkspaces(d.workspaces ?? []);
+        setError(null);
+      })
+      .catch((e: unknown) => {
+        if (cancelled) return;
+        setError(e instanceof Error ? e.message : "Unable to load workspaces");
+        setWorkspaces([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+
+    function handlePointerDown(event: PointerEvent) {
+      if (!menuRef.current?.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setOpen(false);
+    }
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [open]);
+
+  return (
+    <div ref={menuRef} className="relative mx-3 mb-2 mt-1">
+      <button
+        type="button"
+        title="Switch workspace"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+        className="flex w-full items-center gap-2.5 rounded-[11px] border border-ink-200/60 bg-surface-2 px-3 py-2.5 text-left transition-colors hover:bg-surface hover:shadow-soft"
+      >
+        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-accent-violet-bg text-[12px] font-bold text-accent-violet-fg">
+          {initials(workspaceName)}
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-[13px] font-semibold text-ink-900">
+            {workspaceName}
+          </span>
+          {workspaceMeta && (
+            <span className="block truncate text-[11px] text-ink-400">
+              {workspaceMeta}
+            </span>
+          )}
+        </span>
+        <ChevronDown
+          className={cn(
+            "h-3.5 w-3.5 shrink-0 text-ink-400 transition-transform",
+            open && "rotate-180"
+          )}
+          strokeWidth={2}
+        />
+      </button>
+
+      {open && (
+        <div
+          role="menu"
+          className="absolute left-0 right-0 top-[calc(100%+8px)] z-30 overflow-hidden rounded-2xl border border-ink-200/60 bg-surface shadow-lifted"
+        >
+          <Link
+            href="/"
+            role="menuitem"
+            onClick={() => setOpen(false)}
+            className="flex items-center gap-2.5 border-b border-ink-100 px-3 py-2.5 text-[13px] font-semibold text-ink-700 transition-colors hover:bg-surface-2 hover:text-ink-900"
+          >
+            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-accent-sky-bg text-accent-sky-icon">
+              <Home className="h-4 w-4" strokeWidth={1.75} />
+            </span>
+            Home
+          </Link>
+
+          <div className="max-h-72 overflow-y-auto p-1.5">
+            {!workspaces && (
+              <p className="px-2 py-2 text-[12px] text-ink-400">
+                Loading workspaces…
+              </p>
+            )}
+            {error && (
+              <p className="px-2 py-2 text-[12px] text-accent-rose-fg">
+                Failed to load workspaces.
+              </p>
+            )}
+            {workspaces?.map((workspace) => {
+              const active = workspace.id === workspaceId;
+              const meta = `${CRM_LABEL[workspace.crm_provider] ?? workspace.crm_provider} · ${workspace.timezone}`;
+              return (
+                <Link
+                  key={workspace.id}
+                  href={`/workspaces/${workspace.id}`}
+                  role="menuitem"
+                  aria-current={active ? "page" : undefined}
+                  onClick={() => setOpen(false)}
+                  className={cn(
+                    "flex items-center gap-2.5 rounded-xl px-2 py-2 transition-colors",
+                    active
+                      ? "bg-brand-50 text-brand-700"
+                      : "text-ink-600 hover:bg-surface-2 hover:text-ink-900"
+                  )}
+                >
+                  <span
+                    className={cn(
+                      "flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-[12px] font-bold",
+                      active
+                        ? "bg-white text-brand-700 shadow-pill"
+                        : "bg-accent-violet-bg text-accent-violet-fg"
+                    )}
+                  >
+                    {initials(workspace.name)}
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[13px] font-semibold">
+                      {workspace.name}
+                    </span>
+                    <span
+                      className={cn(
+                        "block truncate text-[11px]",
+                        active ? "text-brand-500" : "text-ink-400"
+                      )}
+                    >
+                      {meta}
+                    </span>
+                  </span>
+                  <span
+                    className={cn(
+                      "h-2 w-2 shrink-0 rounded-full",
+                      workspace.is_active ? "bg-accent-mint-icon" : "bg-ink-300"
+                    )}
+                  />
+                </Link>
+              );
+            })}
+            {workspaces && workspaces.length === 0 && !error && (
+              <p className="px-2 py-2 text-[12px] text-ink-400">
+                No workspaces available.
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -222,24 +412,11 @@ function Rail({ nav }: { nav?: PageNav }) {
 
       {/* Workspace switcher */}
       {workspaceId && wsName ? (
-        <Link
-          href="/"
-          title="Switch workspace"
-          className="mx-3 mb-2 mt-1 flex items-center gap-2.5 rounded-[11px] border border-ink-200/60 bg-surface-2 px-3 py-2.5 transition-colors hover:bg-surface hover:shadow-soft"
-        >
-          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-accent-violet-bg text-[12px] font-bold text-accent-violet-fg">
-            {initials(wsName)}
-          </span>
-          <span className="min-w-0 flex-1">
-            <span className="block truncate text-[13px] font-semibold text-ink-900">
-              {wsName}
-            </span>
-            {wsMeta && (
-              <span className="block truncate text-[11px] text-ink-400">{wsMeta}</span>
-            )}
-          </span>
-          <ChevronDown className="h-3.5 w-3.5 shrink-0 text-ink-400" strokeWidth={2} />
-        </Link>
+        <WorkspaceSwitcher
+          workspaceId={workspaceId}
+          workspaceName={wsName}
+          workspaceMeta={wsMeta}
+        />
       ) : null}
 
       {/* Nav */}
