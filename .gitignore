@@ -38,6 +38,9 @@ dev-server.log
 .deploy-log.txt
 /supabase/.temp/
 
+# provisioning specs (hold client Retell + CRM secrets — never commit)
+provision-*.json
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

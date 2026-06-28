@@ -20,7 +20,8 @@
     "db:verify-schema": "node scripts/verify-schema.mjs",
     "worker": "tsx watch worker/index.ts",
     "worker:prod": "tsx worker/index.ts",
-    "report:fulfillment": "tsx scripts/fulfillment-report.ts"
+    "report:fulfillment": "tsx scripts/fulfillment-report.ts",
+    "provision:agent": "tsx scripts/provision-agent.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.5.2",
