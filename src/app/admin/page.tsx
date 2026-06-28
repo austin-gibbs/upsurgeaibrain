@@ -253,7 +253,7 @@ export default function AdminConsolePage() {
   }
 
   return (
-    <PageShell nav={{ active: "dashboard", crumb: "Admin console" }}>
+    <PageShell nav={{ active: "admin", crumb: "Admin console" }}>
       <div className="space-y-8">
         <div>
           <h1 className="text-2xl font-semibold text-ink-900">

@@ -28,6 +28,37 @@ export function isAdminEmail(email: string | null | undefined): boolean {
   return adminEmails().includes(email.trim().toLowerCase());
 }
 
+/**
+ * Returns true when the user is an app admin (DB flag or ADMIN_EMAILS bootstrap).
+ * Bootstrap emails are self-healed into profiles.is_admin so RLS applies.
+ */
+export async function resolveIsAdmin(
+  userId: string,
+  email: string | null | undefined
+): Promise<boolean> {
+  const db = createServiceClient();
+
+  const { data: profile } = await db
+    .from("profiles")
+    .select("is_admin")
+    .eq("id", userId)
+    .maybeSingle();
+
+  if (profile?.is_admin) return true;
+
+  if (isAdminEmail(email)) {
+    await db
+      .from("profiles")
+      .upsert(
+        { id: userId, email: email ?? "", is_admin: true },
+        { onConflict: "id" }
+      );
+    return true;
+  }
+
+  return false;
+}
+
 export type AdminGuardResult =
   | { ok: true; userId: string; email: string }
   | { ok: false; status: 401 | 403; error: string };
@@ -51,28 +82,8 @@ export async function requireAdmin(): Promise<AdminGuardResult> {
     return { ok: false, status: 401, error: "unauthorized" };
   }
 
-  const db = createServiceClient();
-
-  // 1. DB-backed admin?
-  const { data: profile } = await db
-    .from("profiles")
-    .select("is_admin")
-    .eq("id", user.id)
-    .maybeSingle();
-
-  if (profile?.is_admin) {
-    return { ok: true, userId: user.id, email: user.email ?? "" };
-  }
-
-  // 2. Bootstrap admin (ADMIN_EMAILS)? Promote them in the DB so RLS bypass
-  //    (is_app_admin) applies, then allow.
-  if (isAdminEmail(user.email)) {
-    await db
-      .from("profiles")
-      .upsert(
-        { id: user.id, email: user.email ?? "", is_admin: true },
-        { onConflict: "id" }
-      );
+  const isAdmin = await resolveIsAdmin(user.id, user.email);
+  if (isAdmin) {
     return { ok: true, userId: user.id, email: user.email ?? "" };
   }
 

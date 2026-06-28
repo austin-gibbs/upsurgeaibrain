@@ -19,7 +19,7 @@ function LoginForm() {
   const params = useSearchParams();
   const supabase = createClient();
 
-  const [mode, setMode] = useState<"signin" | "signup">("signin");
+  const [mode, setMode] = useState<"signin" | "signup" | "forgot">("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -32,6 +32,19 @@ function LoginForm() {
     setNotice(null);
     setLoading(true);
     try {
+      if (mode === "forgot") {
+        const origin =
+          process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "") ??
+          window.location.origin;
+        const { error } = await supabase.auth.resetPasswordForEmail(email, {
+          redirectTo: `${origin}/auth/callback?next=/auth/reset-password`,
+        });
+        if (error) throw error;
+        setNotice(
+          "If an account exists for that email, a password reset link is on its way."
+        );
+        return;
+      }
       if (mode === "signin") {
         const { error } = await supabase.auth.signInWithPassword({
           email,
@@ -75,12 +88,18 @@ function LoginForm() {
         <Card className="p-8 shadow-lifted">
           <div className="mb-6">
             <h2 className="text-lg font-semibold text-ink-900">
-              {mode === "signin" ? "Welcome back" : "Create your account"}
+              {mode === "signin"
+                ? "Welcome back"
+                : mode === "signup"
+                ? "Create your account"
+                : "Reset your password"}
             </h2>
             <p className="mt-1 text-sm text-ink-500">
               {mode === "signin"
                 ? "Sign in to manage your voice agent workspaces."
-                : "Get started with multi-tenant AI voice orchestration."}
+                : mode === "signup"
+                ? "Get started with multi-tenant AI voice orchestration."
+                : "Enter your email and we'll send a link to choose a new password."}
             </p>
           </div>
 
@@ -96,20 +115,37 @@ function LoginForm() {
                 onChange={(e) => setEmail(e.target.value)}
               />
             </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="password">Password</Label>
-              <Input
-                id="password"
-                type="password"
-                autoComplete={
-                  mode === "signin" ? "current-password" : "new-password"
-                }
-                required
-                minLength={6}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-              />
-            </div>
+            {mode !== "forgot" && (
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <Label htmlFor="password">Password</Label>
+                  {mode === "signin" && (
+                    <button
+                      type="button"
+                      className="text-xs font-medium text-brand-600 hover:underline"
+                      onClick={() => {
+                        setMode("forgot");
+                        setError(null);
+                        setNotice(null);
+                      }}
+                    >
+                      Forgot password?
+                    </button>
+                  )}
+                </div>
+                <Input
+                  id="password"
+                  type="password"
+                  autoComplete={
+                    mode === "signin" ? "current-password" : "new-password"
+                  }
+                  required
+                  minLength={6}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                />
+              </div>
+            )}
 
             {error && (
               <p className="rounded-xl bg-accent-rose-bg px-4 py-3 text-sm text-accent-rose-fg">
@@ -127,23 +163,59 @@ function LoginForm() {
                 ? "Working…"
                 : mode === "signin"
                 ? "Sign in"
-                : "Create account"}
+                : mode === "signup"
+                ? "Create account"
+                : "Send reset link"}
             </Button>
           </form>
 
           <p className="mt-6 text-center text-sm text-ink-500">
-            {mode === "signin" ? "No account yet?" : "Already have an account?"}{" "}
-            <button
-              type="button"
-              className="font-medium text-brand-600 hover:underline"
-              onClick={() => {
-                setMode(mode === "signin" ? "signup" : "signin");
-                setError(null);
-                setNotice(null);
-              }}
-            >
-              {mode === "signin" ? "Sign up" : "Sign in"}
-            </button>
+            {mode === "signin" ? (
+              <>
+                No account yet?{" "}
+                <button
+                  type="button"
+                  className="font-medium text-brand-600 hover:underline"
+                  onClick={() => {
+                    setMode("signup");
+                    setError(null);
+                    setNotice(null);
+                  }}
+                >
+                  Sign up
+                </button>
+              </>
+            ) : mode === "signup" ? (
+              <>
+                Already have an account?{" "}
+                <button
+                  type="button"
+                  className="font-medium text-brand-600 hover:underline"
+                  onClick={() => {
+                    setMode("signin");
+                    setError(null);
+                    setNotice(null);
+                  }}
+                >
+                  Sign in
+                </button>
+              </>
+            ) : (
+              <>
+                Remember your password?{" "}
+                <button
+                  type="button"
+                  className="font-medium text-brand-600 hover:underline"
+                  onClick={() => {
+                    setMode("signin");
+                    setError(null);
+                    setNotice(null);
+                  }}
+                >
+                  Back to sign in
+                </button>
+              </>
+            )}
           </p>
         </Card>
       </div>

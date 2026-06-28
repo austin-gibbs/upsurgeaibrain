@@ -17,6 +17,8 @@ import {
   ChevronRight,
   Sun,
   Moon,
+  Settings,
+  Shield,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/components/ui";
@@ -44,7 +46,9 @@ export type PageNav = {
     | "agent"
     | "workspaces"
     | "new-workspace"
-    | "new-agent";
+    | "new-agent"
+    | "settings"
+    | "admin";
   activeAgentId?: string;
   /** Breadcrumb leaf shown after the workspace name. */
   crumb?: string;
@@ -62,6 +66,63 @@ type WorkspaceOption = {
   crm_provider: string;
   is_active: boolean;
 };
+
+type UserProfile = {
+  id: string;
+  email: string;
+  full_name: string | null;
+  is_admin: boolean;
+};
+
+function userInitials(profile: UserProfile | null): string {
+  if (!profile) return "…";
+  const name = profile.full_name?.trim();
+  if (name) {
+    const parts = name.split(/\s+/).filter(Boolean);
+    if (parts.length >= 2) {
+      return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+    }
+    return name.slice(0, 2).toUpperCase();
+  }
+  const email = profile.email.trim();
+  if (email) return email.slice(0, 2).toUpperCase();
+  return "U";
+}
+
+function userDisplayName(profile: UserProfile | null): string {
+  if (!profile) return "Account";
+  return profile.full_name?.trim() || profile.email.split("@")[0] || "Account";
+}
+
+function userSubtitle(profile: UserProfile | null): string {
+  if (!profile) return "Loading…";
+  if (profile.is_admin) return "Platform admin";
+  return profile.email;
+}
+
+function useUserProfile() {
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/profile")
+      .then(async (res) => {
+        if (!res.ok) return null;
+        return (await res.json()) as UserProfile;
+      })
+      .then((data) => {
+        if (!cancelled) setProfile(data);
+      })
+      .catch(() => {
+        if (!cancelled) setProfile(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return profile;
+}
 
 function initials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -382,6 +443,7 @@ function useResolvedNav(nav?: PageNav): PageNav | undefined {
 function Rail({ nav }: { nav?: PageNav }) {
   const router = useRouter();
   const supabase = createClient();
+  const profile = useUserProfile();
 
   const workspaceId = nav?.workspaceId;
 
@@ -504,24 +566,51 @@ function Rail({ nav }: { nav?: PageNav }) {
             />
           </>
         )}
+
+        <div className="px-2.5 pb-1.5 pt-3.5 text-[10.5px] font-bold uppercase tracking-[0.07em] text-ink-400">
+          Account
+        </div>
+        <NavItem
+          href="/settings"
+          icon={Settings}
+          label="Settings"
+          active={nav?.active === "settings"}
+        />
+        {profile?.is_admin && (
+          <NavItem
+            href="/admin"
+            icon={Shield}
+            label="Admin console"
+            active={nav?.active === "admin"}
+          />
+        )}
       </div>
 
       {/* Account footer */}
       <div className="border-t border-ink-200/60 px-3.5 py-2.5">
         <div className="flex items-center gap-2.5">
-          <span className="flex h-[30px] w-[30px] items-center justify-center rounded-full bg-brand-gradient text-[12px] font-semibold text-white">
-            OP
-          </span>
-          <div className="flex-1">
-            <div className="text-[12.5px] font-semibold text-ink-800">Operator</div>
-            <div className="text-[11px] text-ink-400">Platform admin</div>
-          </div>
+          <Link
+            href="/settings"
+            className="flex min-w-0 flex-1 items-center gap-2.5 rounded-lg transition-colors hover:bg-surface-2"
+          >
+            <span className="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-full bg-brand-gradient text-[12px] font-semibold text-white">
+              {userInitials(profile)}
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-[12.5px] font-semibold text-ink-800">
+                {userDisplayName(profile)}
+              </div>
+              <div className="truncate text-[11px] text-ink-400">
+                {userSubtitle(profile)}
+              </div>
+            </div>
+          </Link>
           <button
             type="button"
             onClick={signOut}
             aria-label="Sign out"
             title="Sign out"
-            className="flex h-[30px] w-[30px] items-center justify-center rounded-lg border border-ink-200/70 bg-surface text-ink-500 transition-colors hover:text-ink-800 hover:shadow-soft"
+            className="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-lg border border-ink-200/70 bg-surface text-ink-500 transition-colors hover:text-ink-800 hover:shadow-soft"
           >
             <LogOut className="h-[17px] w-[17px]" strokeWidth={1.75} />
           </button>
