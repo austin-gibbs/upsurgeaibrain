@@ -7,6 +7,7 @@ import { createServerClient, createServiceClient } from "@/lib/supabase/server";
 import { z } from "zod";
 import { crmAccountUrlSchema } from "@/lib/validation";
 import { normalizeCallConfigList, normalizeEmbedList } from "@/lib/hhmm";
+import { deleteWorkspaceById } from "@/lib/workspaces/delete-workspace";
 
 export const runtime = "nodejs";
 
@@ -212,4 +213,59 @@ export async function PATCH(
     crm_account_url: parsed.data.crm_account_url,
     agents_updated: parsed.data.tasks_enabled !== undefined ? (agents ?? []).length : undefined,
   });
+}
+
+const deleteSchema = z.object({
+  confirmName: z.string().min(1),
+});
+
+// DELETE /api/workspaces/:id — permanently remove a workspace and all related
+// data. Requires typing the workspace name to confirm.
+export async function DELETE(
+  req: NextRequest,
+  { params }: { params: { id: string } }
+) {
+  const userClient = createServerClient();
+  const {
+    data: { user },
+  } = await userClient.auth.getUser();
+  if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+
+  const json = await req.json().catch(() => null);
+  const parsed = deleteSchema.safeParse(json);
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: "invalid payload", issues: parsed.error.issues },
+      { status: 400 }
+    );
+  }
+
+  const { data: workspace } = await userClient
+    .from("workspaces")
+    .select("id, name")
+    .eq("id", params.id)
+    .single<{ id: string; name: string }>();
+  if (!workspace) {
+    return NextResponse.json({ error: "not found" }, { status: 404 });
+  }
+
+  if (parsed.data.confirmName.trim() !== workspace.name) {
+    return NextResponse.json(
+      { error: "confirmName does not match workspace name" },
+      { status: 400 }
+    );
+  }
+
+  const db = createServiceClient();
+
+  try {
+    const result = await deleteWorkspaceById(db, params.id);
+    if (!result) {
+      return NextResponse.json({ error: "not found" }, { status: 404 });
+    }
+    return NextResponse.json(result);
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
 }

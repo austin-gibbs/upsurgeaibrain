@@ -338,6 +338,9 @@ export function WorkspaceOpsTab({
   const [duplicateEnrollTag, setDuplicateEnrollTag] = useState("");
   const [duplicateError, setDuplicateError] = useState<string | null>(null);
   const [duplicating, setDuplicating] = useState(false);
+  const [deleteConfirmName, setDeleteConfirmName] = useState("");
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const router = useRouter();
 
@@ -701,6 +704,33 @@ export function WorkspaceOpsTab({
     }
   }
 
+  async function deleteWorkspace() {
+    if (deleteConfirmName.trim() !== workspace.name) {
+      setDeleteError("Type the workspace name exactly to confirm deletion.");
+      return;
+    }
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      const res = await fetch(`/api/workspaces/${workspaceId}`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ confirmName: deleteConfirmName.trim() }),
+      });
+      const d = await res.json();
+      if (!res.ok) {
+        setDeleteError(d.error ?? "Failed to delete workspace");
+        return;
+      }
+      router.push("/");
+      router.refresh();
+    } catch (e) {
+      setDeleteError(e instanceof Error ? e.message : "Failed to delete workspace");
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   const today = todayInTz(workspace.timezone);
   const nowEt = nowHHMMInTz(workspace.timezone);
   const tzLabel = timezoneAbbrev(workspace.timezone);
@@ -1046,6 +1076,40 @@ export function WorkspaceOpsTab({
           );
         })}
       </div>
+
+      <Card className="border-accent-rose-fg/20 p-5">
+        <SectionHeader
+          title="Delete workspace"
+          description="Permanently removes this workspace, all agents, contacts, call history, and queue entries. Retell agents and phone numbers are not deleted automatically."
+        />
+        <div className="mt-4 max-w-md space-y-3">
+          <Label htmlFor="delete-confirm">
+            Type <span className="font-medium text-ink-800">{workspace.name}</span> to confirm
+          </Label>
+          <Input
+            id="delete-confirm"
+            value={deleteConfirmName}
+            onChange={(e) => {
+              setDeleteConfirmName(e.target.value);
+              setDeleteError(null);
+            }}
+            placeholder={workspace.name}
+            autoComplete="off"
+          />
+          {deleteError && (
+            <div className="rounded-xl bg-accent-rose-bg px-4 py-3 text-sm text-accent-rose-fg">
+              {deleteError}
+            </div>
+          )}
+          <Button
+            variant="danger"
+            disabled={deleting || deleteConfirmName.trim() !== workspace.name}
+            onClick={deleteWorkspace}
+          >
+            {deleting ? "Deleting…" : "Delete workspace permanently"}
+          </Button>
+        </div>
+      </Card>
         </div>
       )}
 

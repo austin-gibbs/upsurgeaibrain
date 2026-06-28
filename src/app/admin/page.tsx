@@ -93,6 +93,9 @@ export default function AdminConsolePage() {
     Array<{ id: string; email: string; full_name: string | null }> | null
   >(null);
 
+  // Delete workspace
+  const [deleteConfirmName, setDeleteConfirmName] = useState("");
+
   async function loadAdmins() {
     setTmBusy("list");
     try {
@@ -222,6 +225,33 @@ export default function AdminConsolePage() {
     }
   }
 
+  async function deleteWorkspace(dryRun: boolean) {
+    if (!workspace.trim()) return;
+    setMgmtBusy(dryRun ? "delete-dry" : "delete");
+    setMgmtResult(null);
+    try {
+      const res = await fetch("/api/console/delete-workspace", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          workspace: workspace.trim(),
+          confirmName: deleteConfirmName.trim(),
+          dryRun,
+        }),
+      });
+      const data = await res.json();
+      setMgmtResult(data);
+      if (res.ok && !dryRun && data.deleted) {
+        setWorkspace("");
+        setDeleteConfirmName("");
+      }
+    } catch (e) {
+      setMgmtResult(e instanceof Error ? e.message : String(e));
+    } finally {
+      setMgmtBusy("");
+    }
+  }
+
   return (
     <PageShell nav={{ active: "dashboard", crumb: "Admin console" }}>
       <div className="space-y-8">
@@ -335,6 +365,45 @@ export default function AdminConsolePage() {
                 disabled={mgmtBusy !== "" || !workspace.trim()}
               >
                 {mgmtBusy === "call-window" ? "Saving…" : "Set call window"}
+              </Button>
+            </div>
+          </div>
+
+          <div className="mt-8 border-t border-ink-200/60 pt-6">
+            <SectionHeader
+              title="Delete workspace"
+              description="Permanently removes the workspace and all related data. Retell resources are not deleted automatically."
+            />
+            <div className="max-w-md">
+              <Label htmlFor="deleteConfirm">
+                Type the workspace name to confirm
+              </Label>
+              <Input
+                id="deleteConfirm"
+                value={deleteConfirmName}
+                onChange={(e) => setDeleteConfirmName(e.target.value)}
+                placeholder={workspace.trim() || "Workspace name"}
+                autoComplete="off"
+              />
+            </div>
+            <div className="mt-4 flex flex-wrap gap-3">
+              <Button
+                variant="secondary"
+                onClick={() => deleteWorkspace(true)}
+                disabled={mgmtBusy !== "" || !workspace.trim()}
+              >
+                {mgmtBusy === "delete-dry" ? "Previewing…" : "Delete (dry-run)"}
+              </Button>
+              <Button
+                variant="danger"
+                onClick={() => deleteWorkspace(false)}
+                disabled={
+                  mgmtBusy !== "" ||
+                  !workspace.trim() ||
+                  deleteConfirmName.trim() !== workspace.trim()
+                }
+              >
+                {mgmtBusy === "delete" ? "Deleting…" : "Delete permanently"}
               </Button>
             </div>
           </div>
