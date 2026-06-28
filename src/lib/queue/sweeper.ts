@@ -109,12 +109,14 @@ export async function resyncCallQueue(opts?: { limit?: number }): Promise<SweepR
   const { data: rows } = await supabase
     .from("call_queue_entries")
     .select(
-      "id, agent_id, contact_id, workspace_id, queue_day, position, scheduled_for, bullmq_job_id"
+      "id, agent_id, contact_id, workspace_id, queue_day, position, enqueued_at, scheduled_for, bullmq_job_id"
     )
     .eq("status", "pending")
     .or(`scheduled_for.is.null,scheduled_for.lte.${nowIso}`)
     .order("agent_id", { ascending: true })
+    .order("queue_day", { ascending: true })
     .order("position", { ascending: true })
+    .order("enqueued_at", { ascending: true })
     .limit(limit)
     .returns<PendingRow[]>();
 

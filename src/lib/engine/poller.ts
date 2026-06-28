@@ -18,8 +18,16 @@ import {
   withinCallWindow,
 } from "./cadence";
 import type { Agent, AgentCallConfig, AgentTaskConfig, Contact, Workspace } from "@/types";
-import { upsertQueueEntry, countActiveQueueForAgent } from "./call-queue";
+import {
+  upsertQueueEntry,
+  countActiveQueueForAgent,
+  countRolloverBacklogForAgent,
+  listActiveQueuedContactIdsForAgent,
+  normalizeRolloverPositions,
+  countDialedTodayForAgent,
+} from "./call-queue";
 import { applyPollStageRouting } from "./pipeline-routing";
+import { computeNewPollCapacity, excludeActiveQueuedContacts } from "./rollover-priority";
 
 export interface PollOptions {
   testMode?: boolean;
@@ -132,6 +140,12 @@ export async function pollAgent(
       return a.attempt_count - b.attempt_count;
     });
 
+  await normalizeRolloverPositions(supabase, agentId, today).catch(() => {});
+
+  const rolloverBacklog = await countRolloverBacklogForAgent(supabase, agentId, today);
+  const activeQueuedIds = await listActiveQueuedContactIdsForAgent(supabase, agentId);
+  const eligibleNotQueued = excludeActiveQueuedContacts(eligible, activeQueuedIds);
+
   const windowCapacity = options?.testMode
     ? config.max_calls_per_day
     : remainingWindowCapacity(
@@ -141,7 +155,19 @@ export async function pollAgent(
         config.drip_seconds
       );
   const dailyCap = Math.min(config.max_calls_per_day, windowCapacity);
-  const capped = eligible.slice(0, dailyCap);
+  const newCallCapacity = computeNewPollCapacity(dailyCap, rolloverBacklog);
+
+  if (newCallCapacity === 0 && eligibleNotQueued.length > 0) {
+    return {
+      agentId,
+      scanned: contacts.length,
+      eligible: eligible.length,
+      enqueued: 0,
+      skippedReason: "capacity reserved for rollover backlog",
+    };
+  }
+
+  const capped = eligibleNotQueued.slice(0, newCallCapacity);
 
   // 3b. HighLevel poll-stage routing — move only contacts we are about to queue.
   if (taskConfig?.poll_stage_enabled && capped.length > 0) {
@@ -173,7 +199,7 @@ export async function pollAgent(
       agentId,
       contactId: contact.id,
       queueDay: today,
-      position: i + 1,
+      position: rolloverBacklog + i + 1,
       scheduledFor,
       bullmqJobId: jobId,
     });

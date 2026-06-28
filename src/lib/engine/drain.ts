@@ -7,8 +7,10 @@ import {
   claimQueueEntry,
   revertQueueClaim,
   failQueueEntry,
+  countDialedTodayForAgent,
 } from "./call-queue";
 import { evaluateDialWindow } from "./cadence";
+import { remainingDailyDialBudget } from "./rollover-priority";
 import type { AgentCallConfig } from "@/types";
 
 type DbClient = ReturnType<typeof createServiceClient>;
@@ -20,6 +22,7 @@ interface DueQueueRow {
   workspace_id: string;
   queue_day: string;
   position: number;
+  enqueued_at: string | null;
   scheduled_for: string | null;
   contacts: {
     is_terminal: boolean;
@@ -33,8 +36,14 @@ interface DueQueueRow {
     retell_agent_id: string | null;
     retell_from_number: string | null;
     agent_call_configs:
-      | Pick<AgentCallConfig, "call_window_start" | "call_window_end" | "drip_seconds">
-      | Pick<AgentCallConfig, "call_window_start" | "call_window_end" | "drip_seconds">[]
+      | Pick<
+          AgentCallConfig,
+          "call_window_start" | "call_window_end" | "drip_seconds" | "max_calls_per_day"
+        >
+      | Pick<
+          AgentCallConfig,
+          "call_window_start" | "call_window_end" | "drip_seconds" | "max_calls_per_day"
+        >[]
       | null;
   } | null;
   workspaces: { timezone: string; is_active: boolean } | null;
@@ -59,7 +68,10 @@ export function drainCapacityPerTick(dripSeconds: number): number {
 
 function pickCallConfig(
   raw: DueQueueRow["agents"]
-): Pick<AgentCallConfig, "call_window_start" | "call_window_end" | "drip_seconds"> | null {
+): Pick<
+  AgentCallConfig,
+  "call_window_start" | "call_window_end" | "drip_seconds" | "max_calls_per_day"
+> | null {
   const configs = raw?.agent_call_configs;
   if (!configs) return null;
   return Array.isArray(configs) ? configs[0] ?? null : configs;
@@ -81,16 +93,18 @@ export async function drainDueDials(opts?: {
   const { data: rows, error } = await supabase
     .from("call_queue_entries")
     .select(
-      `id, agent_id, contact_id, workspace_id, queue_day, position, scheduled_for,
+      `id, agent_id, contact_id, workspace_id, queue_day, position, enqueued_at, scheduled_for,
        contacts(is_terminal, last_called_on, phones, attempt_count),
        agents(status, direction, retell_agent_id, retell_from_number,
-         agent_call_configs(call_window_start, call_window_end, drip_seconds)),
+         agent_call_configs(call_window_start, call_window_end, drip_seconds, max_calls_per_day)),
        workspaces(timezone, is_active)`
     )
     .eq("status", "pending")
     .or(`scheduled_for.is.null,scheduled_for.lte.${nowIso}`)
     .order("agent_id", { ascending: true })
+    .order("queue_day", { ascending: true })
     .order("position", { ascending: true })
+    .order("enqueued_at", { ascending: true })
     .limit(limit)
     .returns<DueQueueRow[]>();
 
@@ -110,7 +124,8 @@ export async function drainDueDials(opts?: {
     skipped: 0,
   };
 
-  const perAgentBudget = new Map<string, number>();
+  const perAgentTickBudget = new Map<string, number>();
+  const perAgentDailyRemaining = new Map<string, number>();
 
   for (const row of rows) {
     const agent = row.agents;
@@ -155,17 +170,35 @@ export async function drainDueDials(opts?: {
       continue;
     }
 
-    const capacity = drainCapacityPerTick(config.drip_seconds);
-    const used = perAgentBudget.get(row.agent_id) ?? 0;
-    if (used >= capacity) {
+    if (!perAgentDailyRemaining.has(row.agent_id)) {
+      const dialedToday = await countDialedTodayForAgent(
+        supabase,
+        row.agent_id,
+        workspace.timezone
+      );
+      perAgentDailyRemaining.set(
+        row.agent_id,
+        remainingDailyDialBudget(config.max_calls_per_day, dialedToday)
+      );
+    }
+    const dailyRemaining = perAgentDailyRemaining.get(row.agent_id) ?? 0;
+    if (dailyRemaining <= 0) {
+      result.skipped++;
+      continue;
+    }
+
+    const tickCapacity = drainCapacityPerTick(config.drip_seconds);
+    const tickUsed = perAgentTickBudget.get(row.agent_id) ?? 0;
+    if (tickUsed >= tickCapacity) {
       result.skipped++;
       continue;
     }
 
     result.eligible++;
-    perAgentBudget.set(row.agent_id, used + 1);
     if (opts?.dryRun) {
       result.wouldDial++;
+      perAgentTickBudget.set(row.agent_id, tickUsed + 1);
+      perAgentDailyRemaining.set(row.agent_id, dailyRemaining - 1);
       continue;
     }
 
@@ -175,6 +208,8 @@ export async function drainDueDials(opts?: {
       continue;
     }
     result.claimed++;
+    perAgentTickBudget.set(row.agent_id, tickUsed + 1);
+    perAgentDailyRemaining.set(row.agent_id, dailyRemaining - 1);
 
     try {
       await placeCall({

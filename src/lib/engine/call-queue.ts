@@ -1,5 +1,6 @@
 // Durable call queue — tracks contacts from BullMQ enqueue through FUB writeback.
 import { createServiceClient } from "@/lib/supabase/server";
+import { addDays, todayInTz, zonedDateTimeToUtcIso } from "./cadence";
 import type { CallQueueStatus } from "@/types";
 
 type DbClient = ReturnType<typeof createServiceClient>;
@@ -212,6 +213,94 @@ export async function countActiveQueueForAgent(
     .eq("queue_day", queueDay)
     .in("status", ["pending", "dialing"]);
   return count ?? 0;
+}
+
+/** Pending + dialing rows from prior calendar days — rollover backlog. */
+export async function countRolloverBacklogForAgent(
+  supabase: DbClient,
+  agentId: string,
+  today: string
+): Promise<number> {
+  const { count, error } = await supabase
+    .from("call_queue_entries")
+    .select("id", { count: "exact", head: true })
+    .eq("agent_id", agentId)
+    .lt("queue_day", today)
+    .in("status", ["pending", "dialing"]);
+  if (error) throw new Error(error.message);
+  return count ?? 0;
+}
+
+/** Contact IDs with any active queue row for this agent (all queue days). */
+export async function listActiveQueuedContactIdsForAgent(
+  supabase: DbClient,
+  agentId: string
+): Promise<Set<string>> {
+  const { data, error } = await supabase
+    .from("call_queue_entries")
+    .select("contact_id")
+    .eq("agent_id", agentId)
+    .in("status", ["pending", "dialing"])
+    .returns<{ contact_id: string }[]>();
+  if (error) throw new Error(error.message);
+  return new Set((data ?? []).map((r) => r.contact_id));
+}
+
+/** Calls already placed today for an agent (workspace-local calendar day). */
+export async function countDialedTodayForAgent(
+  supabase: DbClient,
+  agentId: string,
+  timezone: string
+): Promise<number> {
+  const today = todayInTz(timezone);
+  const tomorrow = addDays(today, 1);
+  const dayStart = zonedDateTimeToUtcIso(timezone, today, "00:00");
+  const dayEnd = zonedDateTimeToUtcIso(timezone, tomorrow, "00:00");
+  const { count, error } = await supabase
+    .from("calls")
+    .select("id", { count: "exact", head: true })
+    .eq("agent_id", agentId)
+    .not("dialed_at", "is", null)
+    .gte("dialed_at", dayStart)
+    .lt("dialed_at", dayEnd);
+  if (error) throw new Error(error.message);
+  return count ?? 0;
+}
+
+/**
+ * Renumber rollover rows to positions 1..N (oldest queue_day first) for Ops
+ * visibility. Does not touch today's or future rows.
+ */
+export async function normalizeRolloverPositions(
+  supabase: DbClient,
+  agentId: string,
+  today: string
+): Promise<number> {
+  const { data, error } = await supabase
+    .from("call_queue_entries")
+    .select("id, queue_day, position, enqueued_at")
+    .eq("agent_id", agentId)
+    .lt("queue_day", today)
+    .eq("status", "pending")
+    .order("queue_day", { ascending: true })
+    .order("position", { ascending: true })
+    .order("enqueued_at", { ascending: true })
+    .returns<{ id: string; queue_day: string; position: number; enqueued_at: string }[]>();
+  if (error) throw new Error(error.message);
+  if (!data?.length) return 0;
+
+  let updated = 0;
+  for (let i = 0; i < data.length; i++) {
+    const target = i + 1;
+    if (data[i].position === target) continue;
+    const { error: patchErr } = await supabase
+      .from("call_queue_entries")
+      .update({ position: target })
+      .eq("id", data[i].id);
+    if (patchErr) throw new Error(patchErr.message);
+    updated++;
+  }
+  return updated;
 }
 
 /** Update scheduled_for on a pending queue row (e.g. after defer or reschedule). */
