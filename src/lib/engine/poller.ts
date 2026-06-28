@@ -23,6 +23,7 @@ import { applyPollStageRouting } from "./pipeline-routing";
 
 export interface PollOptions {
   testMode?: boolean;
+  skipRedis?: boolean;
 }
 
 export interface PollResult {
@@ -191,7 +192,7 @@ export async function pollAgent(
   }
 
   let enqueued = 0;
-  if (jobSpecs.length > 0 && process.env.REDIS_URL) {
+  if (jobSpecs.length > 0 && process.env.REDIS_URL && !options?.skipRedis) {
     try {
       await addCallJobsBulk(jobSpecs);
       enqueued = jobSpecs.length;

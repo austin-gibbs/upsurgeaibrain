@@ -43,6 +43,7 @@ interface DueQueueRow {
 export interface DrainResult {
   scanned: number;
   eligible: number;
+  wouldDial: number;
   claimed: number;
   dialed: number;
   deferred: number;
@@ -70,6 +71,7 @@ function pickCallConfig(
  */
 export async function drainDueDials(opts?: {
   limit?: number;
+  dryRun?: boolean;
   db?: DbClient;
 }): Promise<DrainResult> {
   const limit = opts?.limit ?? 500;
@@ -94,12 +96,13 @@ export async function drainDueDials(opts?: {
 
   if (error) throw new Error(error.message);
   if (!rows?.length) {
-    return { scanned: 0, eligible: 0, claimed: 0, dialed: 0, deferred: 0, failed: 0, skipped: 0 };
+    return { scanned: 0, eligible: 0, wouldDial: 0, claimed: 0, dialed: 0, deferred: 0, failed: 0, skipped: 0 };
   }
 
   const result: DrainResult = {
     scanned: rows.length,
     eligible: 0,
+    wouldDial: 0,
     claimed: 0,
     dialed: 0,
     deferred: 0,
@@ -161,6 +164,10 @@ export async function drainDueDials(opts?: {
 
     result.eligible++;
     perAgentBudget.set(row.agent_id, used + 1);
+    if (opts?.dryRun) {
+      result.wouldDial++;
+      continue;
+    }
 
     const claimed = await claimQueueEntry(supabase, { id: row.id });
     if (!claimed) {

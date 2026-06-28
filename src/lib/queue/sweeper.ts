@@ -45,6 +45,10 @@ export interface SweepResult {
   skipped: number;
 }
 
+export function isLiveBullMqState(state: string): boolean {
+  return ["waiting", "delayed", "active", "prioritized", "paused", "waiting-children"].includes(state);
+}
+
 async function loadAgentDial(
   supabase: DbClient,
   cache: Map<string, AgentDial | null>,
@@ -129,11 +133,16 @@ export async function resyncCallQueue(opts?: { limit?: number }): Promise<SweepR
     const jobId =
       row.bullmq_job_id ?? `${row.agent_id}:${row.contact_id}:${row.queue_day}`;
 
-    // Already has a live job → nothing to heal.
+    // Already has a live job → nothing to heal. Completed/failed Redis jobs do
+    // not count as live; if Postgres still says pending, rebuild the job.
     const existing = await queue.getJob(jobId);
     if (existing) {
-      skipped++;
-      continue;
+      const state = await existing.getState();
+      if (isLiveBullMqState(state)) {
+        skipped++;
+        continue;
+      }
+      await existing.remove().catch(() => {});
     }
 
     const dial = await loadAgentDial(

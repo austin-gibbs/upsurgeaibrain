@@ -74,18 +74,26 @@ async function main() {
   const pollWorker = startPollWorker();
   const callWorker = startCallWorker();
 
-  // Heartbeat for Vercel failover crons — written every 30s to Postgres.
+  // Heartbeat for Vercel failover crons — written only when Redis is healthy.
+  // BullMQ is the execution layer for polls/calls; a process with broken Redis
+  // is a zombie worker, so do not advertise it as healthy.
+  const writeHealthyHeartbeat = async () => {
+    const pong = await getRedis().ping();
+    if (pong !== "PONG") throw new Error(`Redis ping returned ${pong}`);
+    await writeHeartbeat();
+  };
+
   let heartbeatTimer: NodeJS.Timeout | null = setInterval(async () => {
     try {
-      await writeHeartbeat();
+      await writeHealthyHeartbeat();
     } catch (e) {
-      console.error("[heartbeat] write error:", e);
+      console.error("[heartbeat] health/write error:", e);
     }
   }, 30_000);
   try {
-    await writeHeartbeat();
+    await writeHealthyHeartbeat();
   } catch (e) {
-    console.error("[heartbeat] initial write error:", e);
+    console.error("[heartbeat] initial health/write error:", e);
   }
 
   // Internal scheduler: tick every minute. (Disable and use external cron

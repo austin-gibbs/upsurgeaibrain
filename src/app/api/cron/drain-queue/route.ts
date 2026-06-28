@@ -27,6 +27,8 @@ async function handle(req: NextRequest) {
   if (!authorized(req)) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
+  const url = new URL(req.url);
+  const dryRun = url.searchParams.get("dryRun") === "1";
 
   const stallCheck = await checkDialStalls();
   const trigger = resolveFailoverDrainTrigger({
@@ -42,10 +44,11 @@ async function handle(req: NextRequest) {
     });
   }
 
-  const result = await drainDueDials();
+  const result = await drainDueDials({ dryRun });
   return NextResponse.json({
     failover: true,
     trigger,
+    dryRun,
     heartbeatAgeSec: stallCheck.heartbeatAgeSec,
     stalledAgents: stallCheck.stalled.length,
     stalled: stallCheck.stalled.map((s) => ({
@@ -53,6 +56,7 @@ async function handle(req: NextRequest) {
       agentName: s.agentName,
       workspaceName: s.workspaceName,
       overduePending: s.overduePending,
+      oldestPendingQueueDay: s.oldestPendingQueueDay,
     })),
     ...result,
   });

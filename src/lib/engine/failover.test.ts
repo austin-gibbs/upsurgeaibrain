@@ -13,6 +13,7 @@ import {
   shouldTriggerFailoverDrain,
   resolveFailoverDrainTrigger,
 } from "./dial-watchdog";
+import { isLiveBullMqState } from "../queue/sweeper";
 
 describe("isHeartbeatStaleAt", () => {
   const now = Date.parse("2026-06-25T22:30:00.000Z");
@@ -49,6 +50,24 @@ describe("drainCapacityPerTick", () => {
   it("defaults to at least 1 for invalid drip", () => {
     assert.equal(drainCapacityPerTick(0), 1);
     assert.equal(drainCapacityPerTick(-5), 1);
+  });
+});
+
+describe("DrainResult shape", () => {
+  it("tracks dry-run calls separately from placed calls", () => {
+    const result = {
+      scanned: 1,
+      eligible: 1,
+      wouldDial: 1,
+      claimed: 0,
+      dialed: 0,
+      deferred: 0,
+      failed: 0,
+      skipped: 0,
+    };
+
+    assert.equal(result.wouldDial, 1);
+    assert.equal(result.dialed, 0);
   });
 });
 
@@ -99,6 +118,20 @@ describe("shouldAlertDialStall", () => {
       }),
       false
     );
+  });
+});
+
+describe("isLiveBullMqState", () => {
+  it("treats runnable BullMQ states as live", () => {
+    assert.equal(isLiveBullMqState("waiting"), true);
+    assert.equal(isLiveBullMqState("delayed"), true);
+    assert.equal(isLiveBullMqState("active"), true);
+  });
+
+  it("treats terminal BullMQ states as rebuildable", () => {
+    assert.equal(isLiveBullMqState("completed"), false);
+    assert.equal(isLiveBullMqState("failed"), false);
+    assert.equal(isLiveBullMqState("unknown"), false);
   });
 });
 

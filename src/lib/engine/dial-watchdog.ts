@@ -12,6 +12,7 @@ export interface DialStallSignal {
   workspaceName: string;
   timezone: string;
   overduePending: number;
+  oldestPendingQueueDay: string | null;
   recentDials: number;
   heartbeatStale: boolean;
   heartbeatAgeSec: number | null;
@@ -111,20 +112,23 @@ export async function checkDialStalls(opts?: {
       config.call_window_end
     ).allowed;
 
-    const today = new Intl.DateTimeFormat("en-CA", {
-      timeZone: workspace.timezone,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-    }).format(new Date());
-
-    const { count: overduePending } = await supabase
-      .from("call_queue_entries")
-      .select("id", { count: "exact", head: true })
-      .eq("agent_id", agent.id)
-      .eq("queue_day", today)
-      .eq("status", "pending")
-      .or(`scheduled_for.is.null,scheduled_for.lte.${nowIso}`);
+    const [{ count: overduePending }, { data: oldestPending }] = await Promise.all([
+      supabase
+        .from("call_queue_entries")
+        .select("id", { count: "exact", head: true })
+        .eq("agent_id", agent.id)
+        .eq("status", "pending")
+        .or(`scheduled_for.is.null,scheduled_for.lte.${nowIso}`),
+      supabase
+        .from("call_queue_entries")
+        .select("queue_day")
+        .eq("agent_id", agent.id)
+        .eq("status", "pending")
+        .or(`scheduled_for.is.null,scheduled_for.lte.${nowIso}`)
+        .order("queue_day", { ascending: true })
+        .limit(1)
+        .maybeSingle<{ queue_day: string }>(),
+    ]);
 
     const { count: recentDials } = await supabase
       .from("calls")
@@ -149,6 +153,7 @@ export async function checkDialStalls(opts?: {
         workspaceName: workspace.name,
         timezone: workspace.timezone,
         overduePending: overdue,
+        oldestPendingQueueDay: oldestPending?.queue_day ?? null,
         recentDials: recent,
         heartbeatStale,
         heartbeatAgeSec,
@@ -176,7 +181,9 @@ export function formatDialStallAlert(result: DialWatchdogResult): string {
   for (const s of result.stalled) {
     lines.push(
       `• *${s.workspaceName}* / ${s.agentName} (${s.timezone}, now ${nowHHMMInTz(s.timezone)})`,
-      `  overdue pending: ${s.overduePending}, recent dials (${10}m): ${s.recentDials}`
+      `  overdue pending: ${s.overduePending}${
+        s.oldestPendingQueueDay ? `, oldest queue day: ${s.oldestPendingQueueDay}` : ""
+      }, recent dials (${10}m): ${s.recentDials}`
     );
   }
 
