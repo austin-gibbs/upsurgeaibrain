@@ -5,25 +5,20 @@
 // jobs that the cloud worker will pick up. Returns 503 if Redis is down.
 // =====================================================================
 import { NextResponse } from "next/server";
-import { getRedis, closeRedis } from "@/lib/queue/connection";
+import { probeRedisQueueHealth } from "@/lib/queue/redis-health";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  let redisOk = false;
-  try {
-    const pong = await getRedis().ping();
-    redisOk = pong === "PONG";
-  } catch {
-    redisOk = false;
-  } finally {
-    // One-off probe on serverless — don't leak the connection.
-    closeRedis();
-  }
+  const health = await probeRedisQueueHealth({ closeAfter: true });
 
   return NextResponse.json(
-    { ok: redisOk, redis: redisOk ? "up" : "down" },
-    { status: redisOk ? 200 : 503 }
+    {
+      ok: health.ok,
+      redis: health.ok ? "up" : "down",
+      reason: health.reason,
+    },
+    { status: health.ok ? 200 : 503 }
   );
 }
