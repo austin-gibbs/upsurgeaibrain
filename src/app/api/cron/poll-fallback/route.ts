@@ -9,6 +9,7 @@ import { createServiceClient } from "@/lib/supabase/server";
 import { bearerMatches } from "@/lib/secure";
 import { isHeartbeatStale, heartbeatAgeMs } from "@/lib/engine/heartbeat";
 import { pollAgent } from "@/lib/engine/poller";
+import { probeRedisQueueHealth } from "@/lib/queue/redis-health";
 import {
   addDays,
   nowHHMMInTz,
@@ -87,6 +88,8 @@ async function handle(req: NextRequest) {
   }
 
   const stale = await isHeartbeatStale();
+  const redisHealth = await probeRedisQueueHealth({ closeAfter: true });
+  const redisOk = redisHealth.ok;
   const heartbeatAgeSec = await heartbeatAgeMs().then((ms) =>
     ms == null ? null : Math.round(ms / 1000)
   );
@@ -133,7 +136,7 @@ async function handle(req: NextRequest) {
       config,
       workspace.timezone
     );
-    if (!stale && !missedDailyPoll) {
+    if (!stale && !missedDailyPoll && redisOk) {
       skippedAgents.push(agent.id);
       continue;
     }
@@ -147,18 +150,26 @@ async function handle(req: NextRequest) {
     polled.push(agent.id);
   }
 
-  if (!stale && polled.length === 0) {
+  if (!stale && redisOk && polled.length === 0) {
     return NextResponse.json({
       skipped: "worker_healthy",
       heartbeatAgeSec,
+      redis: redisHealth,
       skippedAgents,
     });
   }
 
+  const trigger = !redisOk
+    ? "redis_unavailable"
+    : stale
+      ? "heartbeat_stale"
+      : "missed_daily_poll";
+
   return NextResponse.json({
     failover: true,
-    trigger: stale ? "heartbeat_stale" : "missed_daily_poll",
+    trigger,
     heartbeatAgeSec,
+    redis: redisHealth,
     polled,
     missedDailyPollAgents,
     skippedAgents,

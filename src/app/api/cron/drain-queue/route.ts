@@ -3,8 +3,8 @@
 // Redis-independent failover: claim due call_queue_entries and place calls
 // directly via placeCall when either:
 //   - the Railway worker heartbeat is stale (worker dead), or
-//   - dial stall is detected (zombie worker: heartbeat ok but overdue pending
-//     rows and no recent dials during an open call window).
+//   - Redis/BullMQ is unavailable (quota/outage — PING can still succeed), or
+//   - dial stall is detected (overdue pending + no recent dials in-window).
 // Protect with CRON_SECRET. Runs every minute via Vercel Cron.
 // =====================================================================
 import { NextRequest, NextResponse } from "next/server";
@@ -14,6 +14,7 @@ import {
   resolveFailoverDrainTrigger,
 } from "@/lib/engine/dial-watchdog";
 import { drainDueDials } from "@/lib/engine/drain";
+import { probeRedisQueueHealth } from "@/lib/queue/redis-health";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -31,9 +32,11 @@ async function handle(req: NextRequest) {
   const dryRun = url.searchParams.get("dryRun") === "1";
 
   const stallCheck = await checkDialStalls();
+  const redisHealth = await probeRedisQueueHealth({ closeAfter: true });
   const trigger = resolveFailoverDrainTrigger({
     heartbeatStale: stallCheck.heartbeatStale,
     stalledAgentCount: stallCheck.stalled.length,
+    redisUnhealthy: !redisHealth.ok,
   });
 
   if (!trigger) {
@@ -41,6 +44,7 @@ async function handle(req: NextRequest) {
       skipped: "worker_healthy",
       heartbeatAgeSec: stallCheck.heartbeatAgeSec,
       stalledAgents: 0,
+      redis: redisHealth,
     });
   }
 
@@ -49,6 +53,7 @@ async function handle(req: NextRequest) {
     failover: true,
     trigger,
     dryRun,
+    redis: redisHealth,
     heartbeatAgeSec: stallCheck.heartbeatAgeSec,
     stalledAgents: stallCheck.stalled.length,
     stalled: stallCheck.stalled.map((s) => ({

@@ -39,23 +39,31 @@ export function shouldAlertDialStall(params: {
 
 /**
  * Whether the Postgres-backed drain cron should take over dialing.
- * Triggers on stale heartbeat (worker dead) OR dial stall (zombie worker:
+ * Triggers on stale heartbeat (worker dead), Redis/BullMQ unavailable
+ * (quota/outage — PING can still succeed), or dial stall (zombie worker:
  * heartbeat fresh but overdue pending rows and no recent dials in-window).
  */
 export function shouldTriggerFailoverDrain(params: {
   heartbeatStale: boolean;
   stalledAgentCount: number;
+  redisUnhealthy?: boolean;
 }): boolean {
+  if (params.redisUnhealthy) return true;
   if (params.heartbeatStale) return true;
   return params.stalledAgentCount > 0;
 }
 
-export type FailoverDrainTrigger = "heartbeat_stale" | "dial_stall";
+export type FailoverDrainTrigger =
+  | "redis_unavailable"
+  | "heartbeat_stale"
+  | "dial_stall";
 
 export function resolveFailoverDrainTrigger(params: {
   heartbeatStale: boolean;
   stalledAgentCount: number;
+  redisUnhealthy?: boolean;
 }): FailoverDrainTrigger | null {
+  if (params.redisUnhealthy) return "redis_unavailable";
   if (params.heartbeatStale) return "heartbeat_stale";
   if (params.stalledAgentCount > 0) return "dial_stall";
   return null;

@@ -17,7 +17,7 @@ import { startCallWorker } from "@/lib/queue/workers/call.worker";
 import { tickScheduler } from "@/lib/engine/scheduler";
 import { reconcileStuckCalls } from "@/lib/engine/reconcile";
 import { resyncCallQueue } from "@/lib/queue/sweeper";
-import { getRedis } from "@/lib/queue/connection";
+import { probeRedisQueueHealth } from "@/lib/queue/redis-health";
 import { writeHeartbeat } from "@/lib/engine/heartbeat";
 
 const BOOTED_AT = Date.now();
@@ -44,15 +44,18 @@ function startHealthServer(): Server {
       return;
     }
     let redisOk = false;
+    let redisReason: string | undefined;
     try {
-      const pong = await getRedis().ping();
-      redisOk = pong === "PONG";
+      const health = await probeRedisQueueHealth();
+      redisOk = health.ok;
+      redisReason = health.reason;
     } catch {
       redisOk = false;
     }
     const body = JSON.stringify({
       ok: redisOk,
       redis: redisOk ? "up" : "down",
+      redisReason,
       uptimeSec: Math.round((Date.now() - BOOTED_AT) / 1000),
     });
     res.writeHead(redisOk ? 200 : 503, { "content-type": "application/json" });
@@ -74,27 +77,43 @@ async function main() {
   const pollWorker = startPollWorker();
   const callWorker = startCallWorker();
 
-  // Heartbeat for Vercel failover crons — written only when Redis is healthy.
-  // BullMQ is the execution layer for polls/calls; a process with broken Redis
-  // is a zombie worker, so do not advertise it as healthy.
+  // Heartbeat for Vercel failover crons — written only when BullMQ can run.
+  // Upstash quota exhaustion still allows PING; probe queue ops to avoid a
+  // zombie worker that looks healthy while dials are stuck.
   const writeHealthyHeartbeat = async () => {
-    const pong = await getRedis().ping();
-    if (pong !== "PONG") throw new Error(`Redis ping returned ${pong}`);
+    const health = await probeRedisQueueHealth();
+    if (!health.ok) {
+      throw new Error(`Redis queue unhealthy: ${health.reason ?? "unknown"}`);
+    }
     await writeHeartbeat();
   };
 
-  let heartbeatTimer: NodeJS.Timeout | null = setInterval(async () => {
-    try {
-      await writeHealthyHeartbeat();
-    } catch (e) {
-      console.error("[heartbeat] health/write error:", e);
-    }
-  }, 30_000);
+  const HEARTBEAT_BASE_MS = 30_000;
+  const HEARTBEAT_MAX_MS = 5 * 60_000;
+  let heartbeatDelayMs = HEARTBEAT_BASE_MS;
+  let heartbeatTimer: NodeJS.Timeout | null = null;
+
+  const scheduleHeartbeat = () => {
+    heartbeatTimer = setTimeout(async () => {
+      try {
+        await writeHealthyHeartbeat();
+        heartbeatDelayMs = HEARTBEAT_BASE_MS;
+      } catch (e) {
+        console.error("[heartbeat] health/write error:", e);
+        heartbeatDelayMs = Math.min(heartbeatDelayMs * 2, HEARTBEAT_MAX_MS);
+      } finally {
+        scheduleHeartbeat();
+      }
+    }, heartbeatDelayMs);
+  };
+
   try {
     await writeHealthyHeartbeat();
   } catch (e) {
     console.error("[heartbeat] initial health/write error:", e);
+    heartbeatDelayMs = Math.min(heartbeatDelayMs * 2, HEARTBEAT_MAX_MS);
   }
+  scheduleHeartbeat();
 
   // Internal scheduler: tick every minute. (Disable and use external cron
   // instead by setting USE_EXTERNAL_CRON=true.)
@@ -126,25 +145,27 @@ async function main() {
     }
   }, 2 * 60_000);
 
-  // Queue self-heal sweep: every 90s, rebuild BullMQ dial jobs for durable
+  // Queue self-heal sweep: every 3 minutes, rebuild BullMQ dial jobs for durable
   // `call_queue_entries` rows that are due but have no live job (e.g. after a
-  // worker redeploy or a Redis restart wiped the delayed-job set). This makes
-  // the durable Postgres queue the source of truth and lets the day's dials
-  // survive infra churn instead of silently dying. Idempotent and bounded.
+  // worker redeploy or a Redis restart wiped the delayed-job set). Skipped
+  // automatically when Redis/BullMQ is unavailable so we don't burn quota on
+  // doomed requests — Vercel failover drain takes over instead.
   let sweepTimer: NodeJS.Timeout | null = setInterval(async () => {
     try {
       const summary = await resyncCallQueue({ limit: 500 });
       if (summary.reEnqueued) {
         console.log("[sweeper] call-queue self-heal:", summary);
+      } else if (summary.redisSkipped) {
+        console.warn("[sweeper] skipped — Redis queue unavailable (failover drain active)");
       }
     } catch (e) {
       console.error("[sweeper] resync error:", e);
     }
-  }, 90_000);
+  }, 3 * 60_000);
 
   const shutdown = async () => {
     console.log("[worker] shutting down…");
-    if (heartbeatTimer) clearInterval(heartbeatTimer);
+    if (heartbeatTimer) clearTimeout(heartbeatTimer);
     heartbeatTimer = null;
     if (timer) clearInterval(timer);
     if (reconcileTimer) clearInterval(reconcileTimer);

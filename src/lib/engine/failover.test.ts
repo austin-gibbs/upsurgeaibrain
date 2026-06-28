@@ -143,6 +143,17 @@ describe("shouldTriggerFailoverDrain", () => {
     );
   });
 
+  it("triggers when Redis/BullMQ is unavailable", () => {
+    assert.equal(
+      shouldTriggerFailoverDrain({
+        heartbeatStale: false,
+        stalledAgentCount: 0,
+        redisUnhealthy: true,
+      }),
+      true
+    );
+  });
+
   it("triggers on dial stall even when heartbeat is fresh (zombie worker)", () => {
     assert.equal(
       shouldTriggerFailoverDrain({ heartbeatStale: false, stalledAgentCount: 2 }),
@@ -159,7 +170,18 @@ describe("shouldTriggerFailoverDrain", () => {
 });
 
 describe("resolveFailoverDrainTrigger", () => {
-  it("prefers heartbeat_stale when both conditions hold", () => {
+  it("prefers redis_unavailable over other conditions", () => {
+    assert.equal(
+      resolveFailoverDrainTrigger({
+        heartbeatStale: true,
+        stalledAgentCount: 3,
+        redisUnhealthy: true,
+      }),
+      "redis_unavailable"
+    );
+  });
+
+  it("prefers heartbeat_stale when Redis is ok and both conditions hold", () => {
     assert.equal(
       resolveFailoverDrainTrigger({ heartbeatStale: true, stalledAgentCount: 3 }),
       "heartbeat_stale"

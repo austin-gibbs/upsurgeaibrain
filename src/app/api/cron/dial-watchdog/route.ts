@@ -10,6 +10,7 @@ import {
   checkDialStalls,
   formatDialStallAlert,
 } from "@/lib/engine/dial-watchdog";
+import { probeRedisQueueHealth } from "@/lib/queue/redis-health";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -24,13 +25,22 @@ async function handle(req: NextRequest) {
   }
 
   const result = await checkDialStalls();
+  const redisHealth = await probeRedisQueueHealth({ closeAfter: true });
   let alerted = false;
 
   if (result.stalled.length > 0) {
-    alerted = await sendOpsAlert(formatDialStallAlert(result));
+    const redisLine = !redisHealth.ok
+      ? `\nRedis: *UNAVAILABLE* (${redisHealth.reason ?? "unknown"}) — failover drain should be active.`
+      : "";
+    alerted = await sendOpsAlert(formatDialStallAlert(result) + redisLine);
+  } else if (!redisHealth.ok) {
+    alerted = await sendOpsAlert(
+      `:warning: *Redis queue unavailable* (${redisHealth.reason ?? "unknown"}). ` +
+        "BullMQ dials are blocked; Vercel failover drain should place calls during open windows."
+    );
   }
 
-  return NextResponse.json({ ...result, alerted });
+  return NextResponse.json({ ...result, redis: redisHealth, alerted });
 }
 
 export const GET = handle;

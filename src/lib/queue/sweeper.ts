@@ -18,8 +18,11 @@
 // =====================================================================
 import { createServiceClient } from "@/lib/supabase/server";
 import { getCallQueue } from "./queues";
+import { probeRedisQueueHealth } from "./redis-health";
 import { msUntilQueueSlot, todayInTz } from "@/lib/engine/cadence";
 import type { AgentCallConfig } from "@/types";
+import type { Queue } from "bullmq";
+import type { CallJob } from "./queues";
 
 type DbClient = ReturnType<typeof createServiceClient>;
 
@@ -43,6 +46,23 @@ export interface SweepResult {
   scanned: number;
   reEnqueued: number;
   skipped: number;
+  redisSkipped?: boolean;
+}
+
+/** One batched Redis read instead of per-row getJob (major request savings). */
+export async function listLiveCallJobIds(
+  queue: Queue<CallJob>,
+  opts?: { maxPerState?: number }
+): Promise<Set<string>> {
+  const ids = new Set<string>();
+  const maxPerState = opts?.maxPerState ?? 2000;
+  for (const state of ["waiting", "delayed", "active", "prioritized"] as const) {
+    const jobs = await queue.getJobs([state], 0, maxPerState);
+    for (const job of jobs) {
+      if (job.id != null) ids.add(String(job.id));
+    }
+  }
+  return ids;
 }
 
 export function isLiveBullMqState(state: string): boolean {
@@ -100,6 +120,11 @@ async function loadAgentDial(
 export async function resyncCallQueue(opts?: { limit?: number }): Promise<SweepResult> {
   if (!process.env.REDIS_URL) return { scanned: 0, reEnqueued: 0, skipped: 0 };
 
+  const redisHealth = await probeRedisQueueHealth();
+  if (!redisHealth.ok) {
+    return { scanned: 0, reEnqueued: 0, skipped: 0, redisSkipped: true };
+  }
+
   const limit = opts?.limit ?? 1000;
   const supabase = createServiceClient();
   const nowIso = new Date().toISOString();
@@ -123,6 +148,7 @@ export async function resyncCallQueue(opts?: { limit?: number }): Promise<SweepR
   if (!rows?.length) return { scanned: 0, reEnqueued: 0, skipped: 0 };
 
   const queue = getCallQueue();
+  const liveJobIds = await listLiveCallJobIds(queue);
   const agentCache = new Map<string, AgentDial | null>();
   // Re-stagger only the jobs we actually rebuild, per agent, so recovered dials
   // keep drip spacing instead of firing in one burst.
@@ -135,16 +161,11 @@ export async function resyncCallQueue(opts?: { limit?: number }): Promise<SweepR
     const jobId =
       row.bullmq_job_id ?? `${row.agent_id}:${row.contact_id}:${row.queue_day}`;
 
-    // Already has a live job → nothing to heal. Completed/failed Redis jobs do
-    // not count as live; if Postgres still says pending, rebuild the job.
-    const existing = await queue.getJob(jobId);
-    if (existing) {
-      const state = await existing.getState();
-      if (isLiveBullMqState(state)) {
-        skipped++;
-        continue;
-      }
-      await existing.remove().catch(() => {});
+    // Already has a live job → nothing to heal. Completed/failed jobs are not
+    // in liveJobIds, so Postgres pending rows get rebuilt below.
+    if (liveJobIds.has(jobId)) {
+      skipped++;
+      continue;
     }
 
     const dial = await loadAgentDial(
