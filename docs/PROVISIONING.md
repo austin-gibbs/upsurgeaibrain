@@ -63,6 +63,8 @@ See `scripts/provision-agent.example.json` for a fillable template. Key fields:
 | `workspace` | `{ "mode": "existing", "id": "<uuid>" }` or `{ "mode": "new", ... }`. New workspaces take `organizationId` **or** `organizationName` (found-or-created by name), and `crmProvider` (defaults `followupboss`). |
 | `workspace.crmCredentials` | **Optional for new workspaces.** Omit to defer CRM — the agent is still provisioned but lands as `draft` until CRM is connected in the app. Include to activate immediately. |
 | `agent.callConfig` | Call window = the timeframe, plus cadence + caps. Missing keys default. For a fixed daily call, set `cadence_day_gaps: [1]` + `max_attempts_per_contact: <days>`, with a tight `call_window_start`/`end` bracketing `daily_run_at`. |
+| `agent.taskConfig` | **Optional.** CRM task + HighLevel automations. `pipeline_automation_enabled` (outcome→stage routing, needs `pipelineStageMap`), `poll_stage_enabled` + `poll_pipeline_id`/`poll_pipeline_stage_id` (poll-initiated opportunity), `opportunity_custom_field_enabled` + `_id`/`_value`. All HighLevel-only — no-op on Follow Up Boss. |
+| `agent.pipelineStageMap` | **Optional, HighLevel-only.** Array of `{ outcome, call_attempt, pipeline_id, pipeline_stage_id, pipeline_name?, stage_name? }` routing rules; `call_attempt: null` is the fallback for any attempt. Requires `taskConfig.pipeline_automation_enabled`. IDs come from the console's "Fetch HighLevel pipelines & fields". |
 
 ## Steps
 

@@ -15,7 +15,8 @@
 import { z } from "zod";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { encryptJson } from "@/lib/crypto";
-import { RetellClient } from "@/lib/retell/client";
+import { validateAgentActivation } from "@/lib/agents/activation";
+import { bindRetellWebhookForAgentSafe, appRetellWebhookUrl } from "@/lib/retell/webhook-bind";
 import {
   createRetellAgent,
   createRetellLlm,
@@ -25,10 +26,10 @@ import {
 import {
   callConfigSchema,
   taskConfigSchema,
+  pipelineStageMapSchema,
   crmCredentialsSchema,
   crmAccountUrlSchema,
 } from "@/lib/validation";
-import { validateAgentActivation } from "@/lib/agents/activation";
 import {
   effectiveEnrollTag,
   enrollTagConflict,
@@ -113,6 +114,14 @@ const agentSpecSchema = z.object({
   /** Optional; missing keys fall back to call-config defaults. */
   callConfig: callConfigSchema.optional(),
   taskConfig: taskConfigSchema.optional(),
+  /**
+   * Optional outcome -> HighLevel pipeline-stage routing rules. Each entry
+   * pins (outcome, optional call_attempt) to a pipeline + stage. Requires the
+   * effective CRM to be HighLevel and `taskConfig.pipeline_automation_enabled`
+   * for after-call moves to fire. Pipeline/stage IDs come from the client's
+   * HighLevel account (fetch via GET /api/console/highlevel).
+   */
+  pipelineStageMap: pipelineStageMapSchema.optional(),
 });
 
 export const provisionRetellAgentSchema = z
@@ -186,12 +195,6 @@ type WorkspaceRow = {
   crm_credentials_encrypted: string | null;
 };
 
-function webhookUrlFromEnv(): string | undefined {
-  const base = process.env.NEXT_PUBLIC_APP_URL?.trim();
-  if (!base) return undefined;
-  return `${base.replace(/\/$/, "")}/api/webhooks/retell`;
-}
-
 /**
  * Author a Retell agent and wire it into the app. Throws on any failure;
  * Retell resources created before a later failure are reported in the error
@@ -203,7 +206,7 @@ export async function provisionRetellAgent(
 ): Promise<ProvisionResult> {
   const spec = provisionRetellAgentSchema.parse(specInput);
   const { retell } = spec;
-  const webhookUrl = webhookUrlFromEnv();
+  const webhookUrl = appRetellWebhookUrl();
 
   // Resolve the owner up front (before any Retell resource is created) so a bad
   // email fails fast without leaving orphans. The owner makes the workspace
@@ -463,18 +466,35 @@ export async function provisionRetellAgent(
     throw new Error(`failed to create agent task config: ${tcErr.message}`);
   }
 
-  // ---- 8. Bind webhook events on the agent (defensive) --------------------
-  if (webhookUrl) {
-    try {
-      await new RetellClient(retell.apiKey).ensureAgentWebhookUrl(
-        retellAgentId,
-        webhookUrl
-      );
-    } catch {
-      // Non-fatal: per-call webhook_url still delivers; the agent was created
-      // with a webhook_url. Leave a draft for manual review if this fails.
+  // Optional outcome -> pipeline stage routing rules (HighLevel). Insert the
+  // supplied rules so after-call pipeline automation has a map to consult;
+  // without these, pipeline_automation_enabled is a no-op. Mirrors the
+  // replace-all semantics of PATCH /api/agents/[id].
+  if (spec.agent.pipelineStageMap && spec.agent.pipelineStageMap.length > 0) {
+    const stageRows = spec.agent.pipelineStageMap.map((entry) => ({
+      agent_id: agent.id,
+      outcome: entry.outcome,
+      call_attempt: entry.call_attempt,
+      pipeline_id: entry.pipeline_id,
+      pipeline_stage_id: entry.pipeline_stage_id,
+      pipeline_name: entry.pipeline_name,
+      stage_name: entry.stage_name,
+      updated_at: new Date().toISOString(),
+    }));
+    const { error: smErr } = await db
+      .from("agent_pipeline_stage_map")
+      .insert(stageRows);
+    if (smErr) {
+      throw new Error(`failed to create pipeline stage map: ${smErr.message}`);
     }
   }
+
+  // ---- 8. Bind webhook events on the agent (defensive) --------------------
+  await bindRetellWebhookForAgentSafe({
+    id: agent.id,
+    retell_agent_id: retellAgentId,
+    retell_credentials_encrypted: retellCredentialsEncrypted,
+  });
 
   // ---- 9. Activate (running the same invariants as the UI) ----------------
   let status: "active" | "draft" = "draft";

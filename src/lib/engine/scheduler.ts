@@ -12,47 +12,65 @@ import { getPollQueue } from "@/lib/queue/queues";
 import { nowHHMMInTz, todayInTz } from "./cadence";
 import type { Agent, AgentCallConfig, Workspace } from "@/types";
 
+type SchedulerAgentRow = Pick<Agent, "id" | "workspace_id" | "status" | "direction"> & {
+  agent_call_configs:
+    | Pick<AgentCallConfig, "daily_run_at">
+    | Pick<AgentCallConfig, "daily_run_at">[]
+    | null;
+  workspaces: Pick<Workspace, "timezone" | "is_active"> | null;
+};
+
+function pickDailyRunAt(row: SchedulerAgentRow): string | null {
+  const configs = row.agent_call_configs;
+  if (!configs) return null;
+  const config = Array.isArray(configs) ? configs[0] : configs;
+  return config?.daily_run_at ?? null;
+}
+
 export async function tickScheduler(): Promise<{ enqueued: string[] }> {
   const supabase = createServiceClient();
   const enqueued: string[] = [];
 
   const { data: agents } = await supabase
     .from("agents")
-    .select("id, workspace_id, status, direction")
+    .select(
+      `id, workspace_id, status, direction,
+       agent_call_configs(daily_run_at),
+       workspaces(timezone, is_active)`
+    )
     .eq("status", "active")
     .eq("direction", "outbound")
-    .returns<Pick<Agent, "id" | "workspace_id" | "status" | "direction">[]>();
+    .returns<SchedulerAgentRow[]>();
   if (!agents?.length) return { enqueued };
 
   const queue = getPollQueue();
+  const candidates: { agentId: string; jobId: string }[] = [];
 
   for (const agent of agents) {
-    const { data: config } = await supabase
-      .from("agent_call_configs").select("daily_run_at").eq("agent_id", agent.id)
-      .single<Pick<AgentCallConfig, "daily_run_at">>();
-    const { data: workspace } = await supabase
-      .from("workspaces").select("timezone, is_active").eq("id", agent.workspace_id)
-      .single<Pick<Workspace, "timezone" | "is_active">>();
-    if (!config || !workspace?.is_active) continue;
+    const dailyRunAt = pickDailyRunAt(agent);
+    const workspace = agent.workspaces;
+    if (!dailyRunAt || !workspace?.is_active) continue;
 
-    // Fire at the FIRST tick at or after daily_run_at, not only on an exact
-    // minute match. A single skipped minute (worker restart, GC pause, cron
-    // jitter) previously meant the agent never polled that day. The per-day
-    // jobId keeps this idempotent: once the poll is enqueued for today, every
-    // later tick that day is a no-op (BullMQ ignores the duplicate jobId).
     const now = nowHHMMInTz(workspace.timezone);
-    if (now < config.daily_run_at) continue;
+    if (now < dailyRunAt) continue;
 
-    // Skip if this agent's daily poll was already enqueued today. This keeps
-    // the catch-up window quiet: we enqueue once at the first tick >= run time
-    // and every later tick that day is a no-op instead of re-logging.
     const today = todayInTz(workspace.timezone);
-    const jobId = `poll:${agent.id}:${today}`;
-    const existing = await queue.getJob(jobId);
-    if (existing) continue;
+    candidates.push({ agentId: agent.id, jobId: `poll:${agent.id}:${today}` });
+  }
 
-    await queue.add("poll", { agentId: agent.id }, { jobId }); // one poll per agent per day
-    enqueued.push(agent.id);
+  if (!candidates.length) return { enqueued };
+
+  const existingJobs = await Promise.all(
+    candidates.map(async (c) => ({
+      ...c,
+      exists: Boolean(await queue.getJob(c.jobId)),
+    }))
+  );
+
+  for (const candidate of existingJobs) {
+    if (candidate.exists) continue;
+    await queue.add("poll", { agentId: candidate.agentId }, { jobId: candidate.jobId });
+    enqueued.push(candidate.agentId);
   }
 
   return { enqueued };

@@ -9,6 +9,7 @@
 import { createServiceClient } from "@/lib/supabase/server";
 import { getCrmAdapterForAgent } from "@/lib/crm";
 import { getRetellClientForAgent } from "@/lib/retell/client";
+import { appRetellWebhookUrl } from "@/lib/retell/webhook-bind";
 import { buildDynamicVariables } from "./memory";
 import { todayInTz, evaluateDialWindow } from "./cadence";
 import { cancelQueueEntries, markQueueDialing } from "./call-queue";
@@ -22,17 +23,6 @@ import type { Agent, AgentMemory, Contact, Workspace } from "@/types";
  * and BEFORE any Retell call is created, a dial can never be placed outside the
  * window regardless of which caller invoked placeCall (worker, script, manual).
  */
-/**
- * Public URL Retell should POST call events to. Bound per-call so dials placed
- * with override_agent_id (which carry no agent webhook) still deliver
- * call_analyzed in real time. Falls back to the production domain so a worker
- * missing NEXT_PUBLIC_APP_URL still points somewhere reachable.
- */
-function appRetellWebhookUrl(): string {
-  const base = (process.env.NEXT_PUBLIC_APP_URL || "").trim() || "https://upsurgeprosai.com";
-  return `${base.replace(/\/+$/, "")}/api/webhooks/retell`;
-}
-
 export class OutsideCallWindowError extends Error {
   readonly deferMs: number;
   readonly reason: string;
@@ -184,7 +174,28 @@ export async function placeCall(job: CallJob): Promise<{ callId: string; retellC
       })
       .select("id")
       .single<{ id: string }>();
-    call = inserted.data;
+    if (inserted.error?.code === "23505") {
+      const { data: conflict } = await supabase
+        .from("calls")
+        .select("id, retell_call_id, status")
+        .eq("agent_id", agent.id)
+        .eq("contact_id", contact.id)
+        .eq("attempt_number", job.attemptNumber)
+        .in("status", ["queued", "dialing", "completed"])
+        .maybeSingle<{ id: string; retell_call_id: string | null; status: string }>();
+      if (conflict?.retell_call_id) {
+        return { callId: conflict.id, retellCallId: conflict.retell_call_id };
+      }
+      if (conflict?.status === "queued") {
+        call = { id: conflict.id };
+      } else {
+        throw new Error(
+          `duplicate active call row for agent ${agent.id} contact ${contact.id} attempt ${job.attemptNumber}`
+        );
+      }
+    } else {
+      call = inserted.data;
+    }
   }
   if (!call) throw new Error("failed to create call row");
 
@@ -198,12 +209,6 @@ export async function placeCall(job: CallJob): Promise<{ callId: string; retellC
 
   const retell = getRetellClientForAgent(agent);
   const webhookUrl = appRetellWebhookUrl();
-  // Defense-in-depth: bind agent-level webhook for separate Retell accounts (FUB).
-  void retell.ensureAgentWebhookUrl(agent.retell_agent_id, webhookUrl).catch((e) => {
-    console.warn(
-      `[caller] ensureAgentWebhookUrl failed for agent ${agent.id}: ${e instanceof Error ? e.message : e}`
-    );
-  });
 
   const { callId: retellCallId } = await retell.createPhoneCall({
     fromNumber: agent.retell_from_number,

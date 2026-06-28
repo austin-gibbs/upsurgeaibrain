@@ -4,7 +4,7 @@ Read this first. It captures the *operational context* and *open work* that the
 codebase alone doesn't tell you. For app design read `README.md` and
 `docs/ARCHITECTURE.md`; for agent-memory design read `docs/V2-MEMORY.md`.
 
-_Last updated: 2026-06-22._
+_Last updated: 2026-06-28._
 
 ---
 
@@ -56,28 +56,47 @@ running in production today.
 - **Caller** (`src/lib/engine/caller.ts`) places one Retell call per job.
 - **Outcome processor** (`src/lib/engine/process-outcome.ts`) replaces WF2: on the
   `call_analyzed` webhook, classify → CRM note → reconcile tags → optional task → advance
-  cadence → update V2 memory. Idempotent on `retell_call_id`.
+  cadence → update V2 memory. Idempotent via atomic `outcome_claimed_at` claim.
 - **Scheduler** (`src/lib/engine/scheduler.ts`) ticks every minute (or external cron) and
   enqueues the daily poll per active agent.
+- **Failover** — Vercel crons (`poll-fallback`, `drain-queue`, `dial-watchdog`) take over
+  when the Railway worker heartbeat is stale or Redis is down. Durable `call_queue_entries`
+  is the source of truth.
 - Pure logic lives in `cadence.ts`, `outcome.ts`, `tags.ts`, `memory.ts`.
 
-## Open items / known gaps (my review, 2026-06-22)
+## Backend audit status (2026-06-28)
 
-1. **Dial-time call-window gap (highest priority for parity).** `caller.ts placeCall()`
-   does NOT re-check the call window. The poller checks it once at poll time, but calls are
-   drip-delayed (`i * drip_seconds`). A late poll or a long queue (e.g. 100 calls × 60s ≈
-   100 min) can fire dials **after `call_window_end` (7pm)** — the exact bug just patched in
-   n8n WF1. Fix: re-check `withinCallWindow(workspace.timezone, ...)` inside `placeCall` and
-   skip/no-op (or reschedule to next day) when outside the window.
-2. **No tests.** ARCHITECTURE calls the logic "unit-testable," but there are zero test files.
-   Before cutover, add unit tests for `classifyOutcome`, `nextEligibleDate`/`isEligible`,
-   and `reconcileTags` — these encode the money logic.
-3. **Duplicate `calls` rows on retry.** Call queue has `attempts: 3`. `placeCall` inserts a
-   fresh `queued` calls row each invocation, so a retried job can leave orphan `queued` rows
-   (the worker marks them failed on final failure). Cosmetic, but worth tidying.
-4. **Retell concurrency** is bounded only by worker `concurrency: 5` + drip spacing; confirm
-   against the Retell account's concurrent-call limit before high volume.
-5. **Single initial commit** (`cda3e0b`) — no incremental history yet.
+Remediation from [docs/BACKEND_AUDIT_2026-06-27.md](docs/BACKEND_AUDIT_2026-06-27.md) is
+**largely complete**. See [docs/PRODUCTION-READINESS.md](docs/PRODUCTION-READINESS.md).
+
+**Resolved since 2026-06-22 snapshot:**
+
+- Dial-time call-window re-check in `placeCall` (throws `OutsideCallWindowError` before any
+  Retell call or `calls` row).
+- Unit tests exist under `src/lib/**/*.test.ts` (cadence, outcome, tags, drain, watchdog, etc.).
+- Shared queue claim in the BullMQ call worker + partial unique index on active call attempts.
+- `poll-fallback` healthy-path early return; hot-path DB indexes (migration `0022`).
+- Retell agent webhook bound at provision/activation, not per dial.
+
+**Still open before high-volume cutover:**
+
+1. Apply migration `0022_backend_audit_indexes.sql` in prod Supabase.
+2. Tune `CALL_WORKER_CONCURRENCY` / `CALL_WORKER_RATE_MAX` to your Retell plan (see production
+   readiness doc).
+3. Per-Retell-account dial fairness deferred until multi-account scale — see
+   [docs/MULTI-ACCOUNT-FAIRNESS.md](docs/MULTI-ACCOUNT-FAIRNESS.md).
+
+## Open items / known gaps (legacy list — see audit status above)
+
+_The items below were accurate on 2026-06-22; several are now resolved. Prefer the
+**Backend audit status** section above._
+
+1. ~~**Dial-time call-window gap.**~~ **Fixed** — authoritative guard in `placeCall`.
+2. ~~**No tests.**~~ **Fixed** — multiple `*.test.ts` files; run `npm test`.
+3. **Duplicate `calls` rows on retry.** Partially improved (reuse orphan `queued` row + unique
+   index); cosmetic orphans may still exist on edge retries.
+4. **Retell concurrency** — env-tunable (`CALL_WORKER_*`); confirm against Retell plan caps.
+5. ~~**Single initial commit.**~~ Repo now has incremental history.
 
 ## Hard constraints / rules (do not violate)
 
@@ -102,4 +121,5 @@ running in production today.
 ## What Austin wants next
 
 Continue enhancing and reviewing this app to finish the transition off n8n. Keep behavior
-parity with the live n8n system as the cutover bar; close the gaps above (start with #1).
+parity with the live n8n system as the cutover bar. Before go-live: apply migration `0022`,
+run `npm test`, tune worker Retell caps, and verify failover crons in staging.

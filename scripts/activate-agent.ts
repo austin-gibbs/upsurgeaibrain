@@ -15,6 +15,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createClient } from "@supabase/supabase-js";
 import { validateAgentActivation } from "../src/lib/agents/activation";
+import { bindRetellWebhookForAgentSafe } from "../src/lib/retell/webhook-bind";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
@@ -149,6 +150,12 @@ async function main() {
       console.log(`- ${a.name}: would activate (passes all invariants).`);
       continue;
     }
+
+    await bindRetellWebhookForAgentSafe({
+      id: a.id,
+      retell_agent_id: a.retell_agent_id,
+      retell_credentials_encrypted: a.retell_credentials_encrypted,
+    });
 
     const { error } = await db
       .from("agents")

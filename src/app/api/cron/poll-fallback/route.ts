@@ -10,12 +10,7 @@ import { bearerMatches } from "@/lib/secure";
 import { isHeartbeatStale, heartbeatAgeMs } from "@/lib/engine/heartbeat";
 import { pollAgent } from "@/lib/engine/poller";
 import { probeRedisQueueHealth } from "@/lib/queue/redis-health";
-import {
-  addDays,
-  nowHHMMInTz,
-  todayInTz,
-  zonedDateTimeToUtcIso,
-} from "@/lib/engine/cadence";
+import { nowHHMMInTz } from "@/lib/engine/cadence";
 import type { Agent, AgentCallConfig } from "@/types";
 
 export const runtime = "nodejs";
@@ -40,48 +35,6 @@ function pickConfig(agent: AgentRow) {
     : agent.agent_call_configs;
 }
 
-async function hasMissedDailyPoll(
-  supabase: ReturnType<typeof createServiceClient>,
-  agent: AgentRow,
-  config: Pick<AgentCallConfig, "daily_run_at" | "max_attempts_per_contact">,
-  timezone: string
-): Promise<boolean> {
-  const today = todayInTz(timezone);
-  const tomorrow = addDays(today, 1);
-  const dayStart = zonedDateTimeToUtcIso(timezone, today, "00:00");
-  const dayEnd = zonedDateTimeToUtcIso(timezone, tomorrow, "00:00");
-
-  const [{ count: queueRowsToday }, { count: callsToday }, { count: dueContacts }] =
-    await Promise.all([
-      supabase
-        .from("call_queue_entries")
-        .select("id", { count: "exact", head: true })
-        .eq("agent_id", agent.id)
-        .eq("queue_day", today),
-      supabase
-        .from("calls")
-        .select("id", { count: "exact", head: true })
-        .eq("agent_id", agent.id)
-        .gte("queued_at", dayStart)
-        .lt("queued_at", dayEnd),
-      supabase
-        .from("contacts")
-        .select("id", { count: "exact", head: true })
-        .eq("workspace_id", agent.workspace_id)
-        .eq("is_terminal", false)
-        .lt("attempt_count", config.max_attempts_per_contact)
-        .not("phones", "eq", "{}")
-        .or(`last_called_on.is.null,last_called_on.lt.${today}`)
-        .or(`next_eligible_on.is.null,next_eligible_on.lte.${today}`),
-    ]);
-
-  return (
-    (queueRowsToday ?? 0) === 0 &&
-    (callsToday ?? 0) === 0 &&
-    (dueContacts ?? 0) > 0
-  );
-}
-
 async function handle(req: NextRequest) {
   if (!authorized(req)) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
@@ -93,6 +46,16 @@ async function handle(req: NextRequest) {
   const heartbeatAgeSec = await heartbeatAgeMs().then((ms) =>
     ms == null ? null : Math.round(ms / 1000)
   );
+
+  // Worker + Redis healthy: skip entirely. Avoids N×3 COUNT queries per minute
+  // during call windows when nothing is wrong.
+  if (!stale && redisOk) {
+    return NextResponse.json({
+      skipped: "worker_healthy",
+      heartbeatAgeSec,
+      redis: redisHealth,
+    });
+  }
 
   const supabase = createServiceClient();
   const { data: agents } = await supabase
@@ -109,7 +72,6 @@ async function handle(req: NextRequest) {
 
   const polled: string[] = [];
   const skippedAgents: string[] = [];
-  const missedDailyPollAgents: string[] = [];
   const results: Awaited<ReturnType<typeof pollAgent>>[] = [];
 
   for (const agent of agents ?? []) {
@@ -130,40 +92,22 @@ async function handle(req: NextRequest) {
       continue;
     }
 
-    const missedDailyPoll = await hasMissedDailyPoll(
-      supabase,
-      agent,
-      config,
-      workspace.timezone
-    );
-    if (!stale && !missedDailyPoll && redisOk) {
-      skippedAgents.push(agent.id);
-      continue;
-    }
-    if (missedDailyPoll) missedDailyPollAgents.push(agent.id);
-
-    // In fallback mode the durable Postgres queue is the source of truth.
-    // Avoid touching Redis here because Redis outage/quota exhaustion is one
-    // of the reasons this route takes over.
+    // Failover mode (stale heartbeat or Redis down): poll every eligible agent.
     const result = await pollAgent(agent.id, { skipRedis: true });
     results.push(result);
     polled.push(agent.id);
   }
 
-  if (!stale && redisOk && polled.length === 0) {
+  if (polled.length === 0) {
     return NextResponse.json({
-      skipped: "worker_healthy",
+      skipped: "no_eligible_agents",
       heartbeatAgeSec,
       redis: redisHealth,
       skippedAgents,
     });
   }
 
-  const trigger = !redisOk
-    ? "redis_unavailable"
-    : stale
-      ? "heartbeat_stale"
-      : "missed_daily_poll";
+  const trigger = !redisOk ? "redis_unavailable" : "heartbeat_stale";
 
   return NextResponse.json({
     failover: true,
@@ -171,7 +115,6 @@ async function handle(req: NextRequest) {
     heartbeatAgeSec,
     redis: redisHealth,
     polled,
-    missedDailyPollAgents,
     skippedAgents,
     results,
   });

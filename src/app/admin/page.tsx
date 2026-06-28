@@ -42,6 +42,7 @@ const SPEC_TEMPLATE = `{
     "enrollTag": "acme-outbound",
     "objective": "Book a listing appointment",
     "callConfig": {
+      "max_total_calls": null,
       "max_calls_per_day": 100,
       "max_attempts_per_contact": 10,
       "call_window_start": "09:00",
@@ -49,8 +50,41 @@ const SPEC_TEMPLATE = `{
       "daily_run_at": "09:00",
       "drip_seconds": 60,
       "cadence_day_gaps": [0, 1, 2, 3, 5, 7, 10, 14, 21, 30]
-    }
+    },
+    "taskConfig": {
+      "enabled": false,
+      "pipeline_automation_enabled": false,
+      "poll_stage_enabled": false,
+      "poll_pipeline_id": null,
+      "poll_pipeline_stage_id": null,
+      "opportunity_custom_field_enabled": false,
+      "opportunity_custom_field_id": null,
+      "opportunity_custom_field_value": null
+    },
+    "pipelineStageMap": []
   }
+}`;
+
+// Template for the "Edit agent config" panel. Send only the sections you want
+// to change. taskConfig MERGES; pipelineStageMap REPLACES (pass [] to clear).
+// IDs for poll_pipeline_*, opportunity_custom_field_*, and the stage map come
+// from "Fetch HighLevel pipelines & fields". HighLevel features are no-ops on
+// Follow Up Boss. Outcomes: appointment, not_interested, dnd,
+// interested_no_appointment, follow_up, error, no_answer.
+const CONFIG_TEMPLATE = `{
+  "taskConfig": {
+    "pipeline_automation_enabled": true,
+    "poll_stage_enabled": true,
+    "poll_pipeline_id": "PIPELINE_ID",
+    "poll_pipeline_stage_id": "STAGE_ID",
+    "opportunity_custom_field_enabled": false,
+    "opportunity_custom_field_id": null,
+    "opportunity_custom_field_value": null
+  },
+  "pipelineStageMap": [
+    { "outcome": "appointment", "call_attempt": null, "pipeline_id": "PIPELINE_ID", "pipeline_stage_id": "BOOKED_STAGE_ID" },
+    { "outcome": "not_interested", "call_attempt": null, "pipeline_id": "PIPELINE_ID", "pipeline_stage_id": "LOST_STAGE_ID" }
+  ]
 }`;
 
 const textareaClass =
@@ -82,6 +116,13 @@ export default function AdminConsolePage() {
   const [runAt, setRunAt] = useState("23:00");
   const [gap, setGap] = useState("1");
   const [attempts, setAttempts] = useState("30");
+
+  // Agent automations / config (HighLevel routing, task config, call config)
+  const [agentName, setAgentName] = useState("");
+  const [cfgBusy, setCfgBusy] = useState("");
+  const [cfgText, setCfgText] = useState(CONFIG_TEMPLATE);
+  const [cfgResult, setCfgResult] = useState<unknown>(null);
+  const [hlResult, setHlResult] = useState<unknown>(null);
 
   // Team members
   const [tmName, setTmName] = useState("");
@@ -222,6 +263,90 @@ export default function AdminConsolePage() {
       setMgmtResult(e instanceof Error ? e.message : String(e));
     } finally {
       setMgmtBusy("");
+    }
+  }
+
+  async function fetchHighLevel() {
+    if (!workspace.trim()) return;
+    setCfgBusy("hl");
+    setHlResult(null);
+    try {
+      const params = new URLSearchParams({ workspace: workspace.trim() });
+      if (agentName.trim()) params.set("agent", agentName.trim());
+      const res = await fetch(`/api/console/highlevel?${params.toString()}`);
+      setHlResult(await res.json());
+    } catch (e) {
+      setHlResult(e instanceof Error ? e.message : String(e));
+    } finally {
+      setCfgBusy("");
+    }
+  }
+
+  async function loadAgentConfig() {
+    if (!workspace.trim()) return;
+    setCfgBusy("load");
+    setCfgResult(null);
+    try {
+      const params = new URLSearchParams({ workspace: workspace.trim() });
+      if (agentName.trim()) params.set("agent", agentName.trim());
+      const res = await fetch(`/api/console/agent-config?${params.toString()}`);
+      const data = await res.json();
+      if (res.ok) {
+        setCfgText(
+          JSON.stringify(
+            {
+              callConfig: data.callConfig,
+              taskConfig: data.taskConfig,
+              pipelineStageMap: data.pipelineStageMap,
+            },
+            null,
+            2
+          )
+        );
+        setCfgResult({
+          ok: true,
+          loaded: data.agent,
+          effectiveCrmProvider: data.effectiveCrmProvider,
+        });
+      } else {
+        setCfgResult(data);
+      }
+    } catch (e) {
+      setCfgResult(e instanceof Error ? e.message : String(e));
+    } finally {
+      setCfgBusy("");
+    }
+  }
+
+  async function saveAgentConfig() {
+    if (!workspace.trim()) return;
+    setCfgBusy("save");
+    setCfgResult(null);
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = JSON.parse(cfgText);
+    } catch (e) {
+      setCfgResult(
+        `Config is not valid JSON: ${e instanceof Error ? e.message : String(e)}`
+      );
+      setCfgBusy("");
+      return;
+    }
+    try {
+      const res = await fetch("/api/console/agent-config", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          workspace: workspace.trim(),
+          agent: agentName.trim() || undefined,
+          ...parsed,
+        }),
+      });
+      setCfgResult(await res.json());
+    } catch (e) {
+      setCfgResult(e instanceof Error ? e.message : String(e));
+    } finally {
+      setCfgBusy("");
     }
   }
 
@@ -367,6 +492,66 @@ export default function AdminConsolePage() {
                 {mgmtBusy === "call-window" ? "Saving…" : "Set call window"}
               </Button>
             </div>
+          </div>
+
+          <div className="mt-8 border-t border-ink-200/60 pt-6">
+            <SectionHeader
+              title="Agent automations & config (call settings + HighLevel routing)"
+              description="Edit an existing agent's call settings, task/automation config, and outcome→stage routing. Optional agent name disambiguates a workspace with more than one agent. HighLevel features no-op on Follow Up Boss."
+            />
+            <div className="max-w-md">
+              <Label htmlFor="agentName">Agent name (optional)</Label>
+              <Input
+                id="agentName"
+                value={agentName}
+                onChange={(e) => setAgentName(e.target.value)}
+                placeholder="leave blank if the workspace has one agent"
+              />
+            </div>
+
+            <div className="mt-4 flex flex-wrap gap-3">
+              <Button
+                variant="secondary"
+                onClick={fetchHighLevel}
+                disabled={cfgBusy !== "" || !workspace.trim()}
+              >
+                {cfgBusy === "hl"
+                  ? "Fetching…"
+                  : "Fetch HighLevel pipelines & fields"}
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={loadAgentConfig}
+                disabled={cfgBusy !== "" || !workspace.trim()}
+              >
+                {cfgBusy === "load" ? "Loading…" : "Load current config"}
+              </Button>
+            </div>
+
+            <ResultBox data={hlResult} />
+
+            <p className="mb-2 mt-5 text-sm text-ink-600">
+              Send only the sections you want to change.{" "}
+              <code>callConfig</code> and <code>taskConfig</code> merge over the
+              existing row; <code>pipelineStageMap</code> replaces all rules
+              (send <code>[]</code> to clear).
+            </p>
+            <textarea
+              className={textareaClass}
+              rows={18}
+              value={cfgText}
+              onChange={(e) => setCfgText(e.target.value)}
+              spellCheck={false}
+            />
+            <div className="mt-4">
+              <Button
+                onClick={saveAgentConfig}
+                disabled={cfgBusy !== "" || !workspace.trim()}
+              >
+                {cfgBusy === "save" ? "Saving…" : "Save config"}
+              </Button>
+            </div>
+            <ResultBox data={cfgResult} />
           </div>
 
           <div className="mt-8 border-t border-ink-200/60 pt-6">

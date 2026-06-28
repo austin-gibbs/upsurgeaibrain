@@ -78,6 +78,36 @@ export interface ClaimedQueueEntry {
   bullmq_job_id: string | null;
 }
 
+/** Look up today's pending queue row for a contact dial job. */
+export async function findPendingQueueEntry(
+  supabase: DbClient,
+  params: { agentId: string; contactId: string; queueDay: string }
+): Promise<{ id: string } | null> {
+  const { data, error } = await supabase
+    .from("call_queue_entries")
+    .select("id")
+    .eq("agent_id", params.agentId)
+    .eq("contact_id", params.contactId)
+    .eq("queue_day", params.queueDay)
+    .eq("status", "pending")
+    .maybeSingle<{ id: string }>();
+  if (error) throw new Error(error.message);
+  return data;
+}
+
+/**
+ * Resolve and atomically claim the pending queue row for a dial job.
+ * Returns null when no pending row exists or another executor claimed it first.
+ */
+export async function claimQueueEntryForDial(
+  supabase: DbClient,
+  params: { agentId: string; contactId: string; queueDay: string }
+): Promise<ClaimedQueueEntry | null> {
+  const pending = await findPendingQueueEntry(supabase, params);
+  if (!pending) return null;
+  return claimQueueEntry(supabase, { id: pending.id });
+}
+
 /**
  * Atomically move a pending row to `dialing` before placing a call.
  * Returns null when another executor already claimed the row.

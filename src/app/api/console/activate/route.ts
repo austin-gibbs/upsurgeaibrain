@@ -12,6 +12,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/server";
 import { requireAdmin } from "@/lib/admin";
 import { validateAgentActivation } from "@/lib/agents/activation";
+import { bindRetellWebhookForAgentSafe } from "@/lib/retell/webhook-bind";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -144,6 +145,12 @@ export async function POST(req: NextRequest) {
       results.push({ agent: a.name, result: "would activate" });
       continue;
     }
+
+    await bindRetellWebhookForAgentSafe({
+      id: a.id,
+      retell_agent_id: a.retell_agent_id,
+      retell_credentials_encrypted: a.retell_credentials_encrypted,
+    });
 
     const { error } = await db
       .from("agents")

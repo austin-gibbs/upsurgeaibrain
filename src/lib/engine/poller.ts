@@ -98,36 +98,46 @@ export async function pollAgent(
   const crmContacts = await crm.getContactsByTag(enrollTag);
 
   // 2. Upsert into our cache, preserving cadence state we already track.
-  const contacts: Contact[] = [];
-  for (const c of crmContacts) {
-    const { data: existing } = await supabase
+  const crmIds = crmContacts.map((c) => c.id);
+  const existingByCrmId = new Map<string, Contact>();
+
+  if (crmIds.length > 0) {
+    const { data: existingRows } = await supabase
       .from("contacts")
       .select("*")
       .eq("workspace_id", workspace.id)
-      .eq("crm_contact_id", c.id)
-      .maybeSingle<Contact>();
+      .in("crm_contact_id", crmIds)
+      .returns<Contact[]>();
+    for (const row of existingRows ?? []) {
+      existingByCrmId.set(row.crm_contact_id, row);
+    }
+  }
 
-    const merged = {
+  const mergedRows = crmContacts.map((c) => {
+    const existing = existingByCrmId.get(c.id);
+    return {
       workspace_id: workspace.id,
       crm_contact_id: c.id,
       full_name: c.fullName,
       email: c.email,
       phones: c.phones,
       tags: c.tags,
-      // Preserve engine-owned cadence fields if the row exists.
       attempt_count: existing?.attempt_count ?? 0,
       last_called_on: existing?.last_called_on ?? null,
       next_eligible_on: existing?.next_eligible_on ?? null,
       is_terminal: existing?.is_terminal ?? false,
       terminal_outcome: existing?.terminal_outcome ?? null,
     };
+  });
 
-    const { data: saved } = await supabase
+  const contacts: Contact[] = [];
+  if (mergedRows.length > 0) {
+    const { data: savedRows } = await supabase
       .from("contacts")
-      .upsert(merged, { onConflict: "workspace_id,crm_contact_id" })
+      .upsert(mergedRows, { onConflict: "workspace_id,crm_contact_id" })
       .select("*")
-      .single<Contact>();
-    if (saved) contacts.push(saved);
+      .returns<Contact[]>();
+    if (savedRows) contacts.push(...savedRows);
   }
 
   // 3. Filter eligible, sort for fair rollover, cap to what fits today's window.
@@ -401,6 +411,30 @@ export async function enqueueContactsNow(
   return { agentId, requested, eligible, enqueued, capped, errors: errors.length ? errors : undefined };
 }
 
+/** Run async tasks with a bounded concurrency pool. */
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  fn: (item: T) => Promise<R>
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let nextIndex = 0;
+
+  async function worker() {
+    while (nextIndex < items.length) {
+      const index = nextIndex++;
+      results[index] = await fn(items[index]);
+    }
+  }
+
+  const workers = Array.from(
+    { length: Math.min(concurrency, items.length) },
+    () => worker()
+  );
+  await Promise.all(workers);
+  return results;
+}
+
 /** Poll every active outbound agent in a workspace. */
 export async function pollWorkspace(
   workspaceId: string,
@@ -418,11 +452,7 @@ export async function pollWorkspace(
 
     if (!agents?.length) return [];
 
-    const results: PollResult[] = [];
-    for (const agent of agents) {
-      results.push(await pollAgent(agent.id, options));
-    }
-    return results;
+    return mapWithConcurrency(agents, 4, (agent) => pollAgent(agent.id, options));
   } finally {
     // Release Redis so serverless poll handlers can exit (avoids timeout hang).
     await closeCallQueue().catch(() => {});

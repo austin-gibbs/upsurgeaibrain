@@ -3,8 +3,13 @@ import { Worker } from "bullmq";
 import { getRedis } from "../connection";
 import { CALL_QUEUE, getCallQueue, type CallJob } from "../queues";
 import { placeCall, OutsideCallWindowError } from "@/lib/engine/caller";
-import { failQueueEntry, updateQueueScheduledFor } from "@/lib/engine/call-queue";
-import { evaluateDialWindow } from "@/lib/engine/cadence";
+import {
+  claimQueueEntryForDial,
+  failQueueEntry,
+  revertQueueClaim,
+  updateQueueScheduledFor,
+} from "@/lib/engine/call-queue";
+import { evaluateDialWindow, todayInTz } from "@/lib/engine/cadence";
 import { createServiceClient } from "@/lib/supabase/server";
 
 type AgentWindowRow = {
@@ -32,7 +37,12 @@ const CALL_CONCURRENCY = intEnv("CALL_WORKER_CONCURRENCY", 20);
 const CALL_RATE_MAX = intEnv("CALL_WORKER_RATE_MAX", 20);
 const CALL_RATE_DURATION_MS = intEnv("CALL_WORKER_RATE_DURATION_MS", 1000);
 
-async function deferDial(job: CallJob, delayMs: number, reason: string) {
+async function deferDial(
+  job: CallJob,
+  delayMs: number,
+  reason: string,
+  claimedQueueEntryId?: string
+) {
   const delay = Math.max(delayMs, 60_000);
   const scheduledFor = new Date(Date.now() + delay).toISOString();
 
@@ -42,16 +52,41 @@ async function deferDial(job: CallJob, delayMs: number, reason: string) {
   });
 
   const supabase = createServiceClient();
-  await updateQueueScheduledFor(supabase, {
-    agentId: job.agentId,
-    contactId: job.contactId,
-    scheduledFor,
-  });
+  if (claimedQueueEntryId) {
+    await revertQueueClaim(supabase, {
+      id: claimedQueueEntryId,
+      scheduledFor,
+    });
+  } else {
+    await updateQueueScheduledFor(supabase, {
+      agentId: job.agentId,
+      contactId: job.contactId,
+      scheduledFor,
+    });
+  }
 
   console.log(
     `[call.worker] ${reason} — deferred contact ${job.contactId} ~${Math.round(delay / 60000)}m`
   );
   return { deferred: true };
+}
+
+/** Return an existing live dial when another executor already placed this attempt. */
+async function findExistingDial(
+  supabase: ReturnType<typeof createServiceClient>,
+  job: CallJob
+): Promise<{ callId: string; retellCallId: string } | null> {
+  const { data } = await supabase
+    .from("calls")
+    .select("id, retell_call_id")
+    .eq("agent_id", job.agentId)
+    .eq("contact_id", job.contactId)
+    .eq("attempt_number", job.attemptNumber)
+    .in("status", ["dialing", "completed"])
+    .not("retell_call_id", "is", null)
+    .maybeSingle<{ id: string; retell_call_id: string | null }>();
+  if (!data?.retell_call_id) return null;
+  return { callId: data.id, retellCallId: data.retell_call_id };
 }
 
 export function startCallWorker(): Worker<CallJob> {
@@ -65,8 +100,10 @@ export function startCallWorker(): Worker<CallJob> {
       // optimization — the AUTHORITATIVE guard lives inside placeCall (it throws
       // OutsideCallWindowError), caught below, so the window holds even if this
       // pre-check is ever skipped or the clock crosses the boundary after it.
+      const supabase = createServiceClient();
+      let claimedQueueEntryId: string | undefined;
+
       if (!job.data.testMode) {
-        const supabase = createServiceClient();
         const { data: agentRow } = await supabase
           .from("agents")
           .select(
@@ -88,6 +125,22 @@ export function startCallWorker(): Worker<CallJob> {
         if (!decision.allowed) {
           return deferDial(job.data, decision.deferMs, decision.reason);
         }
+
+        const queueDay = todayInTz(timezone);
+        const claimed = await claimQueueEntryForDial(supabase, {
+          agentId: job.data.agentId,
+          contactId: job.data.contactId,
+          queueDay,
+        });
+        if (!claimed) {
+          const existing = await findExistingDial(supabase, job.data);
+          if (existing) return existing;
+          console.log(
+            `[call.worker] queue row already claimed or absent for contact ${job.data.contactId} — skipping`
+          );
+          return { skipped: true };
+        }
+        claimedQueueEntryId = claimed.id;
       }
 
       try {
@@ -96,7 +149,15 @@ export function startCallWorker(): Worker<CallJob> {
         // placeCall refuses to dial outside the window (defense in depth). Treat
         // that as a deferral, not a failure, so the contact is never dropped.
         if (err instanceof OutsideCallWindowError) {
-          return deferDial(job.data, err.deferMs, err.reason);
+          return deferDial(
+            job.data,
+            err.deferMs,
+            err.reason,
+            claimedQueueEntryId
+          );
+        }
+        if (claimedQueueEntryId) {
+          await revertQueueClaim(supabase, { id: claimedQueueEntryId });
         }
         throw err;
       }

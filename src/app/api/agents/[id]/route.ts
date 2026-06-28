@@ -34,6 +34,7 @@ import {
   agentInheritsWorkspaceCrm,
 } from "@/lib/agents/crm-inheritance";
 import { validateAgentActivation } from "@/lib/agents/activation";
+import { bindRetellWebhookForAgentSafe } from "@/lib/retell/webhook-bind";
 import { z } from "zod";
 
 export const runtime = "nodejs";
@@ -364,6 +365,14 @@ export async function PATCH(
   }
 
   if (Object.keys(update).length > 0) {
+    if (input.status === "active") {
+      await bindRetellWebhookForAgentSafe({
+        id: params.id,
+        retell_agent_id: nextRetellAgentId,
+        retell_credentials_encrypted: nextRetellEncrypted,
+      });
+    }
+
     const { error: agentError } = await db
       .from("agents")
       .update(update)
