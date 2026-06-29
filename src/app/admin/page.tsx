@@ -127,6 +127,10 @@ export default function AdminConsolePage() {
   // Team members
   const [tmName, setTmName] = useState("");
   const [tmEmail, setTmEmail] = useState("");
+  const [diagBusy, setDiagBusy] = useState("");
+  const [diagResult, setDiagResult] = useState<unknown>(null);
+  const [reconcileBusy, setReconcileBusy] = useState("");
+  const [reconcileResult, setReconcileResult] = useState<unknown>(null);
   const [tmPassword, setTmPassword] = useState("");
   const [tmBusy, setTmBusy] = useState("");
   const [tmResult, setTmResult] = useState<unknown>(null);
@@ -136,6 +140,39 @@ export default function AdminConsolePage() {
 
   // Delete workspace
   const [deleteConfirmName, setDeleteConfirmName] = useState("");
+
+  async function loadDiagnostics() {
+    setDiagBusy("load");
+    setDiagResult(null);
+    try {
+      const res = await fetch("/api/console/diagnostics");
+      const data = await res.json();
+      setDiagResult(data);
+    } catch (e) {
+      setDiagResult(e instanceof Error ? e.message : String(e));
+    } finally {
+      setDiagBusy("");
+    }
+  }
+
+  async function runReconcile(dryRun: boolean) {
+    setReconcileBusy(dryRun ? "dry" : "run");
+    setReconcileResult(null);
+    try {
+      const res = await fetch("/api/console/reconcile-stuck-calls", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ dryRun, limit: 200, olderThanMinutes: 5 }),
+      });
+      const data = await res.json();
+      setReconcileResult(data);
+      if (res.ok && !dryRun) await loadDiagnostics();
+    } catch (e) {
+      setReconcileResult(e instanceof Error ? e.message : String(e));
+    } finally {
+      setReconcileBusy("");
+    }
+  }
 
   async function loadAdmins() {
     setTmBusy("list");
@@ -594,6 +631,38 @@ export default function AdminConsolePage() {
           </div>
 
           <ResultBox data={mgmtResult} />
+        </Card>
+
+        {/* ---------------------- Diagnostics ---------------------- */}
+        <Card className="p-6">
+          <SectionHeader
+            title="Platform diagnostics"
+            description="Webhook health, Redis/engine queue connectivity, stuck dialing calls, and reporting backfill status."
+          />
+          <div className="mt-4 flex flex-wrap gap-3">
+            <Button
+              variant="secondary"
+              onClick={loadDiagnostics}
+              disabled={diagBusy !== ""}
+            >
+              {diagBusy === "load" ? "Loading…" : "Refresh diagnostics"}
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={() => runReconcile(true)}
+              disabled={reconcileBusy !== ""}
+            >
+              {reconcileBusy === "dry" ? "Previewing…" : "Reconcile (dry-run)"}
+            </Button>
+            <Button
+              onClick={() => runReconcile(false)}
+              disabled={reconcileBusy !== ""}
+            >
+              {reconcileBusy === "run" ? "Reconciling…" : "Reconcile stuck calls"}
+            </Button>
+          </div>
+          <ResultBox data={diagResult} />
+          <ResultBox data={reconcileResult} />
         </Card>
 
         {/* ---------------------- Team members ---------------------- */}

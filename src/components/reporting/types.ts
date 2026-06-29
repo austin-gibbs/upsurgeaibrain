@@ -24,6 +24,13 @@ export type ReportingResponse = ReportingAggregates & {
   range: { from: string; to: string };
   filters: { agentId: string; direction: string };
   calls: (NormalizedCallRow & { crmUrl: string | null })[];
+  meta?: {
+    dataSource: "database";
+    completedInRange: number;
+    missingRawPayload: number;
+    stuckDialing: number;
+    hint: string | null;
+  };
 };
 
 export type DashboardWidgetId =

@@ -256,6 +256,13 @@ export async function GET(
       filters: { agentId: agentIdParam, direction: directionParam },
       ...empty,
       calls: [],
+      meta: {
+        dataSource: "database" as const,
+        completedInRange: 0,
+        missingRawPayload: 0,
+        stuckDialing: 0,
+        hint: "No agents match the current filters.",
+      },
     });
   }
 
@@ -288,6 +295,14 @@ export async function GET(
     ),
   }));
 
+  const { count: stuckDialing } = await db
+    .from("calls")
+    .select("id", { count: "exact", head: true })
+    .eq("workspace_id", params.id)
+    .eq("status", "dialing");
+
+  const missingPayload = callRows.filter((row) => !row.raw_payload).length;
+
   return NextResponse.json({
     workspace: {
       id: workspace.id,
@@ -307,5 +322,17 @@ export async function GET(
     filters: { agentId: agentIdParam, direction: directionParam },
     ...aggregates,
     calls: callsWithUrls,
+    meta: {
+      dataSource: "database" as const,
+      completedInRange: callRows.length,
+      missingRawPayload: missingPayload,
+      stuckDialing: stuckDialing ?? 0,
+      hint:
+        callRows.length === 0
+          ? "No completed calls in range. Reporting is DB-backed from call_analyzed webhooks — use Admin → Diagnostics or reconcile stuck calls if traffic exists in Retell."
+          : missingPayload > 0
+            ? `${missingPayload} completed call(s) lack raw_payload — KPIs may be incomplete until webhooks backfill or reconcile runs.`
+            : null,
+    },
   });
 }

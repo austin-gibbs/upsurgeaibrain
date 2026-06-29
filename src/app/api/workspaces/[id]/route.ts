@@ -24,7 +24,7 @@ export async function GET(
   const { data: workspace, error: wsErr } = await db
     .from("workspaces")
     .select(
-      "id, name, timezone, crm_provider, enroll_tag, is_active, created_at, crm_credentials_encrypted"
+      "id, name, timezone, crm_provider, enroll_tag, is_active, created_at, crm_account_url, crm_status, crm_credentials_encrypted"
     )
     .eq("id", params.id)
     .single<{
@@ -35,6 +35,8 @@ export async function GET(
       enroll_tag: string;
       is_active: boolean;
       created_at: string;
+      crm_account_url: string | null;
+      crm_status: string | null;
       crm_credentials_encrypted: string | null;
     }>();
 
@@ -118,12 +120,12 @@ export async function GET(
     .select("outcome, tag, is_terminal")
     .eq("workspace_id", params.id);
 
-  const { crm_credentials_encrypted, ...workspacePublic } = workspace;
+  const { crm_credentials_encrypted, crm_status, ...workspacePublic } = workspace;
 
   return NextResponse.json({
     workspace: {
       ...workspacePublic,
-      crm_account_url: null,
+      crm_status: crm_status ?? null,
       has_workspace_crm_credentials: Boolean(crm_credentials_encrypted),
     },
     agents: agents ?? [],
@@ -138,6 +140,7 @@ export async function GET(
 // workspace (flips each agent_task_configs.enabled).
 const patchSchema = z.object({
   tasks_enabled: z.boolean().optional(),
+  is_active: z.boolean().optional(),
   crm_account_url: crmAccountUrlSchema,
 });
 
@@ -191,6 +194,16 @@ export async function PATCH(
     }
   }
 
+  if (parsed.data.is_active !== undefined) {
+    const { error } = await db
+      .from("workspaces")
+      .update({ is_active: parsed.data.is_active })
+      .eq("id", params.id);
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+  }
+
   if (parsed.data.crm_account_url !== undefined) {
     const { error } = await db
       .from("workspaces")
@@ -210,6 +223,7 @@ export async function PATCH(
   return NextResponse.json({
     ok: true,
     tasks_enabled: parsed.data.tasks_enabled,
+    is_active: parsed.data.is_active,
     crm_account_url: parsed.data.crm_account_url,
     agents_updated: parsed.data.tasks_enabled !== undefined ? (agents ?? []).length : undefined,
   });

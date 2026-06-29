@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeft, Phone, Settings, KeyRound } from "lucide-react";
 import { CallSettings } from "@/components/agent-form/CallSettings";
 import { TaskSettings } from "@/components/agent-form/TaskSettings";
@@ -78,20 +79,57 @@ type CallRow = {
   completed_at: string | null;
 };
 
+type AgentTab = "overview" | "call" | "crm" | "tasks" | "history";
+
+const AGENT_TABS: AgentTab[] = ["overview", "call", "crm", "tasks", "history"];
+
+function parseAgentTab(value: string | null): AgentTab {
+  if (value && AGENT_TABS.includes(value as AgentTab)) {
+    return value as AgentTab;
+  }
+  return "overview";
+}
+
 export default function AgentDetailPage({
   params,
 }: {
   params: { id: string };
 }) {
+  return (
+    <Suspense fallback={null}>
+      <AgentDetail params={params} />
+    </Suspense>
+  );
+}
+
+function AgentDetail({
+  params,
+}: {
+  params: { id: string };
+}) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const agentTab = parseAgentTab(searchParams.get("tab"));
+
   const [agent, setAgent] = useState<Agent | null>(null);
   const [calls, setCalls] = useState<CallRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [actionMsg, setActionMsg] = useState<string | null>(null);
   const [taskActionMsg, setTaskActionMsg] = useState<string | null>(null);
-  const [agentTab, setAgentTab] = useState<
-    "overview" | "call" | "crm" | "tasks" | "history"
-  >("overview");
+
+  const setAgentTab = useCallback(
+    (tab: AgentTab) => {
+      const qsParams = new URLSearchParams(searchParams.toString());
+      if (tab === "overview") qsParams.delete("tab");
+      else qsParams.set("tab", tab);
+      const qs = qsParams.toString();
+      router.replace(qs ? `/agents/${params.id}?${qs}` : `/agents/${params.id}`, {
+        scroll: false,
+      });
+    },
+    [searchParams, router, params.id]
+  );
 
   const [direction, setDirection] = useState<Direction>("outbound");
   const [retellId, setRetellId] = useState("");
@@ -186,19 +224,24 @@ export default function AgentDetailPage({
 
   // Surface the CRM OAuth callback result (redirects back with ?crm=).
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const status = params.get("crm");
-    if (status === "connected") {
+    const crm = searchParams.get("crm");
+    if (crm === "connected") {
       setActionMsg("HighLevel connected — token will auto-refresh.");
-    } else if (status === "error") {
-      const reason = params.get("reason");
+      if (searchParams.get("tab") !== "crm") {
+        setAgentTab("crm");
+      }
+    } else if (crm === "error") {
+      const reason = searchParams.get("reason");
       setActionMsg(
         reason
           ? `HighLevel connection failed: ${reason}`
           : "HighLevel connection was cancelled or failed."
       );
+      if (searchParams.get("tab") !== "crm") {
+        setAgentTab("crm");
+      }
     }
-  }, []);
+  }, [searchParams, setAgentTab]);
 
   // Pull HighLevel pipelines + stages for the routing UI. Callable on demand
   // (the "Refresh" button) so a user can re-sync after editing pipelines or
@@ -459,13 +502,13 @@ export default function AgentDetailPage({
 
   if (error)
     return (
-      <PageShell>
+      <PageShell nav={{ active: "agent", crumb: "Agent" }}>
         <Card className="p-5 text-sm text-accent-rose-fg">{error}</Card>
       </PageShell>
     );
   if (!agent)
     return (
-      <PageShell>
+      <PageShell nav={{ active: "agent", crumb: "Agent" }}>
         <p className="text-sm text-ink-500">Loading…</p>
       </PageShell>
     );
@@ -545,7 +588,7 @@ export default function AgentDetailPage({
           { id: "history", label: "Call History" },
         ]}
         active={agentTab}
-        onSelect={(v) => setAgentTab(v)}
+        onSelect={(v) => setAgentTab(v as AgentTab)}
       />
 
       {agentTab === "overview" && (
@@ -799,6 +842,25 @@ export default function AgentDetailPage({
             title="Tasks & automations"
             description="Post-call CRM tasks, HighLevel workflow webhooks, poll-stage routing, opportunity custom fields, and outcome-based pipeline routing."
           />
+          {searchParams.get("hl") === "setup" && isHighLevel && (
+            <p className="rounded-xl bg-accent-sky-bg px-3 py-2 text-xs text-accent-sky-fg">
+              Agent created. Configure pipeline stage routing, poll-stage rules, and
+              opportunity custom fields below, then save.
+            </p>
+          )}
+          {!hasEffectiveCrmCredentials && (
+            <p className="rounded-xl bg-accent-amber-bg px-3 py-2 text-xs text-accent-amber-fg">
+              Connect CRM credentials on the{" "}
+              <button
+                type="button"
+                className="font-medium underline"
+                onClick={() => setAgentTab("crm")}
+              >
+                CRM &amp; Integrations
+              </button>{" "}
+              tab before configuring tasks and automations.
+            </p>
+          )}
           <TaskSettings
             cfg={taskCfg}
             users={crmUsers}

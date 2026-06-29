@@ -166,7 +166,7 @@ export async function buildClientServicesReport(
     // Today's calls — for per-agent call counts and spend.
     db
       .from("calls")
-      .select("agent_id, combined_cost:raw_payload->call_cost->>combined_cost")
+      .select("agent_id, combined_cost:raw_payload->call->call_cost->>combined_cost")
       .in("workspace_id", wsIds)
       .gte("completed_at", report.dayStart)
       .lte("completed_at", nowIso),
@@ -174,7 +174,7 @@ export async function buildClientServicesReport(
     db
       .from("calls")
       .select(
-        "workspace_id, duration_seconds:raw_payload->call_cost->>total_duration_seconds"
+        "workspace_id, duration_seconds:raw_payload->call->call_cost->>total_duration_seconds"
       )
       .in("workspace_id", wsIds)
       .gte("completed_at", report.monthStart)

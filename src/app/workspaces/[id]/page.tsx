@@ -32,13 +32,22 @@ type OpsDetail = {
     timezone: string;
     crm_provider: string;
     crm_account_url?: string | null;
+    crm_status?: string | null;
     enroll_tag: string;
     is_active: boolean;
+    has_workspace_crm_credentials?: boolean;
   };
   agents: Parameters<typeof WorkspaceOpsTab>[0]["data"]["agents"];
   contactCount: number;
   contacts: Parameters<typeof WorkspaceOpsTab>[0]["data"]["contacts"];
   outcomeTags: Parameters<typeof WorkspaceOpsTab>[0]["data"]["outcomeTags"];
+};
+
+type SummaryDetail = {
+  workspace: OpsDetail["workspace"];
+  agents: OpsDetail["agents"];
+  contactCount: number;
+  tasksEnabled: boolean;
 };
 
 function defaultFromDate(): string {
@@ -79,10 +88,12 @@ function WorkspaceDetail({ params }: { params: { id: string } }) {
   const searchParams = useSearchParams();
   const tab: "dashboard" | "operations" =
     searchParams.get("tab") === "operations" ? "operations" : "dashboard";
+  const [summary, setSummary] = useState<SummaryDetail | null>(null);
   const [opsData, setOpsData] = useState<OpsDetail | null>(null);
   const [reporting, setReporting] = useState<ReportingResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loadingReporting, setLoadingReporting] = useState(true);
+  const [loadingOps, setLoadingOps] = useState(false);
 
   const [agentId, setAgentId] = useState("all");
   const [direction, setDirection] = useState<"all" | "inbound" | "outbound">("all");
@@ -95,17 +106,50 @@ function WorkspaceDetail({ params }: { params: { id: string } }) {
   const [crmAccountUrl, setCrmAccountUrl] = useState("");
   const [savingUrl, setSavingUrl] = useState(false);
 
+  const refreshSummary = useCallback(() => {
+    fetch(`/api/workspaces/${params.id}/summary`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.error) setError(d.error);
+        else {
+          setSummary(d);
+          setCrmAccountUrl(d.workspace.crm_account_url ?? "");
+        }
+      })
+      .catch((e) => setError(e.message));
+  }, [params.id]);
+
   const refreshOps = useCallback(() => {
+    setLoadingOps(true);
     fetch(`/api/workspaces/${params.id}`)
       .then((r) => r.json())
       .then((d) => {
         if (d.error) setError(d.error);
         else {
           setOpsData(d);
+          setSummary((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  workspace: {
+                    ...prev.workspace,
+                    ...d.workspace,
+                  },
+                  agents: d.agents,
+                  contactCount: d.contactCount,
+                }
+              : {
+                  workspace: d.workspace,
+                  agents: d.agents,
+                  contactCount: d.contactCount,
+                  tasksEnabled: false,
+                }
+          );
           setCrmAccountUrl(d.workspace.crm_account_url ?? "");
         }
       })
-      .catch((e) => setError(e.message));
+      .catch((e) => setError(e.message))
+      .finally(() => setLoadingOps(false));
   }, [params.id]);
 
   const fetchReporting = useCallback(() => {
@@ -127,8 +171,14 @@ function WorkspaceDetail({ params }: { params: { id: string } }) {
   }, [params.id, agentId, direction, fromDate, toDate]);
 
   useEffect(() => {
-    refreshOps();
-  }, [refreshOps]);
+    refreshSummary();
+  }, [refreshSummary]);
+
+  useEffect(() => {
+    if (tab === "operations" && !opsData && !loadingOps) {
+      refreshOps();
+    }
+  }, [tab, opsData, loadingOps, refreshOps]);
 
   useEffect(() => {
     if (tab === "dashboard") fetchReporting();
@@ -160,7 +210,8 @@ function WorkspaceDetail({ params }: { params: { id: string } }) {
       });
       const d = await res.json();
       if (!res.ok) throw new Error(d.error ?? "Failed to save");
-      refreshOps();
+      refreshSummary();
+      if (opsData) refreshOps();
       fetchReporting();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to save CRM URL");
@@ -175,8 +226,9 @@ function WorkspaceDetail({ params }: { params: { id: string } }) {
   );
 
   const crumb = tab === "operations" ? "Operations" : "Dashboard";
+  const header = summary ?? opsData;
 
-  if (error && !opsData) {
+  if (error && !header) {
     return (
       <PageShell nav={{ workspaceId: params.id, active: tab, crumb }}>
         <Card className="p-5 text-sm text-accent-rose-fg">{error}</Card>
@@ -184,7 +236,7 @@ function WorkspaceDetail({ params }: { params: { id: string } }) {
     );
   }
 
-  if (!opsData) {
+  if (!header) {
     return (
       <PageShell nav={{ workspaceId: params.id, active: tab, crumb }}>
         <Skeleton className="mb-4 h-8 w-48" />
@@ -193,13 +245,36 @@ function WorkspaceDetail({ params }: { params: { id: string } }) {
     );
   }
 
-  const { workspace } = opsData;
+  if (tab === "operations" && !opsData) {
+    return (
+      <PageShell
+        nav={{
+          workspaceId: params.id,
+          workspaceName: header.workspace.name,
+          workspaceMeta: `${CRM_LABEL[header.workspace.crm_provider]} · ${header.workspace.timezone}`,
+          agents: header.agents.map((a) => ({
+            id: a.id,
+            name: a.name,
+            status: a.status,
+            direction: a.direction,
+          })),
+          active: tab,
+          crumb,
+        }}
+      >
+        <Skeleton className="mb-4 h-8 w-48" />
+        <Skeleton className="h-64 w-full" />
+      </PageShell>
+    );
+  }
+
+  const { workspace } = header;
 
   const nav: PageNav = {
     workspaceId: params.id,
     workspaceName: workspace.name,
     workspaceMeta: `${CRM_LABEL[workspace.crm_provider]} · ${workspace.timezone}`,
-    agents: opsData.agents.map((a) => ({
+    agents: header.agents.map((a) => ({
       id: a.id,
       name: a.name,
       status: a.status,
@@ -226,7 +301,7 @@ function WorkspaceDetail({ params }: { params: { id: string } }) {
                   onChange={(e) => setAgentId(e.target.value)}
                 >
                   <option value="all">All agents</option>
-                  {(reporting?.agents ?? opsData.agents).map((a) => (
+                  {(reporting?.agents ?? header.agents).map((a) => (
                     <option key={a.id} value={a.id}>
                       {a.name} ({a.direction})
                     </option>
@@ -275,6 +350,12 @@ function WorkspaceDetail({ params }: { params: { id: string } }) {
                 Customize
               </Button>
             </div>
+
+            {reporting?.meta?.hint && (
+              <p className="rounded-xl bg-accent-amber-bg px-3 py-2 text-xs text-accent-amber-fg">
+                {reporting.meta.hint}
+              </p>
+            )}
 
             {selectedAgent && agentId !== "all" && (
               <p className="text-sm text-ink-500">
@@ -337,6 +418,15 @@ function WorkspaceDetail({ params }: { params: { id: string } }) {
               </div>
               <Skeleton className="h-72 rounded-2xl" />
             </div>
+          ) : reporting && reporting.kpis.totalCalls === 0 ? (
+            <Card className="p-8 text-center">
+              <p className="text-sm font-medium text-ink-700">No completed calls in this range</p>
+              <p className="mt-2 text-sm text-ink-500">
+                Calls appear here after Retell webhooks finalize them as completed.
+                If you expect traffic, check webhook health in Admin → Diagnostics
+                or widen the date range.
+              </p>
+            </Card>
           ) : reporting ? (
             <>
               <KpiGrid kpis={reporting.kpis} visible={widgets} />
@@ -350,14 +440,22 @@ function WorkspaceDetail({ params }: { params: { id: string } }) {
               )}
             </>
           ) : null}
+          {error && reporting && (
+            <p className="mt-4 rounded-xl bg-accent-rose-bg px-4 py-2.5 text-sm text-accent-rose-fg">
+              {error}
+            </p>
+          )}
         </>
       )}
 
-      {tab === "operations" && (
+      {tab === "operations" && opsData && (
         <WorkspaceOpsTab
           data={opsData}
           workspaceId={params.id}
-          onRefresh={refreshOps}
+          onRefresh={() => {
+            refreshSummary();
+            refreshOps();
+          }}
         />
       )}
     </PageShell>

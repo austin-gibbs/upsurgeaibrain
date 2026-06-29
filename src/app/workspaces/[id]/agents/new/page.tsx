@@ -149,7 +149,11 @@ export default function NewAgentPage({
       if (!res.ok || data.error) {
         throw new Error(data.error ?? "Failed to create agent");
       }
-      router.push(`/agents/${data.agentId}`);
+      router.push(
+        `/agents/${data.agentId}?tab=tasks${
+          effectiveCrmProvider === "highlevel" ? "&hl=setup" : ""
+        }`
+      );
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Something went wrong");
       setSubmitting(false);
@@ -382,6 +386,13 @@ export default function NewAgentPage({
 
             <Card className="space-y-6 p-6 sm:p-8">
               <SectionHeader title="Tasks" />
+              {effectiveCrmProvider === "highlevel" && (
+                <p className="rounded-xl bg-accent-sky-bg px-3 py-2 text-xs text-accent-sky-fg">
+                  Basic task settings can be set here. After creation, open{" "}
+                  <strong>Tasks &amp; Automations</strong> on the agent to configure
+                  pipeline routing, poll-stage rules, and opportunity custom fields.
+                </p>
+              )}
               <TaskSettings
                 cfg={taskConfig}
                 users={[]}

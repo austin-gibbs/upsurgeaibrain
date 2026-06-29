@@ -654,6 +654,34 @@ function TopBar({ nav }: { nav?: PageNav }) {
   );
 }
 
+/* ----------------------------- Mobile nav ------------------------------ */
+function MobileNavStrip({ nav }: { nav?: PageNav }) {
+  if (!nav?.workspaceId) return null;
+  const id = nav.workspaceId;
+  const linkClass = (active: boolean) =>
+    cn(
+      "flex-1 rounded-lg px-3 py-2 text-center text-xs font-medium transition-colors",
+      active
+        ? "bg-accent-sky-bg text-accent-sky-fg"
+        : "text-ink-500 hover:bg-ink-50 hover:text-ink-700"
+    );
+  return (
+    <nav className="flex gap-1 border-b border-ink-200/60 bg-surface px-3 py-2 md:hidden">
+      <Link href={`/workspaces/${id}?tab=dashboard`} className={linkClass(nav.active === "dashboard")}>
+        Dashboard
+      </Link>
+      <Link href={`/workspaces/${id}?tab=operations`} className={linkClass(nav.active === "operations")}>
+        Operations
+      </Link>
+      {nav.activeAgentId && (
+        <Link href={`/agents/${nav.activeAgentId}`} className={linkClass(nav.active === "agent")}>
+          Agent
+        </Link>
+      )}
+    </nav>
+  );
+}
+
 /* ------------------------------ Public API ----------------------------- */
 export function TopNav() {
   return <Rail />;
@@ -672,6 +700,7 @@ export function PageShell({
       <Rail nav={resolved} />
       <div className="flex min-w-0 flex-col">
         <TopBar nav={resolved} />
+        <MobileNavStrip nav={resolved} />
         <main className="flex-1">
           <div className="mx-auto w-full max-w-6xl px-6 py-8">{children}</div>
         </main>

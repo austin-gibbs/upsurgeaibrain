@@ -193,17 +193,19 @@ export function CallLog({
                         )}
                       </td>
                       <td className="px-5 py-3.5">
-                        {c.crmUrl && crmProvider === "followupboss" ? (
+                        {c.crmUrl ? (
                           <a href={c.crmUrl} target="_blank" rel="noopener noreferrer">
                             <Button variant="ghost" size="sm" className="gap-1">
                               View
                               <ExternalLink className="h-3.5 w-3.5" />
                             </Button>
                           </a>
-                        ) : (
-                          <span className="text-xs text-ink-400">
-                            {!c.crmContactId ? "No contact ID" : "Set CRM URL"}
+                        ) : c.crmContactId ? (
+                          <span className="font-mono text-xs text-ink-500" title="CRM contact ID">
+                            {c.crmContactId}
                           </span>
+                        ) : (
+                          <span className="text-xs text-ink-400">No contact ID</span>
                         )}
                       </td>
                     </tr>

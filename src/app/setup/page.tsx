@@ -214,7 +214,7 @@ export default function SetupWizard() {
             "Provisioning failed"
         );
       }
-      router.push(`/workspaces/${data.workspaceId}`);
+      router.push(`/workspaces/${data.workspaceId}?tab=operations`);
     } catch (e: any) {
       setSubmitErr(e.message ?? "Something went wrong");
       setSubmitting(false);

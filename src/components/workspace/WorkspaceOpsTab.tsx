@@ -1,8 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   Bot,
   Users,
@@ -65,6 +65,8 @@ type OpsData = {
     name: string;
     timezone: string;
     crm_provider: string;
+    crm_account_url?: string | null;
+    crm_status?: string | null;
     enroll_tag: string;
     is_active: boolean;
     has_workspace_crm_credentials?: boolean;
@@ -303,6 +305,23 @@ export function WorkspaceOpsTab({
   workspaceId: string;
   onRefresh: () => void;
 }) {
+  return (
+    <Suspense fallback={null}>
+      <WorkspaceOpsTabInner data={data} workspaceId={workspaceId} onRefresh={onRefresh} />
+    </Suspense>
+  );
+}
+
+function WorkspaceOpsTabInner({
+  data,
+  workspaceId,
+  onRefresh,
+}: {
+  data: OpsData;
+  workspaceId: string;
+  onRefresh: () => void;
+}) {
+  const searchParams = useSearchParams();
   const [opsTab, setOpsTab] = useState<
     "overview" | "queue" | "schedule" | "outcomes"
   >("overview");
@@ -341,10 +360,51 @@ export function WorkspaceOpsTab({
   const [deleteConfirmName, setDeleteConfirmName] = useState("");
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [controlMsg, setControlMsg] = useState<string | null>(null);
+  const [savingControl, setSavingControl] = useState(false);
 
   const router = useRouter();
 
   const { workspace, agents, contactCount, contacts, outcomeTags } = data;
+
+  useEffect(() => {
+    const crm = searchParams.get("crm");
+    if (crm === "connected") {
+      setControlMsg("HighLevel connected at workspace level — all inheriting agents share this token.");
+      onRefresh();
+    } else if (crm === "error") {
+      const reason = searchParams.get("reason");
+      setControlMsg(
+        reason
+          ? `HighLevel connection failed: ${reason}`
+          : "HighLevel connection was cancelled or failed."
+      );
+    }
+  }, [searchParams, onRefresh]);
+
+  const tasksEnabled =
+    agents.length > 0 &&
+    agents.every((a) => Boolean(firstEmbed(a.agent_task_configs)?.enabled));
+
+  async function patchWorkspace(body: Record<string, unknown>) {
+    setSavingControl(true);
+    setControlMsg(null);
+    try {
+      const res = await fetch(`/api/workspaces/${workspaceId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error ?? "Failed to update workspace");
+      onRefresh();
+      setControlMsg("Workspace settings saved.");
+    } catch (e) {
+      setControlMsg(e instanceof Error ? e.message : "Failed to update workspace");
+    } finally {
+      setSavingControl(false);
+    }
+  }
 
   const agentEnrollRows = agents.map((a) => ({
     id: a.id,
@@ -858,8 +918,76 @@ export function WorkspaceOpsTab({
         onSelect={(v) => setOpsTab(v)}
       />
 
+      {controlMsg && (
+        <div className="mb-5 rounded-xl bg-ink-100 px-4 py-3 text-sm text-ink-600">
+          {controlMsg}
+        </div>
+      )}
+
       {opsTab === "overview" && (
         <div className="space-y-6">
+      <Card className="p-5">
+        <SectionHeader
+          title="Workspace controls"
+          description="Pause dialing, bulk-enable tasks, and manage the shared CRM connection."
+        />
+        <div className="mt-4 flex flex-wrap items-center gap-4">
+          <Button
+            variant={workspace.is_active ? "secondary" : "primary"}
+            disabled={savingControl}
+            onClick={() => patchWorkspace({ is_active: !workspace.is_active })}
+          >
+            {workspace.is_active ? "Pause workspace" : "Resume workspace"}
+          </Button>
+          <Label className="flex cursor-pointer items-center gap-2 font-normal text-ink-600">
+            <input
+              type="checkbox"
+              checked={tasksEnabled}
+              disabled={savingControl || agents.length === 0}
+              onChange={(e) => patchWorkspace({ tasks_enabled: e.target.checked })}
+              className="h-4 w-4 rounded border-ink-300 text-brand-600 focus:ring-brand-500"
+            />
+            Tasks enabled for all agents
+          </Label>
+          <Badge tone={workspace.is_active ? "green" : "amber"}>
+            {workspace.is_active ? "Active" : "Paused"}
+          </Badge>
+          {workspace.crm_provider === "highlevel" && (
+            <>
+              <Badge
+                tone={
+                  workspace.crm_status === "needs_reauth"
+                    ? "red"
+                    : workspace.has_workspace_crm_credentials
+                      ? "green"
+                      : "amber"
+                }
+              >
+                {workspace.crm_status === "needs_reauth"
+                  ? "CRM reconnect needed"
+                  : workspace.has_workspace_crm_credentials
+                    ? "HighLevel connected"
+                    : "HighLevel not connected"}
+              </Badge>
+              <a
+                href={`/api/workspaces/${workspaceId}/crm/connect`}
+                className="rounded-xl border border-ink-200 px-4 py-2 text-sm font-medium text-ink-700 transition-colors hover:bg-ink-50"
+              >
+                {workspace.has_workspace_crm_credentials
+                  ? "Reconnect HighLevel"
+                  : "Connect HighLevel (workspace)"}
+              </a>
+            </>
+          )}
+        </div>
+        {workspace.crm_provider === "highlevel" && workspace.crm_status === "needs_reauth" && (
+          <p className="mt-3 rounded-xl bg-accent-rose-bg px-3 py-2 text-xs text-accent-rose-fg">
+            The workspace HighLevel token expired. Reconnect once here so all agents
+            that inherit workspace CRM can sync again.
+          </p>
+        )}
+      </Card>
+
       {outboundAgents.length > 1 && (
         <Card className="mb-6 p-5">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
