@@ -1,12 +1,11 @@
 // Push-based ops alerts (Slack incoming webhook).
 
-export async function sendOpsAlert(text: string): Promise<boolean> {
-  const url = process.env.ALERT_SLACK_WEBHOOK_URL?.trim();
-  if (!url) {
-    console.warn("[alerts] ALERT_SLACK_WEBHOOK_URL not set:", text);
-    return false;
-  }
-
+/**
+ * Post plain text to a specific Slack incoming-webhook URL.
+ * Each incoming webhook is bound to one channel, so callers pass the URL
+ * for the channel they want (ops alerts vs. the #client-services report).
+ */
+export async function postSlackWebhook(url: string, text: string): Promise<boolean> {
   try {
     const res = await fetch(url, {
       method: "POST",
@@ -22,4 +21,13 @@ export async function sendOpsAlert(text: string): Promise<boolean> {
     console.error("[alerts] failed to send:", e instanceof Error ? e.message : e);
     return false;
   }
+}
+
+export async function sendOpsAlert(text: string): Promise<boolean> {
+  const url = process.env.ALERT_SLACK_WEBHOOK_URL?.trim();
+  if (!url) {
+    console.warn("[alerts] ALERT_SLACK_WEBHOOK_URL not set:", text);
+    return false;
+  }
+  return postSlackWebhook(url, text);
 }

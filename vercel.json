@@ -15,6 +15,10 @@
     {
       "path": "/api/cron/dial-watchdog",
       "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/client-services-report?post=slack",
+      "schedule": "0 * * * *"
     }
   ]
 }
