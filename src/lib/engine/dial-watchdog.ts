@@ -90,7 +90,7 @@ export async function checkDialStalls(opts?: {
     .from("agents")
     .select(
       `id, name, workspace_id, status, direction,
-       agent_call_configs(call_window_start, call_window_end, daily_run_at),
+       agent_call_configs(call_window_start, call_window_end, call_window_days, daily_run_at),
        workspaces(name, timezone, is_active)`
     )
     .eq("status", "active")
@@ -98,8 +98,14 @@ export async function checkDialStalls(opts?: {
     .returns<
       (Pick<Agent, "id" | "name" | "workspace_id" | "status" | "direction"> & {
         agent_call_configs:
-          | Pick<AgentCallConfig, "call_window_start" | "call_window_end" | "daily_run_at">
-          | Pick<AgentCallConfig, "call_window_start" | "call_window_end" | "daily_run_at">[]
+          | Pick<
+              AgentCallConfig,
+              "call_window_start" | "call_window_end" | "call_window_days" | "daily_run_at"
+            >
+          | Pick<
+              AgentCallConfig,
+              "call_window_start" | "call_window_end" | "call_window_days" | "daily_run_at"
+            >[]
           | null;
         workspaces: Pick<Workspace, "name" | "timezone" | "is_active"> | null;
       })[]
@@ -117,7 +123,8 @@ export async function checkDialStalls(opts?: {
     const windowOpen = evaluateDialWindow(
       workspace.timezone,
       config.call_window_start,
-      config.call_window_end
+      config.call_window_end,
+      config.call_window_days
     ).allowed;
 
     const [{ count: overduePending }, { data: oldestPending }] = await Promise.all([

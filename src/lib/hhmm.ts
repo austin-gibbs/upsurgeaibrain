@@ -16,6 +16,25 @@ export function normalizeEmbedList<T>(raw: T | T[] | null | undefined): T[] {
   return [raw];
 }
 
+import { DEFAULT_CALL_WINDOW_DAYS } from "@/types";
+
+/** Normalize ISO weekday array (1=Mon … 7=Sun) for agent call configs. */
+export function normalizeCallWindowDays(
+  days: unknown
+): number[] {
+  if (!Array.isArray(days) || days.length === 0) {
+    return [...DEFAULT_CALL_WINDOW_DAYS];
+  }
+  const unique = [
+    ...new Set(
+      days
+        .map((d) => Number(d))
+        .filter((d) => Number.isInteger(d) && d >= 1 && d <= 7)
+    ),
+  ].sort((a, b) => a - b);
+  return unique.length ? unique : [...DEFAULT_CALL_WINDOW_DAYS];
+}
+
 /** Normalize HH:MM fields on a single agent_call_configs row. */
 export function normalizeCallConfigTimes(
   config: Record<string, unknown> | null | undefined
@@ -31,6 +50,7 @@ export function normalizeCallConfigTimes(
       typeof config.call_window_end === "string"
         ? normalizeHHMM(config.call_window_end)
         : config.call_window_end,
+    call_window_days: normalizeCallWindowDays(config.call_window_days),
     daily_run_at:
       typeof config.daily_run_at === "string"
         ? normalizeHHMM(config.daily_run_at)

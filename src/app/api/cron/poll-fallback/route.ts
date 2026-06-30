@@ -10,7 +10,7 @@ import { bearerMatches } from "@/lib/secure";
 import { isHeartbeatStale, heartbeatAgeMs } from "@/lib/engine/heartbeat";
 import { pollAgent } from "@/lib/engine/poller";
 import { probeRedisQueueHealth } from "@/lib/queue/redis-health";
-import { nowHHMMInTz } from "@/lib/engine/cadence";
+import { nowHHMMInTz, isCallDayAllowed } from "@/lib/engine/cadence";
 import type { Agent, AgentCallConfig } from "@/types";
 
 export const runtime = "nodejs";
@@ -23,8 +23,14 @@ function authorized(req: NextRequest): boolean {
 
 type AgentRow = Pick<Agent, "id" | "status" | "direction" | "workspace_id"> & {
   agent_call_configs:
-    | Pick<AgentCallConfig, "daily_run_at" | "call_window_end" | "max_attempts_per_contact">
-    | Pick<AgentCallConfig, "daily_run_at" | "call_window_end" | "max_attempts_per_contact">[]
+    | Pick<
+        AgentCallConfig,
+        "daily_run_at" | "call_window_end" | "call_window_days" | "max_attempts_per_contact"
+      >
+    | Pick<
+        AgentCallConfig,
+        "daily_run_at" | "call_window_end" | "call_window_days" | "max_attempts_per_contact"
+      >[]
     | null;
   workspaces: { timezone: string; is_active: boolean } | null;
 };
@@ -63,7 +69,7 @@ async function handle(req: NextRequest) {
     .select(
       `id, status, direction,
        workspace_id,
-       agent_call_configs(daily_run_at, call_window_end, max_attempts_per_contact),
+       agent_call_configs(daily_run_at, call_window_end, call_window_days, max_attempts_per_contact),
        workspaces(timezone, is_active)`
     )
     .eq("status", "active")
@@ -84,6 +90,10 @@ async function handle(req: NextRequest) {
 
     const now = nowHHMMInTz(workspace.timezone);
     if (now < config.daily_run_at) {
+      skippedAgents.push(agent.id);
+      continue;
+    }
+    if (!isCallDayAllowed(workspace.timezone, config.call_window_days)) {
       skippedAgents.push(agent.id);
       continue;
     }

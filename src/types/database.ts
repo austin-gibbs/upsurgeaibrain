@@ -43,6 +43,7 @@ export type Database = {
         Row: {
           agent_id: string
           cadence_day_gaps: number[]
+          call_window_days: number[]
           call_window_end: string
           call_window_start: string
           created_at: string
@@ -56,6 +57,7 @@ export type Database = {
         Insert: {
           agent_id: string
           cadence_day_gaps?: number[]
+          call_window_days?: number[]
           call_window_end?: string
           call_window_start?: string
           created_at?: string
@@ -69,6 +71,7 @@ export type Database = {
         Update: {
           agent_id?: string
           cadence_day_gaps?: number[]
+          call_window_days?: number[]
           call_window_end?: string
           call_window_start?: string
           created_at?: string

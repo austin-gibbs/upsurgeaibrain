@@ -11,11 +11,12 @@ import { getCallQueue, addCallJobsBulk, closeCallQueue, type CallJobSpec } from 
 import { getRedis } from "@/lib/queue/connection";
 import {
   isEligible,
-  isPastCallWindowEnd,
+  isCallDayAllowed,
+  isCallWindowClosedForToday,
   msUntilCallWindowOpens,
   remainingWindowCapacity,
   todayInTz,
-  withinCallWindow,
+  evaluateDialWindow,
 } from "./cadence";
 import type { Agent, AgentCallConfig, AgentTaskConfig, Contact, Workspace } from "@/types";
 import {
@@ -85,9 +86,21 @@ export async function pollAgent(
 
   if (
     !options?.testMode &&
-    isPastCallWindowEnd(workspace.timezone, config.call_window_end)
+    isCallWindowClosedForToday(
+      workspace.timezone,
+      config.call_window_end,
+      config.call_window_days
+    )
   ) {
-    return { agentId, scanned: 0, eligible: 0, enqueued: 0, skippedReason: "call window closed for today" };
+    return {
+      agentId,
+      scanned: 0,
+      eligible: 0,
+      enqueued: 0,
+      skippedReason: isCallDayAllowed(workspace.timezone, config.call_window_days)
+        ? "call window closed for today"
+        : "not a call day",
+    };
   }
 
   const today = todayInTz(workspace.timezone);
@@ -162,7 +175,8 @@ export async function pollAgent(
         workspace.timezone,
         config.call_window_start,
         config.call_window_end,
-        config.drip_seconds
+        config.drip_seconds,
+        config.call_window_days
       );
   const dailyCap = Math.min(config.max_calls_per_day, windowCapacity);
   const newCallCapacity = computeNewPollCapacity(dailyCap, rolloverBacklog);
@@ -193,7 +207,8 @@ export async function pollAgent(
     : msUntilCallWindowOpens(
         workspace.timezone,
         config.call_window_start,
-        config.call_window_end
+        config.call_window_end,
+        config.call_window_days
       );
 
   // 4. Persist queue rows, then bulk-enqueue dial jobs (one Redis round-trip).
@@ -294,8 +309,14 @@ export async function enqueueContactsNow(
     return { ...base, skippedReason: "workspace inactive" };
   }
 
-  if (!withinCallWindow(workspace.timezone, config.call_window_start, config.call_window_end)) {
-    return { ...base, skippedReason: "outside call window" };
+  const windowDecision = evaluateDialWindow(
+    workspace.timezone,
+    config.call_window_start,
+    config.call_window_end,
+    config.call_window_days
+  );
+  if (!windowDecision.allowed) {
+    return { ...base, skippedReason: windowDecision.reason };
   }
 
   const today = todayInTz(workspace.timezone);

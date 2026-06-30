@@ -1,8 +1,8 @@
 "use client";
 
-import { Input, Label } from "@/components/ui";
+import { Input, Label, Pill } from "@/components/ui";
 import { CadenceDayGapsEditor } from "./CadenceDayGapsEditor";
-import type { CallConfig } from "./types";
+import { CALL_WINDOW_DAY_OPTIONS, type CallConfig } from "./types";
 
 function NumField({
   label,
@@ -39,6 +39,19 @@ export function CallSettings({
   cfg: CallConfig;
   onChange: (patch: Partial<CallConfig>) => void;
 }) {
+  const selectedDays = new Set(cfg.call_window_days);
+
+  function toggleDay(day: number) {
+    const next = new Set(selectedDays);
+    if (next.has(day)) {
+      if (next.size === 1) return;
+      next.delete(day);
+    } else {
+      next.add(day);
+    }
+    onChange({ call_window_days: [...next].sort((a, b) => a - b) });
+  }
+
   return (
     <div className="grid gap-4 sm:grid-cols-2">
       <NumField
@@ -81,6 +94,23 @@ export function CallSettings({
           value={cfg.call_window_end}
           onChange={(e) => onChange({ call_window_end: e.target.value })}
         />
+      </div>
+      <div className="space-y-1.5 sm:col-span-2">
+        <Label hint="workspace timezone">Call days</Label>
+        <div className="flex flex-wrap gap-2">
+          {CALL_WINDOW_DAY_OPTIONS.map((day) => (
+            <Pill
+              key={day.value}
+              selected={selectedDays.has(day.value)}
+              onClick={() => toggleDay(day.value)}
+            >
+              {day.label}
+            </Pill>
+          ))}
+        </div>
+        <p className="text-xs text-ink-400">
+          Outbound dials only run on selected days during the call window.
+        </p>
       </div>
       <div className="space-y-1.5">
         <Label hint="when the daily poll fires">Daily run at</Label>

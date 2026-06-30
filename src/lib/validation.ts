@@ -45,12 +45,21 @@ export const callOutcomeSchema = z.enum([
   "error",
 ]);
 
+const callWindowDaySchema = z.number().int().min(1).max(7);
+
+export const callWindowDaysSchema = z
+  .array(callWindowDaySchema)
+  .min(1, "Select at least one call day")
+  .default([1, 2, 3, 4, 5, 6, 7])
+  .transform((days) => [...new Set(days)].sort((a, b) => a - b));
+
 export const callConfigSchema = z.object({
   max_total_calls: z.number().int().positive().nullable().default(null),
   max_calls_per_day: z.number().int().positive().default(100),
   max_attempts_per_contact: z.number().int().positive().default(10),
   call_window_start: hhmmSchema.default("09:00"),
   call_window_end: hhmmSchema.default("18:00"),
+  call_window_days: callWindowDaysSchema,
   daily_run_at: hhmmSchema.default("09:00"),
   drip_seconds: z.number().int().min(1).default(60),
   cadence_day_gaps: z

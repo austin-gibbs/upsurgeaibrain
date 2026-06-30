@@ -100,6 +100,11 @@ export interface Agent {
   updated_at: string;
 }
 
+/** ISO weekday numbers allowed for outbound dialing (1=Mon … 7=Sun). */
+export type CallWindowDay = 1 | 2 | 3 | 4 | 5 | 6 | 7;
+
+export const DEFAULT_CALL_WINDOW_DAYS: CallWindowDay[] = [1, 2, 3, 4, 5, 6, 7];
+
 export interface AgentCallConfig {
   agent_id: string;
   max_total_calls: number | null;
@@ -107,6 +112,8 @@ export interface AgentCallConfig {
   max_attempts_per_contact: number;
   call_window_start: string;
   call_window_end: string;
+  /** ISO weekdays (1=Mon … 7=Sun) when dialing is permitted. */
+  call_window_days: number[];
   daily_run_at: string;
   drip_seconds: number;
   cadence_day_gaps: number[];

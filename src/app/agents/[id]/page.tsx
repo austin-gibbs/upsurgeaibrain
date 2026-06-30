@@ -196,6 +196,10 @@ function AgentDetail({
             max_attempts_per_contact: cc.max_attempts_per_contact ?? 10,
             call_window_start: normalizeHHMM(cc.call_window_start ?? "09:00"),
             call_window_end: normalizeHHMM(cc.call_window_end ?? "18:00"),
+            call_window_days:
+              Array.isArray(cc.call_window_days) && cc.call_window_days.length > 0
+                ? [...cc.call_window_days].sort((a, b) => a - b)
+                : defaultCallConfig().call_window_days,
             daily_run_at: normalizeHHMM(cc.daily_run_at ?? "09:00"),
             drip_seconds: cc.drip_seconds ?? 60,
             cadence_day_gaps: cc.cadence_day_gaps ?? defaultCallConfig().cadence_day_gaps,

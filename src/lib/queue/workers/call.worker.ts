@@ -16,9 +16,11 @@ type AgentWindowRow = {
   agent_call_configs: {
     call_window_start: string;
     call_window_end: string;
+    call_window_days: number[];
   } | {
     call_window_start: string;
     call_window_end: string;
+    call_window_days: number[];
   }[] | null;
   workspaces: { timezone: string } | null;
 };
@@ -107,7 +109,7 @@ export function startCallWorker(): Worker<CallJob> {
         const { data: agentRow } = await supabase
           .from("agents")
           .select(
-            "agent_call_configs(call_window_start, call_window_end), workspaces(timezone)"
+            "agent_call_configs(call_window_start, call_window_end, call_window_days), workspaces(timezone)"
           )
           .eq("id", job.data.agentId)
           .single<AgentWindowRow>();
@@ -120,7 +122,8 @@ export function startCallWorker(): Worker<CallJob> {
         const decision = evaluateDialWindow(
           timezone,
           config?.call_window_start,
-          config?.call_window_end
+          config?.call_window_end,
+          config?.call_window_days
         );
         if (!decision.allowed) {
           return deferDial(job.data, decision.deferMs, decision.reason);

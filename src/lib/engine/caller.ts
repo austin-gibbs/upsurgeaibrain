@@ -112,13 +112,18 @@ export async function placeCall(job: CallJob): Promise<{ callId: string; retellC
   if (!job.testMode) {
     const { data: callConfig } = await supabase
       .from("agent_call_configs")
-      .select("call_window_start, call_window_end")
+      .select("call_window_start, call_window_end, call_window_days")
       .eq("agent_id", agent.id)
-      .maybeSingle<{ call_window_start: string; call_window_end: string }>();
+      .maybeSingle<{
+        call_window_start: string;
+        call_window_end: string;
+        call_window_days: number[];
+      }>();
     const decision = evaluateDialWindow(
       workspace.timezone,
       callConfig?.call_window_start,
-      callConfig?.call_window_end
+      callConfig?.call_window_end,
+      callConfig?.call_window_days
     );
     if (!decision.allowed) {
       throw new OutsideCallWindowError(decision.reason, decision.deferMs);
@@ -200,12 +205,27 @@ export async function placeCall(job: CallJob): Promise<{ callId: string; retellC
   if (!call) throw new Error("failed to create call row");
 
   // Inject V2 memory + identity into the Retell prompt.
-  const dynamicVariables = buildDynamicVariables({
+  let dynamicVariables = buildDynamicVariables({
     agent,
     contact,
     memory: memory ?? null,
     attemptNumber: job.attemptNumber,
   });
+
+  // Best-effort: enrich with the contact's CRM field values (e.g. HighLevel
+  // custom fields like interested campus/program) so the prompt can reference
+  // them as {{...}} dynamic variables. Strictly additive — base identity/memory
+  // variables win on any key collision, and any failure (no CRM connected, API
+  // error) leaves the base variables untouched so the dial still proceeds.
+  try {
+    const crmForVars = getCrmAdapterForAgent(agent, workspace);
+    if (typeof crmForVars.getContactFieldValues === "function" && contact.crm_contact_id) {
+      const fieldVars = await crmForVars.getContactFieldValues(contact.crm_contact_id);
+      dynamicVariables = { ...fieldVars, ...dynamicVariables };
+    }
+  } catch {
+    // non-fatal — proceed with base dynamic variables only
+  }
 
   const retell = getRetellClientForAgent(agent);
   const webhookUrl = appRetellWebhookUrl();

@@ -76,7 +76,8 @@ export async function rescheduleAgentCallQueue(agentId: string): Promise<number>
       config.call_window_start,
       config.call_window_end,
       config.drip_seconds,
-      i
+      i,
+      config.call_window_days
     );
     const safeDelay = Math.max(delay, 0);
     const scheduledFor = new Date(Date.now() + safeDelay).toISOString();

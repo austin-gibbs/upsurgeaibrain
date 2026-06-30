@@ -4,10 +4,21 @@ export type CallConfig = {
   max_attempts_per_contact: number;
   call_window_start: string;
   call_window_end: string;
+  call_window_days: number[];
   daily_run_at: string;
   drip_seconds: number;
   cadence_day_gaps: number[];
 };
+
+export const CALL_WINDOW_DAY_OPTIONS = [
+  { value: 1, label: "Mon" },
+  { value: 2, label: "Tue" },
+  { value: 3, label: "Wed" },
+  { value: 4, label: "Thu" },
+  { value: 5, label: "Fri" },
+  { value: 6, label: "Sat" },
+  { value: 7, label: "Sun" },
+] as const;
 
 export type TaskConfig = {
   enabled: boolean;
@@ -77,6 +88,7 @@ export function defaultCallConfig(): CallConfig {
     max_attempts_per_contact: 10,
     call_window_start: "09:00",
     call_window_end: "18:00",
+    call_window_days: [1, 2, 3, 4, 5, 6, 7],
     daily_run_at: "09:00",
     drip_seconds: 60,
     cadence_day_gaps: [0, 1, 2, 3, 5, 7, 10, 14, 21, 30],

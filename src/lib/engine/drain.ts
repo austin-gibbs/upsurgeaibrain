@@ -30,7 +30,7 @@ interface DueQueueRow {
     phones: string[];
     attempt_count: number;
   } | null;
-  agents: {
+    agents: {
     status: string;
     direction: string;
     retell_agent_id: string | null;
@@ -38,11 +38,19 @@ interface DueQueueRow {
     agent_call_configs:
       | Pick<
           AgentCallConfig,
-          "call_window_start" | "call_window_end" | "drip_seconds" | "max_calls_per_day"
+          | "call_window_start"
+          | "call_window_end"
+          | "call_window_days"
+          | "drip_seconds"
+          | "max_calls_per_day"
         >
       | Pick<
           AgentCallConfig,
-          "call_window_start" | "call_window_end" | "drip_seconds" | "max_calls_per_day"
+          | "call_window_start"
+          | "call_window_end"
+          | "call_window_days"
+          | "drip_seconds"
+          | "max_calls_per_day"
         >[]
       | null;
   } | null;
@@ -70,7 +78,11 @@ function pickCallConfig(
   raw: DueQueueRow["agents"]
 ): Pick<
   AgentCallConfig,
-  "call_window_start" | "call_window_end" | "drip_seconds" | "max_calls_per_day"
+  | "call_window_start"
+  | "call_window_end"
+  | "call_window_days"
+  | "drip_seconds"
+  | "max_calls_per_day"
 > | null {
   const configs = raw?.agent_call_configs;
   if (!configs) return null;
@@ -96,7 +108,7 @@ export async function drainDueDials(opts?: {
       `id, agent_id, contact_id, workspace_id, queue_day, position, enqueued_at, scheduled_for,
        contacts(is_terminal, last_called_on, phones, attempt_count),
        agents(status, direction, retell_agent_id, retell_from_number,
-         agent_call_configs(call_window_start, call_window_end, drip_seconds, max_calls_per_day)),
+         agent_call_configs(call_window_start, call_window_end, call_window_days, drip_seconds, max_calls_per_day)),
        workspaces(timezone, is_active)`
     )
     .eq("status", "pending")
@@ -152,7 +164,8 @@ export async function drainDueDials(opts?: {
     const decision = evaluateDialWindow(
       workspace.timezone,
       config.call_window_start,
-      config.call_window_end
+      config.call_window_end,
+      config.call_window_days
     );
     if (!decision.allowed) {
       result.skipped++;

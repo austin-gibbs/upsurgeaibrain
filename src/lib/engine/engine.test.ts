@@ -20,6 +20,11 @@ import {
   hhmmToSeconds,
   projectDialSlot,
   rollScheduleForwardIfPast,
+  normalizeCallWindowDays,
+  isCallDayAllowed,
+  isoWeekdayInTz,
+  evaluateDialWindow,
+  msUntilCallWindowOpens,
 } from "./cadence";
 import { reconcileTags } from "./tags";
 import type { AgentCallConfig, Contact, OutcomeTag } from "@/types";
@@ -35,6 +40,7 @@ function callConfig(overrides: Partial<AgentCallConfig> = {}): AgentCallConfig {
     max_attempts_per_contact: 10,
     call_window_start: "09:00",
     call_window_end: "18:00",
+    call_window_days: [1, 2, 3, 4, 5, 6, 7],
     daily_run_at: "09:00",
     drip_seconds: 60,
     cadence_day_gaps: [0, 1, 2, 3, 5, 7, 10, 14, 21, 30],
@@ -351,5 +357,87 @@ describe("daily cap rollover math", () => {
     assert.equal(perDay, 361);
     const daysNeeded = Math.ceil(1200 / perDay);
     assert.equal(daysNeeded, 4);
+  });
+});
+
+// ---------------------------------------------------------------------
+// call_window_days
+// ---------------------------------------------------------------------
+describe("normalizeCallWindowDays", () => {
+  it("defaults to all seven days when empty or invalid", () => {
+    assert.deepEqual(normalizeCallWindowDays(null), [1, 2, 3, 4, 5, 6, 7]);
+    assert.deepEqual(normalizeCallWindowDays([]), [1, 2, 3, 4, 5, 6, 7]);
+    assert.deepEqual(normalizeCallWindowDays([9, 0]), [1, 2, 3, 4, 5, 6, 7]);
+  });
+
+  it("dedupes and sorts valid weekdays", () => {
+    assert.deepEqual(normalizeCallWindowDays([5, 1, 1, 3]), [1, 3, 5]);
+  });
+});
+
+describe("isCallDayAllowed", () => {
+  it("recognizes weekdays for a known date", () => {
+    // 2026-06-23 is a Tuesday (ISO 2)
+    assert.equal(isoWeekdayInTz("America/New_York", "2026-06-23"), 2);
+    assert.equal(isCallDayAllowed("America/New_York", [2], "2026-06-23"), true);
+    assert.equal(isCallDayAllowed("America/New_York", [1], "2026-06-23"), false);
+  });
+});
+
+describe("evaluateDialWindow with call days", () => {
+  it("blocks dialing on a disallowed weekday", () => {
+    const decision = evaluateDialWindow(
+      "America/New_York",
+      "09:00",
+      "18:00",
+      [1]
+    );
+    if (isoWeekdayInTz("America/New_York") === 1) {
+      assert.equal(typeof decision.allowed, "boolean");
+    } else {
+      assert.equal(decision.allowed, false);
+      assert.ok(decision.deferMs >= 60_000);
+      assert.match(decision.reason, /call days/);
+    }
+  });
+
+  it("allows all-days configs to behave like the legacy daily window", () => {
+    const decision = evaluateDialWindow(
+      "America/New_York",
+      "09:00",
+      "18:00",
+      [1, 2, 3, 4, 5, 6, 7]
+    );
+  assert.equal(
+      decision.allowed,
+      withinCallWindow("America/New_York", "09:00", "18:00")
+    );
+  });
+});
+
+describe("msUntilCallWindowOpens with call days", () => {
+  it("defers to the next allowed day when today is off", () => {
+    const tz = "America/New_York";
+    const today = "2026-06-23"; // Tuesday
+    const weekday = isoWeekdayInTz(tz, today);
+    const offDay = weekday === 7 ? 6 : 7;
+    if (weekday === offDay) return;
+    assert.equal(isCallDayAllowed(tz, [offDay], today), false);
+    const ms = msUntilCallWindowOpens(tz, "09:00", "18:00", [offDay]);
+    assert.ok(ms > 0);
+  });
+});
+
+describe("remainingWindowCapacity with call days", () => {
+  it("returns zero on disallowed weekdays", () => {
+    const tz = "America/New_York";
+    const today = "2026-06-23";
+    const weekday = isoWeekdayInTz(tz, today);
+    const offDay = weekday === 7 ? 6 : 7;
+    if (weekday === offDay) return;
+    assert.equal(
+      remainingWindowCapacity(tz, "09:00", "18:00", 60, [offDay]),
+      0
+    );
   });
 });

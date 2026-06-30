@@ -211,7 +211,8 @@ export async function resyncCallQueue(opts?: { limit?: number }): Promise<SweepR
         dial.config.call_window_start,
         dial.config.call_window_end,
         dial.config.drip_seconds,
-        idx
+        idx,
+        dial.config.call_window_days
       ),
       0
     );

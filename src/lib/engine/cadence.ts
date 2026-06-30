@@ -6,7 +6,50 @@
 // computes the next eligible date from the per-agent day-gap schedule.
 // =====================================================================
 import type { AgentCallConfig, Contact } from "@/types";
+import { DEFAULT_CALL_WINDOW_DAYS } from "@/types";
 import { normalizeHHMM } from "@/lib/hhmm";
+
+const WEEKDAY_SHORT_TO_ISO: Record<string, number> = {
+  Mon: 1,
+  Tue: 2,
+  Wed: 3,
+  Thu: 4,
+  Fri: 5,
+  Sat: 6,
+  Sun: 7,
+};
+
+/** Normalize ISO weekday array (1=Mon … 7=Sun). */
+export function normalizeCallWindowDays(
+  days?: number[] | null
+): number[] {
+  if (!days?.length) return [...DEFAULT_CALL_WINDOW_DAYS];
+  const unique = [
+    ...new Set(days.filter((d) => Number.isInteger(d) && d >= 1 && d <= 7)),
+  ].sort((a, b) => a - b);
+  return unique.length ? unique : [...DEFAULT_CALL_WINDOW_DAYS];
+}
+
+/** ISO weekday (1=Mon … 7=Sun) for a YYYY-MM-DD date in a timezone. */
+export function isoWeekdayInTz(timezone: string, isoDate?: string): number {
+  const date = isoDate ?? todayInTz(timezone);
+  const noonUtc = zonedDateTimeToUtcIso(timezone, date, "12:00");
+  const short = new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone,
+    weekday: "short",
+  }).format(new Date(noonUtc));
+  return WEEKDAY_SHORT_TO_ISO[short] ?? 1;
+}
+
+/** True when the given calendar day is an allowed call day. */
+export function isCallDayAllowed(
+  timezone: string,
+  days?: number[] | null,
+  isoDate?: string
+): boolean {
+  const allowed = normalizeCallWindowDays(days);
+  return allowed.includes(isoWeekdayInTz(timezone, isoDate));
+}
 
 /** Today's date (YYYY-MM-DD) in a given IANA timezone. */
 export function todayInTz(timezone: string): string {
@@ -97,6 +140,16 @@ export function isPastCallWindowEnd(timezone: string, end: string): boolean {
   return now > windowEnd;
 }
 
+/** True when dialing is closed for today (off-day or past window end). */
+export function isCallWindowClosedForToday(
+  timezone: string,
+  end: string,
+  days?: number[] | null
+): boolean {
+  if (!isCallDayAllowed(timezone, days)) return true;
+  return isPastCallWindowEnd(timezone, end);
+}
+
 function secondsIntoDayInTz(timezone: string): number {
   const parts = new Intl.DateTimeFormat("en-GB", {
     timeZone: timezone,
@@ -165,19 +218,63 @@ export function msUntilQueueSlot(
   start: string,
   end: string,
   dripSeconds: number,
-  slotIndex: number
+  slotIndex: number,
+  days?: number[] | null
 ): number {
+  const allowedDays = normalizeCallWindowDays(days);
   const dailyCap = dailyWindowCapacity(start, end, dripSeconds);
   if (dailyCap <= 0 || slotIndex < 0) {
-    return msUntilCallWindowOpens(timezone, start, end);
+    return msUntilCallWindowOpens(timezone, start, end, allowedDays);
   }
 
-  const dayNum = Math.floor(slotIndex / dailyCap);
+  const allowedDayNum = Math.floor(slotIndex / dailyCap);
   const posInDay = slotIndex % dailyCap;
-  const msToNextOpen = msUntilCallWindowOpens(timezone, start, end);
-  const dayMs = 24 * 3600 * 1000;
+  const msToDay = msToAllowedDayWindowStart(
+    timezone,
+    allowedDays,
+    allowedDayNum,
+    start,
+    end
+  );
+  return msToDay + posInDay * dripSeconds * 1000;
+}
 
-  return msToNextOpen + dayNum * dayMs + posInDay * dripSeconds * 1000;
+/** Ms from now until window start on the Nth allowed dialing day (0-based). */
+function msToAllowedDayWindowStart(
+  timezone: string,
+  days: number[],
+  allowedDayIndex: number,
+  start: string,
+  end: string
+): number {
+  const today = todayInTz(timezone);
+  const windowStart = normalizeHHMM(start);
+  const windowEnd = normalizeHHMM(end);
+  const nowSec = secondsIntoDayInTz(timezone);
+  const startSec = hhmmToSeconds(windowStart);
+  const endSec = hhmmToSeconds(windowEnd);
+
+  let seen = -1;
+  for (let offset = 0; offset <= 60; offset++) {
+    const date = addDays(today, offset);
+    if (!isCallDayAllowed(timezone, days, date)) continue;
+    if (offset === 0 && nowSec > endSec) continue;
+
+    seen++;
+    if (seen !== allowedDayIndex) continue;
+
+    if (offset === 0 && nowSec < startSec) {
+      return (startSec - nowSec) * 1000;
+    }
+    if (offset === 0 && nowSec >= startSec && nowSec <= endSec) {
+      return 0;
+    }
+
+    const secUntilMidnight = 24 * 3600 - nowSec;
+    return (secUntilMidnight + (offset - 1) * 24 * 3600 + startSec) * 1000;
+  }
+
+  return 7 * 24 * 3600 * 1000;
 }
 
 /**
@@ -205,8 +302,10 @@ export function remainingWindowCapacity(
   timezone: string,
   start: string,
   end: string,
-  dripSeconds: number
+  dripSeconds: number,
+  days?: number[] | null
 ): number {
+  if (!isCallDayAllowed(timezone, days)) return 0;
   if (dripSeconds <= 0) return 0;
   const windowStart = normalizeHHMM(start);
   const windowEnd = normalizeHHMM(end);
@@ -225,16 +324,38 @@ export function remainingWindowCapacity(
 export function msUntilCallWindowOpens(
   timezone: string,
   start: string,
-  end: string
+  end: string,
+  days?: number[] | null
 ): number {
   const windowStart = normalizeHHMM(start);
   const windowEnd = normalizeHHMM(end);
-  if (withinCallWindow(timezone, windowStart, windowEnd)) return 0;
+  const allowedDays = normalizeCallWindowDays(days);
+  const today = todayInTz(timezone);
+
+  if (
+    isCallDayAllowed(timezone, allowedDays, today) &&
+    withinCallWindow(timezone, windowStart, windowEnd)
+  ) {
+    return 0;
+  }
+
   const nowSec = secondsIntoDayInTz(timezone);
   const startSec = hhmmToSeconds(windowStart);
-  const deltaSec =
-    nowSec < startSec ? startSec - nowSec : 24 * 3600 - nowSec + startSec;
-  return deltaSec * 1000;
+  const endSec = hhmmToSeconds(windowEnd);
+
+  if (isCallDayAllowed(timezone, allowedDays, today) && nowSec < startSec) {
+    return (startSec - nowSec) * 1000;
+  }
+
+  for (let offset = 1; offset <= 7; offset++) {
+    const date = addDays(today, offset);
+    if (!isCallDayAllowed(timezone, allowedDays, date)) continue;
+
+    const secUntilMidnight = 24 * 3600 - nowSec;
+    return (secUntilMidnight + (offset - 1) * 24 * 3600 + startSec) * 1000;
+  }
+
+  return 24 * 3600 * 1000;
 }
 
 // ---------------------------------------------------------------------------
@@ -296,14 +417,31 @@ export interface CallWindowDecision {
 export function evaluateDialWindow(
   timezone: string,
   start?: string | null,
-  end?: string | null
+  end?: string | null,
+  days?: number[] | null
 ): CallWindowDecision {
   const windowStart = normalizeHHMM(start ?? "09:00");
   const windowEnd = normalizeHHMM(end ?? "19:00");
+  const allowedDays = normalizeCallWindowDays(days);
+
+  if (!isCallDayAllowed(timezone, allowedDays)) {
+    return {
+      allowed: false,
+      deferMs: Math.max(
+        msUntilCallWindowOpens(timezone, windowStart, windowEnd, allowedDays),
+        60_000
+      ),
+      reason: `outside agent call days [${allowedDays.join(",")}] ${timezone}`,
+    };
+  }
+
   if (!withinCallWindow(timezone, windowStart, windowEnd)) {
     return {
       allowed: false,
-      deferMs: Math.max(msUntilCallWindowOpens(timezone, windowStart, windowEnd), 60_000),
+      deferMs: Math.max(
+        msUntilCallWindowOpens(timezone, windowStart, windowEnd, allowedDays),
+        60_000
+      ),
       reason: `outside agent window ${windowStart}-${windowEnd} ${timezone}`,
     };
   }
