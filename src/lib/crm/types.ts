@@ -159,6 +159,15 @@ export interface CrmAdapter {
 
   // ----- Inbound concierge support (optional; FUB implements these) -----
 
+  /**
+   * Fetch a contact's field values (standard + custom) as a flat string map for
+   * injection into the Retell prompt as dynamic variables. Keys are normalized
+   * slugs (e.g. HighLevel custom field `contact.houma_interested_program` →
+   * `houma_interested_program`, and a name-slug alias). Optional; HighLevel
+   * implements it. The caller treats a throw/absence as "no extra variables".
+   */
+  getContactFieldValues?(contactId: string): Promise<Record<string, string>>;
+
   /** Find an existing contact by phone number (E.164). Inbound caller match. */
   findContactByPhone?(phone: string): Promise<CrmContact | null>;
 

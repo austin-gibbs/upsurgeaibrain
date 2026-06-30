@@ -77,6 +77,29 @@ export function buildOpportunityCustomFieldsPayload(
   }));
 }
 
+/** Normalize a field key/name into a safe Retell dynamic-variable slug. */
+function slugFieldName(raw: string): string {
+  return String(raw)
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+/** Coerce a HighLevel field value (string | array | object) to a trimmed string. */
+function stringifyFieldValue(value: unknown): string {
+  if (value == null) return "";
+  if (Array.isArray(value)) {
+    return value.map((v) => stringifyFieldValue(v)).filter(Boolean).join(", ");
+  }
+  if (typeof value === "object") {
+    const o = value as Record<string, unknown>;
+    const inner = o.value ?? o.label ?? o.name;
+    return inner != null ? String(inner).trim() : "";
+  }
+  return String(value).trim();
+}
+
 function isDropdownFieldType(dataType: string): boolean {
   const dt = dataType.toUpperCase();
   return (
@@ -422,6 +445,106 @@ export class HighLevelAdapter implements CrmAdapter {
     } catch {
       return null;
     }
+  }
+
+  // Cache of this location's CONTACT custom-field definitions (id -> {key,name}),
+  // so getContactFieldValues can map a contact's customFields[{id,value}] to
+  // readable variable names. Cached per adapter instance (one call's lifetime).
+  private contactFieldDefs: Map<string, { key: string | null; name: string }> | null =
+    null;
+
+  private async loadContactFieldDefs(): Promise<
+    Map<string, { key: string | null; name: string }>
+  > {
+    if (this.contactFieldDefs) return this.contactFieldDefs;
+    const defs = new Map<string, { key: string | null; name: string }>();
+    for (const path of [
+      `/locations/${this.locationId}/customFields?model=contact`,
+      `/custom-fields/object/contact?locationId=${this.locationId}`,
+    ]) {
+      try {
+        const data = await this.request<any>(path);
+        const list: any[] = data.customFields ?? data.fields ?? [];
+        for (const raw of list) {
+          const f = unwrapCustomFieldRaw(raw);
+          if (!f?.id) continue;
+          defs.set(String(f.id), {
+            key: f.fieldKey ? String(f.fieldKey) : f.key ? String(f.key) : null,
+            name: String(f.name ?? f.label ?? ""),
+          });
+        }
+        if (defs.size > 0) break;
+      } catch {
+        /* try next endpoint */
+      }
+    }
+    this.contactFieldDefs = defs;
+    return defs;
+  }
+
+  /**
+   * Fetch a contact's field values (standard + custom) as a flat slug→string map
+   * for Retell dynamic-variable injection. Each custom field is exposed under up
+   * to two aliases — its fieldKey slug (e.g. `contact.houma_interested_program`
+   * → `houma_interested_program`) and its name slug (e.g. "Baton Rouge Interested
+   * Programs" → `baton_rouge_interested_programs`) — so the prompt resolves
+   * regardless of which form is referenced. Best-effort: returns {} on failure.
+   */
+  async getContactFieldValues(contactId: string): Promise<Record<string, string>> {
+    const out: Record<string, string> = {};
+    let contact: any;
+    try {
+      const data = await this.request<any>(`/contacts/${contactId}`);
+      contact = data.contact ?? data;
+    } catch {
+      return out;
+    }
+    if (!contact || typeof contact !== "object") return out;
+
+    // Standard fields worth exposing to the prompt.
+    const standard: Record<string, unknown> = {
+      first_name: contact.firstName,
+      last_name: contact.lastName,
+      full_name:
+        contact.contactName ??
+        [contact.firstName, contact.lastName].filter(Boolean).join(" "),
+      email: contact.email,
+      phone: contact.phone,
+      city: contact.city,
+      state: contact.state,
+      postal_code: contact.postalCode,
+      company: contact.companyName,
+    };
+    for (const [k, v] of Object.entries(standard)) {
+      const s = stringifyFieldValue(v);
+      if (s) out[k] = s;
+    }
+
+    // Custom fields: contact.customFields = [{ id, value }]. Map id -> key/name.
+    const cfs: any[] = Array.isArray(contact.customFields)
+      ? contact.customFields
+      : Array.isArray(contact.custom_fields)
+        ? contact.custom_fields
+        : [];
+    if (cfs.length > 0) {
+      const defs = await this.loadContactFieldDefs();
+      for (const cf of cfs) {
+        const id = cf?.id != null ? String(cf.id) : "";
+        const value = stringifyFieldValue(cf?.value ?? cf?.field_value);
+        if (!value) continue;
+        const def = id ? defs.get(id) : undefined;
+        const aliases = new Set<string>();
+        if (def?.key) aliases.add(slugFieldName(def.key.replace(/^contact\./i, "")));
+        if (def?.name) aliases.add(slugFieldName(def.name));
+        // Fall back to the raw id-derived key if no definition matched.
+        if (aliases.size === 0 && id) aliases.add(slugFieldName(id));
+        for (const alias of aliases) {
+          if (alias) out[alias] = value;
+        }
+      }
+    }
+
+    return out;
   }
 
   async setTags(contactId: string, tags: string[]): Promise<void> {
