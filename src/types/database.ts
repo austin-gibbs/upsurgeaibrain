@@ -731,6 +731,66 @@ export type Database = {
         }
         Relationships: []
       }
+      poll_runs: {
+        Row: {
+          agent_id: string
+          cancelled: number
+          eligible: number
+          enqueued: number
+          id: string
+          ran_at: string
+          scanned: number
+          skipped_reason: string | null
+          tags_stripped: number
+          test_mode: boolean
+          trigger_source: string
+          workspace_id: string
+        }
+        Insert: {
+          agent_id: string
+          cancelled?: number
+          eligible?: number
+          enqueued?: number
+          id?: string
+          ran_at?: string
+          scanned?: number
+          skipped_reason?: string | null
+          tags_stripped?: number
+          test_mode?: boolean
+          trigger_source?: string
+          workspace_id: string
+        }
+        Update: {
+          agent_id?: string
+          cancelled?: number
+          eligible?: number
+          enqueued?: number
+          id?: string
+          ran_at?: string
+          scanned?: number
+          skipped_reason?: string | null
+          tags_stripped?: number
+          test_mode?: boolean
+          trigger_source?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "poll_runs_agent_id_fkey"
+            columns: ["agent_id"]
+            isOneToOne: false
+            referencedRelation: "agents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "poll_runs_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       workspace_outcome_tags: {
         Row: {
           is_terminal: boolean

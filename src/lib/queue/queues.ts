@@ -85,3 +85,25 @@ export async function closeCallQueue(): Promise<void> {
   }
   closeRedis();
 }
+
+/**
+ * Best-effort removal of BullMQ dial jobs by deterministic job id.
+ * Postgres queue cleanup is authoritative; Redis removal is supplementary.
+ */
+export async function removeCallJobsByIds(jobIds: string[]): Promise<number> {
+  if (jobIds.length === 0 || !process.env.REDIS_URL) return 0;
+
+  const queue = getCallQueue();
+  let removed = 0;
+  for (const jobId of jobIds) {
+    const existing = await queue.getJob(jobId);
+    if (!existing) continue;
+    try {
+      await existing.remove();
+      removed++;
+    } catch {
+      // Job may have started running between lookup and removal.
+    }
+  }
+  return removed;
+}

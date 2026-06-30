@@ -1,0 +1,33 @@
+{
+  "_comment": "Cal.com booking tools for Drew (Plant City only, for now). These are Retell LLM 'general_tools'. They are NOT created by the UpSurge provision spec — add them to Drew's Retell LLM AFTER provisioning (see instructions below). The tool NAMES (check_availability, book_appointment) must match the function names used in the prompt. Houma + Baton Rouge get their own tools once those Cal.com calendars exist.",
+
+  "_what_you_need_from_cal_com": {
+    "CAL_API_KEY": "A Cal.com API key for the LaSalle Tech / Plant City Cal.com account (Cal.com -> Settings -> Developer -> API Keys).",
+    "PLANT_CITY_EVENT_TYPE_ID": "The numeric Event Type ID of the Plant City admissions appointment in Cal.com (open the event type; the id is in the URL / API)."
+  },
+
+  "general_tools_to_add": [
+    {
+      "type": "check_availability_cal",
+      "name": "check_availability",
+      "cal_api_key": "<CAL_API_KEY>",
+      "event_type_id": "<PLANT_CITY_EVENT_TYPE_ID>",
+      "timezone": "America/New_York"
+    },
+    {
+      "type": "book_appointment_cal",
+      "name": "book_appointment",
+      "cal_api_key": "<CAL_API_KEY>",
+      "event_type_id": "<PLANT_CITY_EVENT_TYPE_ID>",
+      "timezone": "America/New_York"
+    }
+  ],
+
+  "_how_to_add": [
+    "Option A (Retell dashboard): open Drew's agent -> its Retell LLM -> Functions -> Add function -> choose the Cal.com 'Check Calendar Availability' and 'Book on the Calendar' tools, paste the Cal.com API key + Plant City event type id, name them exactly 'check_availability' and 'book_appointment'.",
+    "Option B (API, e.g. via Claude-in-Chrome from a dashboard.retellai.com tab): GET https://api.retellai.com/get-retell-llm/{llm_id}, then PATCH https://api.retellai.com/update-retell-llm/{llm_id} with general_tools = the EXISTING end_call tool PLUS the two objects in 'general_tools_to_add' above (general_tools is replace-all, so keep end_call).",
+    "After adding, place a test call and confirm Drew can read open slots and book one on the Plant City calendar."
+  ],
+
+  "_houma_baton_rouge_later": "When you send the Houma and Baton Rouge Cal.com calendars, we add a second pair of tools (e.g. check_availability_houma / book_appointment_houma) with those event type ids and update the prompt's booking rules so Drew books live for those campuses too. Until then the prompt routes LA campuses to a human admissions-rep hand-off."
+}

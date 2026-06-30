@@ -3,8 +3,8 @@
 //
 // The provider redirects here with `code` + the signed `state` we minted in
 // the connect route. We exchange the code for tokens, then store them
-// (access + refresh + expiry + locationId) encrypted on the agent so the
-// adapter can auto-refresh from then on.
+// (access + refresh + expiry + locationId) encrypted on the workspace or legacy
+// agent row so the adapter can auto-refresh from then on.
 // =====================================================================
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient, createServiceClient } from "@/lib/supabase/server";
@@ -42,11 +42,13 @@ export async function GET(req: NextRequest) {
   // Verify + decode the signed state.
   let agentId: string | undefined;
   let workspaceId: string | undefined;
+  let returnAgentId: string | undefined;
   let stateUserId: string | undefined;
   try {
     const decoded = decryptJson<{
       agentId?: string;
       workspaceId?: string;
+      returnAgentId?: string;
       userId?: string;
       ts: number;
     }>(state);
@@ -55,6 +57,7 @@ export async function GET(req: NextRequest) {
     }
     agentId = decoded.agentId;
     workspaceId = decoded.workspaceId;
+    returnAgentId = decoded.returnAgentId;
     stateUserId = decoded.userId;
   } catch {
     return NextResponse.json({ error: "invalid state" }, { status: 400 });
@@ -84,10 +87,11 @@ export async function GET(req: NextRequest) {
   }
 
   const fail = (reason: string) => {
-    if (agentId) {
+    if (agentId || returnAgentId) {
+      const id = agentId ?? returnAgentId;
       return NextResponse.redirect(
         appUrl(
-          `/agents/${agentId}?tab=crm&crm=error&reason=${encodeURIComponent(reason)}`
+          `/agents/${id}?tab=crm&crm=error&reason=${encodeURIComponent(reason)}`
         )
       );
     }
@@ -135,8 +139,32 @@ export async function GET(req: NextRequest) {
         );
       }
 
+      // Workspace-level OAuth is the source of truth. Clear duplicate
+      // per-agent HighLevel token stores so a single refresh token fans out to
+      // every agent and reconnecting once fixes the whole workspace.
+      const { error: agentClearError } = await db
+        .from("agents")
+        .update({
+          crm_provider: null,
+          crm_credentials_encrypted: null,
+          crm_status: null,
+          crm_status_detail: null,
+        })
+        .eq("workspace_id", workspaceId)
+        .eq("crm_provider", "highlevel");
+
+      if (agentClearError) {
+        return fail(
+          `Connected workspace, but clearing duplicate agent CRM tokens failed: ${agentClearError.message}`
+        );
+      }
+
       return NextResponse.redirect(
-        appUrl(`/workspaces/${workspaceId}?tab=operations&crm=connected`)
+        appUrl(
+          returnAgentId
+            ? `/agents/${returnAgentId}?tab=crm&crm=connected`
+            : `/workspaces/${workspaceId}?tab=operations&crm=connected`
+        )
       );
     }
 

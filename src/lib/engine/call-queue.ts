@@ -1,6 +1,9 @@
 // Durable call queue — tracks contacts from BullMQ enqueue through FUB writeback.
 import { createServiceClient } from "@/lib/supabase/server";
 import { addDays, todayInTz, zonedDateTimeToUtcIso } from "./cadence";
+import { stripEnrollTagFromTags } from "./poller-sync";
+import { findUnenrolledPendingQueueRows } from "./rollover-priority";
+import { removeCallJobsByIds } from "@/lib/queue/queues";
 import type { CallQueueStatus } from "@/types";
 
 type DbClient = ReturnType<typeof createServiceClient>;
@@ -214,6 +217,172 @@ export async function cancelQueueEntries(
     .eq("agent_id", params.agentId)
     .eq("contact_id", params.contactId)
     .eq("status", "pending");
+}
+
+export interface PendingQueueEntryRow {
+  id: string;
+  contact_id: string;
+  queue_day: string;
+  bullmq_job_id: string | null;
+  status: CallQueueStatus;
+}
+
+/** All pending queue rows for an agent (today + rollover backlog). */
+export async function listPendingQueueEntriesForAgent(
+  supabase: DbClient,
+  agentId: string
+): Promise<PendingQueueEntryRow[]> {
+  const { data, error } = await supabase
+    .from("call_queue_entries")
+    .select("id, contact_id, queue_day, bullmq_job_id, status")
+    .eq("agent_id", agentId)
+    .eq("status", "pending")
+    .returns<PendingQueueEntryRow[]>();
+  if (error) throw new Error(error.message);
+  return data ?? [];
+}
+
+/** Bulk-delete pending queue rows by primary key. */
+export async function cancelPendingQueueEntriesByIds(
+  supabase: DbClient,
+  entryIds: string[]
+): Promise<number> {
+  if (entryIds.length === 0) return 0;
+  const { error, count } = await supabase
+    .from("call_queue_entries")
+    .delete({ count: "exact" })
+    .in("id", entryIds)
+    .eq("status", "pending");
+  if (error) throw new Error(error.message);
+  return count ?? entryIds.length;
+}
+
+/**
+ * Remove pending scheduled queue rows for contacts no longer carrying the
+ * CRM enroll tag. Runs during daily poll before rollover/capacity math.
+ */
+export async function reconcileUnenrolledQueueOnPoll(
+  supabase: DbClient,
+  params: {
+    agentId: string;
+    enrolledContactIds: Set<string>;
+    skipRedis?: boolean;
+  }
+): Promise<number> {
+  const pendingRows = await listPendingQueueEntriesForAgent(supabase, params.agentId);
+  const staleRows = findUnenrolledPendingQueueRows(pendingRows, params.enrolledContactIds);
+  if (staleRows.length === 0) return 0;
+
+  if (!params.skipRedis && process.env.REDIS_URL) {
+    const jobIds = staleRows.map(
+      (row) => row.bullmq_job_id ?? `${params.agentId}:${row.contact_id}:${row.queue_day}`
+    );
+    await removeCallJobsByIds(jobIds);
+  }
+
+  return cancelPendingQueueEntriesByIds(
+    supabase,
+    staleRows.map((row) => row.id)
+  );
+}
+
+const STRIP_TAGS_PAGE = 500;
+
+/**
+ * Remove the enroll tag from local contacts absent from the latest CRM scan.
+ * Does not reset cadence fields — only fixes tags[] drift for Ops reporting.
+ */
+export async function stripStaleLocalEnrollTags(
+  supabase: DbClient,
+  params: {
+    workspaceId: string;
+    enrollTag: string;
+    enrolledCrmContactIds: Set<string>;
+  }
+): Promise<number> {
+  let stripped = 0;
+  let offset = 0;
+
+  for (;;) {
+    const { data, error } = await supabase
+      .from("contacts")
+      .select("id, crm_contact_id, tags")
+      .eq("workspace_id", params.workspaceId)
+      .contains("tags", [params.enrollTag])
+      .range(offset, offset + STRIP_TAGS_PAGE - 1)
+      .returns<{ id: string; crm_contact_id: string; tags: string[] }[]>();
+
+    if (error) throw new Error(error.message);
+    if (!data?.length) break;
+
+    for (const row of data) {
+      if (params.enrolledCrmContactIds.has(row.crm_contact_id)) continue;
+      const nextTags = stripEnrollTagFromTags(row.tags, params.enrollTag);
+      if (nextTags.length === row.tags.length) continue;
+      const { error: patchErr } = await supabase
+        .from("contacts")
+        .update({ tags: nextTags })
+        .eq("id", row.id);
+      if (patchErr) throw new Error(patchErr.message);
+      stripped++;
+    }
+
+    if (data.length < STRIP_TAGS_PAGE) break;
+    offset += STRIP_TAGS_PAGE;
+  }
+
+  return stripped;
+}
+
+const ZOMBIE_DIALING_DEFAULT_HOURS = 4;
+
+/**
+ * Drop queue rows stuck in `dialing` with no in-flight call for longer than
+ * staleHours. Prevents rollover backlog from blocking capacity forever.
+ */
+export async function reconcileZombieDialingRows(
+  supabase: DbClient,
+  params?: { agentId?: string; staleHours?: number }
+): Promise<number> {
+  const staleHours = params?.staleHours ?? ZOMBIE_DIALING_DEFAULT_HOURS;
+  const cutoff = new Date(Date.now() - staleHours * 60 * 60 * 1000).toISOString();
+
+  let query = supabase
+    .from("call_queue_entries")
+    .select("id, agent_id, contact_id, call_id, started_at")
+    .eq("status", "dialing")
+    .lt("started_at", cutoff);
+
+  if (params?.agentId) query = query.eq("agent_id", params.agentId);
+
+  const { data: rows, error } = await query.returns<
+    { id: string; agent_id: string; contact_id: string; call_id: string | null; started_at: string | null }[]
+  >();
+  if (error) throw new Error(error.message);
+  if (!rows?.length) return 0;
+
+  const zombieIds: string[] = [];
+  for (const row of rows) {
+    if (row.call_id) {
+      const { data: call } = await supabase
+        .from("calls")
+        .select("status")
+        .eq("id", row.call_id)
+        .maybeSingle<{ status: string }>();
+      if (call?.status === "dialing" || call?.status === "queued") continue;
+    }
+    zombieIds.push(row.id);
+  }
+
+  if (zombieIds.length === 0) return 0;
+
+  const { error: delErr, count } = await supabase
+    .from("call_queue_entries")
+    .delete({ count: "exact" })
+    .in("id", zombieIds)
+    .eq("status", "dialing");
+  if (delErr) throw new Error(delErr.message);
+  return count ?? zombieIds.length;
 }
 
 export interface ActiveQueueRow {

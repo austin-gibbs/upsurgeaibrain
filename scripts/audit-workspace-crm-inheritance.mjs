@@ -14,17 +14,17 @@ dotenv.config({ path: ".env.local" });
 function audit(agent, workspace) {
   const own = Boolean(agent.crm_provider && agent.crm_credentials_encrypted);
   const ws = Boolean(workspace.crm_provider && workspace.crm_credentials_encrypted);
-  const inherits = !own;
-  const provider = own
-    ? agent.crm_provider
-    : ws
+  const inherits = ws || !own;
+  const provider = ws
       ? workspace.crm_provider
-      : agent.crm_provider ?? workspace.crm_provider ?? null;
+      : own
+        ? agent.crm_provider
+        : agent.crm_provider ?? workspace.crm_provider ?? null;
 
   let recommendation = null;
   if (own && ws && provider === "highlevel") {
     recommendation =
-      "Clear this agent's HighLevel credentials and inherit the workspace connection so OAuth refresh tokens are not duplicated for the same location.";
+      "Clear this agent's duplicate HighLevel credentials. The workspace connection is active and will be used for this agent.";
   } else if (!own && !ws) {
     recommendation =
       "Neither this agent nor its workspace has CRM credentials. Connect CRM before activating.";

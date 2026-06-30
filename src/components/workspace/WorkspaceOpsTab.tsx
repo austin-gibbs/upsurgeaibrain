@@ -85,6 +85,19 @@ type OpsData = {
   contactCount: number;
   contacts: ContactRow[];
   outcomeTags: { outcome: string; tag: string; is_terminal: boolean }[];
+  pollRuns?: {
+    id: string;
+    agent_id: string;
+    ran_at: string;
+    scanned: number;
+    eligible: number;
+    enqueued: number;
+    cancelled: number;
+    tags_stripped: number;
+    trigger_source: string;
+    skipped_reason: string | null;
+    test_mode: boolean;
+  }[];
 };
 
 const CRM_LABEL: Record<string, string> = {
@@ -167,6 +180,16 @@ function formatTime(iso: string | null, timezone: string): string {
   if (!iso) return "—";
   return new Intl.DateTimeFormat("en-US", {
     timeZone: timezone,
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(new Date(iso));
+}
+
+function formatDateTime(iso: string, timezone: string): string {
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone,
+    month: "short",
+    day: "numeric",
     hour: "numeric",
     minute: "2-digit",
   }).format(new Date(iso));
@@ -365,7 +388,7 @@ function WorkspaceOpsTabInner({
 
   const router = useRouter();
 
-  const { workspace, agents, contactCount, contacts, outcomeTags } = data;
+  const { workspace, agents, contactCount, contacts, outcomeTags, pollRuns = [] } = data;
 
   useEffect(() => {
     const crm = searchParams.get("crm");
@@ -729,16 +752,31 @@ function WorkspaceOpsTabInner({
         scanned: number;
         eligible: number;
         enqueued: number;
+        cancelled?: number;
+        tagsStripped?: number;
       };
       const results = d.results as {
         agentName: string;
         skippedReason: string | null;
+        cancelled?: number;
+        tagsStripped?: number;
       }[];
       const agentCount = results.length;
-      if (totals.enqueued > 0) {
+      const cancelled = totals.cancelled ?? 0;
+      const tagsStripped = totals.tagsStripped ?? 0;
+      if (totals.enqueued > 0 || cancelled > 0 || tagsStripped > 0) {
+        const parts = [
+          totals.enqueued > 0
+            ? `Enqueued ${totals.enqueued} call${totals.enqueued === 1 ? "" : "s"} across ${agentCount} agent${agentCount === 1 ? "" : "s"} (${totals.scanned} contacts scanned)`
+            : null,
+          cancelled > 0 ? `cancelled ${cancelled} stale queue row${cancelled === 1 ? "" : "s"}` : null,
+          tagsStripped > 0
+            ? `stripped enroll tag from ${tagsStripped} local contact${tagsStripped === 1 ? "" : "s"}`
+            : null,
+        ].filter(Boolean);
         setRunMessage({
           type: "success",
-          text: `Enqueued ${totals.enqueued} call${totals.enqueued === 1 ? "" : "s"} across ${agentCount} agent${agentCount === 1 ? "" : "s"} (${totals.scanned} contacts scanned)`,
+          text: parts.join("; "),
         });
       } else {
         const skipped = results
@@ -926,6 +964,52 @@ function WorkspaceOpsTabInner({
 
       {opsTab === "overview" && (
         <div className="space-y-6">
+      {pollRuns.length > 0 && (
+        <Card className="p-5">
+          <SectionHeader
+            title="Recent poll runs"
+            description="CRM enroll-tag scan results — scanned, enqueued, and cleanup counts."
+          />
+          <div className="mt-4 overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-ink-100 text-left text-xs font-medium uppercase tracking-wide text-ink-400">
+                  <th className="px-2 py-2">When</th>
+                  <th className="px-2 py-2">Agent</th>
+                  <th className="px-2 py-2">Scanned</th>
+                  <th className="px-2 py-2">Enqueued</th>
+                  <th className="px-2 py-2">Cancelled</th>
+                  <th className="px-2 py-2">Tags stripped</th>
+                  <th className="px-2 py-2">Source</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-ink-100">
+                {pollRuns.map((run) => {
+                  const agentName =
+                    agents.find((a) => a.id === run.agent_id)?.name ??
+                    run.agent_id.slice(0, 8);
+                  return (
+                    <tr key={run.id}>
+                      <td className="px-2 py-2 text-ink-600">
+                        {formatDateTime(run.ran_at, workspace.timezone)}
+                      </td>
+                      <td className="px-2 py-2 font-medium text-ink-900">{agentName}</td>
+                      <td className="px-2 py-2">{run.scanned}</td>
+                      <td className="px-2 py-2">{run.enqueued}</td>
+                      <td className="px-2 py-2">{run.cancelled}</td>
+                      <td className="px-2 py-2">{run.tags_stripped}</td>
+                      <td className="px-2 py-2 text-ink-500">
+                        {run.trigger_source}
+                        {run.skipped_reason ? ` · ${run.skipped_reason}` : ""}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
       <Card className="p-5">
         <SectionHeader
           title="Workspace controls"

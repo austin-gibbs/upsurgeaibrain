@@ -66,7 +66,10 @@ export async function POST(
   const agentNames = new Map(agents.map((a) => [a.id, a.name]));
 
   try {
-    const results = await pollWorkspace(params.id, { testMode: parsed.data.testMode });
+    const results = await pollWorkspace(params.id, {
+      testMode: parsed.data.testMode,
+      triggerSource: "manual",
+    });
 
     const enriched = results.map((r) => ({
       ...r,
@@ -79,8 +82,10 @@ export async function POST(
         scanned: acc.scanned + r.scanned,
         eligible: acc.eligible + r.eligible,
         enqueued: acc.enqueued + r.enqueued,
+        cancelled: acc.cancelled + (r.cancelled ?? 0),
+        tagsStripped: acc.tagsStripped + (r.tagsStripped ?? 0),
       }),
-      { scanned: 0, eligible: 0, enqueued: 0 }
+      { scanned: 0, eligible: 0, enqueued: 0, cancelled: 0, tagsStripped: 0 }
     );
 
     return NextResponse.json({

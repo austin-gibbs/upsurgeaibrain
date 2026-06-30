@@ -120,6 +120,15 @@ export async function GET(
     .select("outcome, tag, is_terminal")
     .eq("workspace_id", params.id);
 
+  const { data: pollRuns } = await db
+    .from("poll_runs")
+    .select(
+      "id, agent_id, ran_at, scanned, eligible, enqueued, cancelled, tags_stripped, trigger_source, skipped_reason, test_mode"
+    )
+    .eq("workspace_id", params.id)
+    .order("ran_at", { ascending: false })
+    .limit(10);
+
   const { crm_credentials_encrypted, crm_status, ...workspacePublic } = workspace;
 
   return NextResponse.json({
@@ -132,6 +141,7 @@ export async function GET(
     contactCount: contactCount ?? 0,
     contacts,
     outcomeTags: tags ?? [],
+    pollRuns: pollRuns ?? [],
   });
 }
 

@@ -36,3 +36,21 @@ export function excludeActiveQueuedContacts<T extends { id: string }>(
 ): T[] {
   return contacts.filter((c) => !activeQueuedIds.has(c.id));
 }
+
+export interface PendingQueueRowKey {
+  contact_id: string;
+  status: string;
+}
+
+/**
+ * Pending queue rows whose contact is no longer in the CRM enroll-tag result.
+ * Only `pending` rows are eligible — never cancel `dialing` (call may be in flight).
+ */
+export function findUnenrolledPendingQueueRows<T extends PendingQueueRowKey>(
+  pendingRows: T[],
+  enrolledContactIds: Set<string>
+): T[] {
+  return pendingRows.filter(
+    (row) => row.status === "pending" && !enrolledContactIds.has(row.contact_id)
+  );
+}

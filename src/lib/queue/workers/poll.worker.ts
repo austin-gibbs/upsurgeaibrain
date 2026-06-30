@@ -10,6 +10,7 @@ export function startPollWorker(): Worker<PollJob> {
     async (job) => {
       const result = await pollAgent(job.data.agentId, {
         testMode: job.data.testMode,
+        triggerSource: "worker",
       });
       console.log(`[poll.worker] agent ${job.data.agentId}:`, result);
       return result;

@@ -26,13 +26,19 @@ import {
   listActiveQueuedContactIdsForAgent,
   normalizeRolloverPositions,
   countDialedTodayForAgent,
+  reconcileUnenrolledQueueOnPoll,
+  stripStaleLocalEnrollTags,
+  reconcileZombieDialingRows,
 } from "./call-queue";
 import { applyPollStageRouting } from "./pipeline-routing";
 import { computeNewPollCapacity, excludeActiveQueuedContacts } from "./rollover-priority";
+import { buildMergedContactRows, enrolledCrmIds } from "./poller-sync";
+import { writePollRun, type PollTriggerSource } from "./poll-runs";
 
 export interface PollOptions {
   testMode?: boolean;
   skipRedis?: boolean;
+  triggerSource?: PollTriggerSource;
 }
 
 export interface PollResult {
@@ -40,7 +46,34 @@ export interface PollResult {
   scanned: number;
   eligible: number;
   enqueued: number;
+  cancelled?: number;
+  tagsStripped?: number;
   skippedReason?: string;
+}
+
+async function finishPoll(
+  supabase: ReturnType<typeof createServiceClient>,
+  params: {
+    workspaceId: string;
+    agentId: string;
+    result: PollResult;
+    options?: PollOptions;
+    tagsStripped?: number;
+  }
+): Promise<PollResult> {
+  const result = {
+    ...params.result,
+    tagsStripped: params.tagsStripped ?? params.result.tagsStripped,
+  };
+  await writePollRun(supabase, {
+    workspaceId: params.workspaceId,
+    agentId: params.agentId,
+    result,
+    triggerSource: params.options?.triggerSource ?? "worker",
+    testMode: params.options?.testMode,
+    tagsStripped: params.tagsStripped,
+  });
+  return result;
 }
 
 export async function pollAgent(
@@ -106,9 +139,15 @@ export async function pollAgent(
   const today = todayInTz(workspace.timezone);
   const crm = getCrmAdapterForAgent(agent, workspace);
 
+  // Clear zombie dialing rows before capacity math so rollover backlog is accurate.
+  await reconcileZombieDialingRows(supabase, { agentId }).catch((err) => {
+    console.error(`[poll] zombie dialing cleanup failed for agent ${agentId}:`, err);
+  });
+
   // 1. Pull everyone carrying this agent's enroll tag (falls back to workspace tag).
   const enrollTag = agent.enroll_tag ?? workspace.enroll_tag;
   const crmContacts = await crm.getContactsByTag(enrollTag);
+  const scannedCrmIds = enrolledCrmIds(crmContacts);
 
   // 2. Upsert into our cache, preserving cadence state we already track.
   const crmIds = crmContacts.map((c) => c.id);
@@ -126,22 +165,7 @@ export async function pollAgent(
     }
   }
 
-  const mergedRows = crmContacts.map((c) => {
-    const existing = existingByCrmId.get(c.id);
-    return {
-      workspace_id: workspace.id,
-      crm_contact_id: c.id,
-      full_name: c.fullName,
-      email: c.email,
-      phones: c.phones,
-      tags: c.tags,
-      attempt_count: existing?.attempt_count ?? 0,
-      last_called_on: existing?.last_called_on ?? null,
-      next_eligible_on: existing?.next_eligible_on ?? null,
-      is_terminal: existing?.is_terminal ?? false,
-      terminal_outcome: existing?.terminal_outcome ?? null,
-    };
-  });
+  const mergedRows = buildMergedContactRows(crmContacts, existingByCrmId, workspace.id);
 
   const contacts: Contact[] = [];
   if (mergedRows.length > 0) {
@@ -151,6 +175,59 @@ export async function pollAgent(
       .select("*")
       .returns<Contact[]>();
     if (savedRows) contacts.push(...savedRows);
+  }
+
+  // 2a. Strip enroll tag locally for contacts no longer returned by CRM scan.
+  let tagsStripped = 0;
+  try {
+    tagsStripped = await stripStaleLocalEnrollTags(supabase, {
+      workspaceId: workspace.id,
+      enrollTag,
+      enrolledCrmContactIds: scannedCrmIds,
+    });
+  } catch (err) {
+    console.error(`[poll] strip stale enroll tags failed for agent ${agentId}:`, err);
+    return finishPoll(supabase, {
+      workspaceId: workspace.id,
+      agentId,
+      options,
+      tagsStripped,
+      result: {
+        agentId,
+        scanned: contacts.length,
+        eligible: 0,
+        enqueued: 0,
+        skippedReason: "stale_tag_refresh_failed",
+      },
+    });
+  }
+
+  // 2b. Drop pending queue rows for contacts no longer enrolled in CRM.
+  const enrolledContactIds = new Set(contacts.map((c) => c.id));
+  let cancelled = 0;
+  try {
+    cancelled = await reconcileUnenrolledQueueOnPoll(supabase, {
+      agentId,
+      enrolledContactIds,
+      skipRedis: options?.skipRedis,
+    });
+  } catch (err) {
+    console.error(`[poll] reconcile unenrolled queue failed for agent ${agentId}:`, err);
+    return finishPoll(supabase, {
+      workspaceId: workspace.id,
+      agentId,
+      options,
+      tagsStripped,
+      result: {
+        agentId,
+        scanned: contacts.length,
+        eligible: 0,
+        enqueued: 0,
+        cancelled,
+        tagsStripped,
+        skippedReason: "reconcile_failed",
+      },
+    });
   }
 
   // 3. Filter eligible, sort for fair rollover, cap to what fits today's window.
@@ -182,13 +259,21 @@ export async function pollAgent(
   const newCallCapacity = computeNewPollCapacity(dailyCap, rolloverBacklog);
 
   if (newCallCapacity === 0 && eligibleNotQueued.length > 0) {
-    return {
+    return finishPoll(supabase, {
+      workspaceId: workspace.id,
       agentId,
-      scanned: contacts.length,
-      eligible: eligible.length,
-      enqueued: 0,
-      skippedReason: "capacity reserved for rollover backlog",
-    };
+      options,
+      tagsStripped,
+      result: {
+        agentId,
+        scanned: contacts.length,
+        eligible: eligible.length,
+        enqueued: 0,
+        cancelled,
+        tagsStripped,
+        skippedReason: "capacity reserved for rollover backlog",
+      },
+    });
   }
 
   const capped = eligibleNotQueued.slice(0, newCallCapacity);
@@ -256,7 +341,13 @@ export async function pollAgent(
     enqueued = jobSpecs.length;
   }
 
-  return { agentId, scanned: contacts.length, eligible: eligible.length, enqueued };
+  return finishPoll(supabase, {
+    workspaceId: workspace.id,
+    agentId,
+    options,
+    tagsStripped,
+    result: { agentId, scanned: contacts.length, eligible: eligible.length, enqueued, cancelled, tagsStripped },
+  });
 }
 
 export interface QueueContactsResult {
@@ -473,7 +564,9 @@ export async function pollWorkspace(
 
     if (!agents?.length) return [];
 
-    return mapWithConcurrency(agents, 4, (agent) => pollAgent(agent.id, options));
+    return mapWithConcurrency(agents, 4, (agent) =>
+      pollAgent(agent.id, { ...options, triggerSource: options?.triggerSource ?? "manual" })
+    );
   } finally {
     // Release Redis so serverless poll handlers can exit (avoids timeout hang).
     await closeCallQueue().catch(() => {});

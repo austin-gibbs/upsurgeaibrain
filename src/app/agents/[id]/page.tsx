@@ -146,9 +146,8 @@ function AgentDetail({
   const [callCfg, setCallCfg] = useState<CallConfig>(defaultCallConfig());
   const [taskCfg, setTaskCfg] = useState<TaskConfig>(defaultTaskConfig());
   const [workspaceTimezone, setWorkspaceTimezone] = useState("America/New_York");
-  // Effective CRM = agent's own provider/creds, else inherited from workspace.
-  // Drives the HighLevel-only routing editor so it also shows for older
-  // workspaces that configured HighLevel at the workspace level.
+  // Effective CRM uses the workspace connection whenever configured, so one
+  // HighLevel OAuth token store fans out to every agent.
   const [effectiveCrmProvider, setEffectiveCrmProvider] =
     useState<CrmProvider | null>(null);
   const [hasEffectiveCrmCredentials, setHasEffectiveCrmCredentials] =
@@ -181,7 +180,7 @@ function AgentDetail({
         setFromNumber(d.agent.retell_from_number ?? "");
         setEnrollTag(d.agent.enroll_tag ?? "");
         setCrmProvider(
-          d.agent.crm_provider ?? d.effectiveCrmProvider ?? "followupboss"
+          d.effectiveCrmProvider ?? d.agent.crm_provider ?? "followupboss"
         );
         setFubApiKey("");
         setHlAccessToken("");
@@ -250,7 +249,7 @@ function AgentDetail({
   // Pull HighLevel pipelines + stages for the routing UI. Callable on demand
   // (the "Refresh" button) so a user can re-sync after editing pipelines or
   // stages in HighLevel, without reloading the page. No-op unless the effective
-  // CRM (agent's own or inherited from the workspace) is HighLevel with creds.
+  // workspace-level CRM is HighLevel with credentials.
   const loadPipelines = useCallback(() => {
     if (effectiveCrmProvider !== "highlevel" || !hasEffectiveCrmCredentials) {
       setPipelines([]);
@@ -686,8 +685,9 @@ function AgentDetail({
           </div>
           {crmStatus === "needs_reauth" && (
             <p className="rounded-xl bg-accent-rose-bg px-3 py-2 text-xs text-accent-rose-fg">
-              The HighLevel connection expired and calls for this agent will fail
-              until you reconnect. Click “Connect via OAuth” below to restore it.
+              The HighLevel connection expired and calls for this workspace will
+              fail until you reconnect. Click “Connect workspace via OAuth” below
+              to restore every agent.
             </p>
           )}
           {inheritsWorkspaceCrm && workspaceHasCrmCredentials && (
@@ -770,13 +770,14 @@ function AgentDetail({
               href={`/api/agents/${params.id}/crm/connect`}
               className="block w-full rounded-xl border border-ink-200 px-4 py-2 text-center text-sm font-medium text-ink-700 transition-colors hover:bg-ink-50"
             >
-              Connect via OAuth
+              Connect workspace via OAuth
             </a>
           )}
           {crmProvider === "highlevel" && (
             <p className="text-xs text-ink-500">
-              OAuth keeps the HighLevel token fresh automatically. Pasting an
-              access token works too, but it will expire and stop syncing.
+              OAuth keeps the workspace HighLevel token fresh automatically for
+              every agent. Pasting an access token works too, but it will expire
+              and stop syncing.
             </p>
           )}
         </Card>

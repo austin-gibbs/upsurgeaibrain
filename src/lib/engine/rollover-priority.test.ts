@@ -7,6 +7,7 @@ import {
   computeNewPollCapacity,
   remainingDailyDialBudget,
   excludeActiveQueuedContacts,
+  findUnenrolledPendingQueueRows,
 } from "./rollover-priority";
 
 describe("compareQueueRowsForRollover", () => {
@@ -69,5 +70,40 @@ describe("excludeActiveQueuedContacts", () => {
       filtered.map((c) => c.id),
       ["a", "c"]
     );
+  });
+});
+
+describe("findUnenrolledPendingQueueRows", () => {
+  const rows = [
+    { id: "r1", contact_id: "a", status: "pending", queue_day: "2026-06-28" },
+    { id: "r2", contact_id: "b", status: "pending", queue_day: "2026-06-29" },
+    { id: "r3", contact_id: "c", status: "dialing", queue_day: "2026-06-29" },
+    { id: "r4", contact_id: "d", status: "pending", queue_day: "2026-06-25" },
+  ];
+
+  it("flags pending rows whose contact is not in the enrolled set", () => {
+    const stale = findUnenrolledPendingQueueRows(rows, new Set(["a", "b"]));
+    assert.deepEqual(
+      stale.map((r) => r.id),
+      ["r4"]
+    );
+  });
+
+  it("keeps pending rows for contacts still enrolled", () => {
+    const stale = findUnenrolledPendingQueueRows(rows, new Set(["a", "b", "d"]));
+    assert.equal(stale.length, 0);
+  });
+
+  it("cancels all pending rows when enrolled set is empty", () => {
+    const stale = findUnenrolledPendingQueueRows(rows, new Set());
+    assert.deepEqual(
+      stale.map((r) => r.id),
+      ["r1", "r2", "r4"]
+    );
+  });
+
+  it("never selects dialing rows even when contact is unenrolled", () => {
+    const stale = findUnenrolledPendingQueueRows(rows, new Set(["a", "b"]));
+    assert.ok(!stale.some((r) => r.status === "dialing"));
   });
 });

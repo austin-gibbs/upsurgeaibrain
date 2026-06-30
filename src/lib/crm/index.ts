@@ -5,6 +5,7 @@
 import { decryptJson, encryptJson } from "@/lib/crypto";
 import { createServiceClient } from "@/lib/supabase/server";
 import type { Agent, Workspace } from "@/types";
+import { workspaceHasCrmCredentials } from "@/lib/agents/crm-inheritance";
 import type {
   CrmAdapter,
   FubCredentials,
@@ -60,12 +61,16 @@ function flagHighLevelReauth(
 }
 
 /**
- * Resolve the CRM adapter for an agent. Agents may carry their own CRM
- * provider + credentials (set in the create-agent flow); when they don't,
- * the agent inherits the workspace-level CRM. This keeps pre-0006 agents
- * (no per-agent CRM) working unchanged.
+ * Resolve the CRM adapter for an agent. Workspace credentials are authoritative
+ * for the workspace, so one HighLevel OAuth token store fans out to every agent.
+ * Per-agent credentials remain only as a legacy fallback for rows whose
+ * workspace has not been connected yet.
  */
 export function getCrmAdapterForAgent(agent: Agent, workspace: Workspace): CrmAdapter {
+  if (workspaceHasCrmCredentials(workspace)) {
+    return getCrmAdapter(workspace);
+  }
+
   if (agent.crm_provider && agent.crm_credentials_encrypted) {
     const creds = decryptJson<FubCredentials | HighLevelCredentials>(
       agent.crm_credentials_encrypted

@@ -1,7 +1,7 @@
-// CRM credential inheritance: agents may store their own encrypted CRM creds,
-// or inherit the workspace connection. Multiple agents on the same HighLevel
-// location MUST share one token store — duplicate OAuth copies rotate each
-// other out and de-auth sibling agents.
+// CRM credential inheritance: workspace CRM is the default token store for every
+// agent in that workspace. Multiple agents on the same HighLevel location MUST
+// share one token store — duplicate OAuth copies rotate each other out and
+// de-auth sibling agents.
 
 export type CrmCarrier = {
   crm_provider: "followupboss" | "highlevel" | null;
@@ -16,8 +16,16 @@ export function workspaceHasCrmCredentials(workspace: CrmCarrier): boolean {
   return Boolean(workspace.crm_provider && workspace.crm_credentials_encrypted);
 }
 
-/** Agent inherits workspace CRM when it stores no credentials of its own. */
-export function agentInheritsWorkspaceCrm(agent: CrmCarrier): boolean {
+/**
+ * Agents use workspace CRM whenever the workspace has credentials. The optional
+ * workspace argument keeps older unit tests/callers working while making the
+ * product behavior explicit for runtime/UI callers.
+ */
+export function agentInheritsWorkspaceCrm(
+  agent: CrmCarrier,
+  workspace?: CrmCarrier
+): boolean {
+  if (workspace && workspaceHasCrmCredentials(workspace)) return true;
   return !agentHasOwnCrmCredentials(agent);
 }
 
@@ -26,7 +34,7 @@ export function hasEffectiveCrmCredentials(
   workspace: CrmCarrier
 ): boolean {
   return (
-    agentHasOwnCrmCredentials(agent) || workspaceHasCrmCredentials(workspace)
+    workspaceHasCrmCredentials(workspace) || agentHasOwnCrmCredentials(agent)
   );
 }
 
@@ -34,11 +42,11 @@ export function effectiveCrmProvider(
   agent: CrmCarrier,
   workspace: CrmCarrier
 ): "followupboss" | "highlevel" | null {
-  if (agent.crm_provider && agent.crm_credentials_encrypted) {
-    return agent.crm_provider;
-  }
   if (workspace.crm_provider && workspace.crm_credentials_encrypted) {
     return workspace.crm_provider;
+  }
+  if (agent.crm_provider && agent.crm_credentials_encrypted) {
+    return agent.crm_provider;
   }
   return agent.crm_provider ?? workspace.crm_provider ?? null;
 }
@@ -55,14 +63,14 @@ export type CrmInheritanceAudit = {
 
 /**
  * Audit a single agent's CRM wiring for multi-agent HighLevel workspaces.
- * When workspace and agent both store credentials for the same location,
+ * When workspace and agent both store credentials, workspace wins and we
  * recommend clearing the agent copy so refresh tokens stay in one place.
  */
 export function auditCrmInheritance(
   agent: CrmCarrier & { id: string; name: string },
   workspace: CrmCarrier
 ): CrmInheritanceAudit {
-  const inherits = agentInheritsWorkspaceCrm(agent);
+  const inherits = agentInheritsWorkspaceCrm(agent, workspace);
   const own = agentHasOwnCrmCredentials(agent);
   const ws = workspaceHasCrmCredentials(workspace);
   const provider = effectiveCrmProvider(agent, workspace);
@@ -70,7 +78,7 @@ export function auditCrmInheritance(
   let recommendation: string | null = null;
   if (own && ws && provider === "highlevel") {
     recommendation =
-      "Clear this agent's HighLevel credentials and inherit the workspace connection so OAuth refresh tokens are not duplicated for the same location.";
+      "Clear this agent's duplicate HighLevel credentials. The workspace connection is active and will be used for this agent.";
   } else if (!own && !ws) {
     recommendation =
       "Neither this agent nor its workspace has CRM credentials. Connect CRM at the workspace level or on this agent before activating.";

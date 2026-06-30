@@ -103,7 +103,7 @@ async function handle(req: NextRequest) {
     }
 
     // Failover mode (stale heartbeat or Redis down): poll every eligible agent.
-    const result = await pollAgent(agent.id, { skipRedis: true });
+    const result = await pollAgent(agent.id, { skipRedis: true, triggerSource: "failover" });
     results.push(result);
     polled.push(agent.id);
   }

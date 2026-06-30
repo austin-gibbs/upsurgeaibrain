@@ -17,6 +17,7 @@ import {
 import {
   agentInheritsWorkspaceCrm,
   auditCrmInheritance,
+  effectiveCrmProvider,
   hasEffectiveCrmCredentials,
 } from "./crm-inheritance";
 import { validateAgentActivation } from "./activation";
@@ -153,7 +154,17 @@ describe("CRM inheritance", () => {
   it("inherits when agent has no credentials", () => {
     const agent = { crm_provider: null, crm_credentials_encrypted: null };
     assert.equal(agentInheritsWorkspaceCrm(agent), true);
+    assert.equal(agentInheritsWorkspaceCrm(agent, workspace), true);
     assert.equal(hasEffectiveCrmCredentials(agent, workspace), true);
+  });
+
+  it("uses workspace credentials even when duplicate HighLevel agent creds exist", () => {
+    const agent = {
+      crm_provider: "highlevel" as const,
+      crm_credentials_encrypted: "agent-enc",
+    };
+    assert.equal(agentInheritsWorkspaceCrm(agent, workspace), true);
+    assert.equal(effectiveCrmProvider(agent, workspace), "highlevel");
   });
 
   it("recommends clearing duplicate HighLevel agent creds", () => {
@@ -166,8 +177,8 @@ describe("CRM inheritance", () => {
       },
       workspace
     );
-    assert.equal(audit.inheritsWorkspaceCrm, false);
-    assert.match(audit.recommendation ?? "", /inherit the workspace connection/i);
+    assert.equal(audit.inheritsWorkspaceCrm, true);
+    assert.match(audit.recommendation ?? "", /duplicate HighLevel credentials/i);
   });
 });
 

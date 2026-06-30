@@ -12,6 +12,7 @@
 // =====================================================================
 import { createServiceClient } from "@/lib/supabase/server";
 import { getCrmAdapterForAgent } from "@/lib/crm";
+import { effectiveCrmProvider } from "@/lib/agents/crm-inheritance";
 import { classifyOutcome, outcomeLabel, extractFromRetellPayload } from "./outcome";
 import { reconcileTags } from "./tags";
 import { nextEligibleDate, todayInTz, zonedDateTimeToUtcIso } from "./cadence";
@@ -125,11 +126,10 @@ export async function processRetellWebhook(
 
   const outcome = classifyOutcome({ rawOutcome: parsed.rawOutcome, inVoicemail: parsed.inVoicemail });
   const crm = getCrmAdapterForAgent(agent, workspace);
-  // The agent can be connected to a CRM directly (e.g. HighLevel via OAuth)
-  // even when the workspace defaults to a different provider. Gate
-  // provider-specific side effects on this *effective* provider so an
-  // agent-level HighLevel connection still drives opportunity/webhook logic.
-  const effectiveProvider = agent.crm_provider ?? workspace.crm_provider;
+  // Gate provider-specific side effects on the same effective provider that the
+  // adapter factory uses. Workspace CRM wins so one HighLevel OAuth token store
+  // fans out to every agent.
+  const effectiveProvider = effectiveCrmProvider(agent, workspace);
 
   // 2. CRM call log (recording play button + call notes in FUB).
   const today = todayInTz(workspace.timezone);

@@ -39,13 +39,12 @@ export type PostCallWebhookPayload = {
   duration_seconds: number;
 };
 
-// Resolve the HighLevel location id from the *effective* connection: an
-// agent connected directly (e.g. via OAuth) wins over the workspace default,
-// mirroring getCrmAdapterForAgent's precedence.
+// Resolve the HighLevel location id from the *effective* connection: workspace
+// CRM wins so one OAuth token store fans out to every agent in the workspace.
 function hlLocationId(agent: Agent, workspace: Workspace): string | null {
   const sources: Array<{ provider: string | null; encrypted: string | null }> = [
-    { provider: agent.crm_provider, encrypted: agent.crm_credentials_encrypted },
     { provider: workspace.crm_provider, encrypted: workspace.crm_credentials_encrypted },
+    { provider: agent.crm_provider, encrypted: agent.crm_credentials_encrypted },
   ];
   for (const { provider, encrypted } of sources) {
     if (provider !== "highlevel" || !encrypted) continue;

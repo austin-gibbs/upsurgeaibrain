@@ -41,6 +41,7 @@ type OpsDetail = {
   contactCount: number;
   contacts: Parameters<typeof WorkspaceOpsTab>[0]["data"]["contacts"];
   outcomeTags: Parameters<typeof WorkspaceOpsTab>[0]["data"]["outcomeTags"];
+  pollRuns?: Parameters<typeof WorkspaceOpsTab>[0]["data"]["pollRuns"];
 };
 
 type SummaryDetail = {

@@ -87,7 +87,7 @@ export interface Agent {
   retell_agent_id: string | null;
   retell_from_number: string | null;
   objective: string | null;
-  /** Per-agent CRM. When null the agent inherits the workspace CRM. */
+  /** Legacy per-agent CRM fallback. Workspace CRM is used whenever configured. */
   crm_provider: CrmProvider | null;
   crm_credentials_encrypted: string | null;
   /** CRM connection health. null/"connected" = ok; "needs_reauth" = reconnect. */
@@ -221,4 +221,21 @@ export interface AgentMemory {
   call_count: number;
   last_call_id: string | null;
   updated_at: string;
+}
+
+export type PollTriggerSource = "worker" | "manual" | "failover" | "scheduler";
+
+export interface PollRun {
+  id: string;
+  workspace_id: string;
+  agent_id: string;
+  ran_at: string;
+  scanned: number;
+  eligible: number;
+  enqueued: number;
+  cancelled: number;
+  tags_stripped: number;
+  trigger_source: PollTriggerSource;
+  skipped_reason: string | null;
+  test_mode: boolean;
 }

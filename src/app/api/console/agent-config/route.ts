@@ -22,6 +22,7 @@ import {
   pipelineStageMapSchema,
 } from "@/lib/validation";
 import { resolveConsoleAgent } from "@/lib/console/resolve-agent";
+import { effectiveCrmProvider } from "@/lib/agents/crm-inheritance";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -72,7 +73,7 @@ export async function GET(req: NextRequest) {
     ok: true,
     workspace: workspace.name,
     agent: agent.name,
-    effectiveCrmProvider: agent.crm_provider ?? workspace.crm_provider,
+    effectiveCrmProvider: effectiveCrmProvider(agent, workspace),
     callConfig: stripMeta(callConfig as Record<string, unknown> | null),
     taskConfig: stripMeta(taskConfig as Record<string, unknown> | null),
     pipelineStageMap: stageMap ?? [],
@@ -113,7 +114,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: resolved.error }, { status: resolved.status });
   }
   const { agent, workspace } = resolved;
-  const effectiveProvider = agent.crm_provider ?? workspace.crm_provider;
+  const effectiveProvider = effectiveCrmProvider(agent, workspace);
   const applied: string[] = [];
   const warnings: string[] = [];
 

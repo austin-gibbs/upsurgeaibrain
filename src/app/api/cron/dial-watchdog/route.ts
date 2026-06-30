@@ -6,10 +6,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { bearerMatches } from "@/lib/secure";
 import { sendOpsAlert } from "@/lib/alerts";
-import {
-  checkDialStalls,
-  formatDialStallAlert,
-} from "@/lib/engine/dial-watchdog";
+import { checkDialStalls, formatDialStallAlert } from "@/lib/engine/dial-watchdog";
+import { reconcileZombieDialingRows } from "@/lib/engine/call-queue";
+import { createServiceClient } from "@/lib/supabase/server";
 import { probeRedisQueueHealth } from "@/lib/queue/redis-health";
 
 export const runtime = "nodejs";
@@ -26,6 +25,9 @@ async function handle(req: NextRequest) {
 
   const result = await checkDialStalls();
   const redisHealth = await probeRedisQueueHealth({ closeAfter: true });
+  const zombiesCleared = await reconcileZombieDialingRows(createServiceClient()).catch(
+    () => 0
+  );
   let alerted = false;
 
   if (result.stalled.length > 0) {
@@ -40,7 +42,7 @@ async function handle(req: NextRequest) {
     );
   }
 
-  return NextResponse.json({ ...result, redis: redisHealth, alerted });
+  return NextResponse.json({ ...result, redis: redisHealth, alerted, zombiesCleared });
 }
 
 export const GET = handle;

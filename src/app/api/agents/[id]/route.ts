@@ -32,6 +32,9 @@ import {
 } from "@/lib/agents/enroll-tag";
 import {
   agentInheritsWorkspaceCrm,
+  effectiveCrmProvider as resolveEffectiveCrmProvider,
+  hasEffectiveCrmCredentials as resolveHasEffectiveCrmCredentials,
+  workspaceHasCrmCredentials,
 } from "@/lib/agents/crm-inheritance";
 import { validateAgentActivation } from "@/lib/agents/activation";
 import { bindRetellWebhookForAgentSafe } from "@/lib/retell/webhook-bind";
@@ -106,18 +109,22 @@ export async function GET(
 
   const { workspaces, ...agentRow } = agent;
 
-  // Effective CRM = the agent's own provider/creds when set, otherwise the
-  // ones inherited from the workspace. Older workspaces configured HighLevel
-  // at the workspace level, so agents there have neither field of their own —
-  // the routing editor must key off this, not the agent's own columns.
-  const effectiveCrmProvider =
-    agentRow.crm_provider ?? workspaces?.crm_provider ?? null;
-  const hasEffectiveCrmCredentials =
-    Boolean(agentRow.crm_credentials_encrypted) ||
-    Boolean(workspaces?.crm_credentials_encrypted);
+  const workspaceCarrier = {
+    crm_provider: workspaces?.crm_provider ?? null,
+    crm_credentials_encrypted: workspaces?.crm_credentials_encrypted ?? null,
+  };
+  const effectiveCrmProvider = resolveEffectiveCrmProvider(
+    agentRow,
+    workspaceCarrier
+  );
+  const hasEffectiveCrmCredentials = resolveHasEffectiveCrmCredentials(
+    agentRow,
+    workspaceCarrier
+  );
   // CRM connection health for the connection the engine will actually use.
+  const usesWorkspaceCrm = workspaceHasCrmCredentials(workspaceCarrier);
   const effectiveCrmStatus =
-    agentRow.crm_status ?? workspaces?.crm_status ?? null;
+    usesWorkspaceCrm ? workspaces?.crm_status ?? null : agentRow.crm_status ?? null;
 
   const { data: calls } = await db
     .from("calls")
@@ -148,8 +155,8 @@ export async function GET(
     effectiveCrmProvider,
     hasEffectiveCrmCredentials,
     effectiveCrmStatus,
-    inheritsWorkspaceCrm: agentInheritsWorkspaceCrm(agentRow),
-    workspaceHasCrmCredentials: Boolean(workspaces?.crm_credentials_encrypted),
+    inheritsWorkspaceCrm: agentInheritsWorkspaceCrm(agentRow, workspaceCarrier),
+    workspaceHasCrmCredentials: usesWorkspaceCrm,
     calls: calls ?? [],
     pipelineStageMap: pipelineStageMap ?? [],
   });

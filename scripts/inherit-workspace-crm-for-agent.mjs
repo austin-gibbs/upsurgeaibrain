@@ -49,6 +49,7 @@ async function main() {
       crm_provider: null,
       crm_credentials_encrypted: null,
       crm_status: null,
+      crm_status_detail: null,
     })
     .eq("id", agentId);
   if (updErr) throw new Error(updErr.message);
