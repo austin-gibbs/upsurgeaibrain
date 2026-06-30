@@ -17,6 +17,7 @@ import type {
   LogCallInput,
   LogCallResult,
 } from "./types";
+import { dedupePhones } from "@/lib/engine/multi-phone";
 import { fetchWithTimeout, parseJsonResponse, retryAfterMs, sleep } from "@/lib/http";
 
 const BASE = "https://api.followupboss.com/v1";
@@ -110,11 +111,13 @@ export class FollowUpBossAdapter implements CrmAdapter {
   }
 
   private mapContact(p: any): CrmContact {
-    const phones: string[] = Array.isArray(p.phones)
-      ? p.phones
-          .map((x: any) => toE164(String(x.value)))
-          .filter((v: string | null): v is string => Boolean(v))
-      : [];
+    const phones: string[] = dedupePhones(
+      Array.isArray(p.phones)
+        ? p.phones
+            .map((x: any) => toE164(String(x.value)))
+            .filter((v: string | null): v is string => Boolean(v))
+        : []
+    );
     const email =
       Array.isArray(p.emails) && p.emails.length > 0
         ? String(p.emails[0].value ?? p.emails[0]).trim() || null

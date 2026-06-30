@@ -44,20 +44,34 @@ export async function GET(
   const agentId = req.nextUrl.searchParams.get("agentId");
   const rows = await listActiveQueueEntries(createServiceClient(), params.id);
   const filtered = agentId ? rows.filter((row) => row.agent_id === agentId) : rows;
-  const entries = filtered.map((row) => ({
-    id: row.id,
-    agentId: row.agent_id,
-    agentName: row.agents?.name ?? "Agent",
-    contactId: row.contact_id,
-    contactName: row.contacts?.full_name ?? "Unknown contact",
-    phone: row.contacts?.phones?.[0] ?? null,
-    status: row.status,
-    position: row.position,
-    scheduledFor: row.scheduled_for,
-    enqueuedAt: row.enqueued_at,
-    startedAt: row.started_at,
-    callId: row.call_id,
-  }));
+  const entries = filtered.map((row) => {
+    const phoneNumbers =
+      row.phone_numbers?.length > 0
+        ? row.phone_numbers
+        : row.contacts?.phones ?? [];
+    const phoneIndex = row.next_phone_index ?? 0;
+    const phone = phoneNumbers[phoneIndex] ?? phoneNumbers[0] ?? null;
+    return {
+      id: row.id,
+      agentId: row.agent_id,
+      agentName: row.agents?.name ?? "Agent",
+      contactId: row.contact_id,
+      contactName: row.contacts?.full_name ?? "Unknown contact",
+      phone,
+      phoneIndex,
+      phoneCount: phoneNumbers.length,
+      phoneProgress:
+        phoneNumbers.length > 1
+          ? `${phoneIndex + 1} of ${phoneNumbers.length}`
+          : null,
+      status: row.status,
+      position: row.position,
+      scheduledFor: row.scheduled_for,
+      enqueuedAt: row.enqueued_at,
+      startedAt: row.started_at,
+      callId: row.call_id,
+    };
+  });
 
   return NextResponse.json({
     entries,

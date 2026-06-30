@@ -29,6 +29,9 @@ export function buildDynamicVariables(params: {
   return {
     contact_name: contact.full_name ?? "there",
     objective: agent.objective ?? "",
+    // Direction signal the prompt can branch on. Engine-placed calls are always
+    // outbound; inbound handling (if bound) should pass "inbound" instead.
+    call_direction: "outbound",
     attempt_number: String(attemptNumber),
     is_returning_contact: memory && memory.call_count > 0 ? "true" : "false",
     prior_call_count: String(memory?.call_count ?? 0),

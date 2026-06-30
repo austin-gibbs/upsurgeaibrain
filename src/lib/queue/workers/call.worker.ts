@@ -4,6 +4,7 @@ import { getRedis } from "../connection";
 import { CALL_QUEUE, getCallQueue, type CallJob } from "../queues";
 import { placeCall, OutsideCallWindowError } from "@/lib/engine/caller";
 import {
+  claimQueueEntryById,
   claimQueueEntryForDial,
   failQueueEntry,
   revertQueueClaim,
@@ -78,15 +79,18 @@ async function findExistingDial(
   supabase: ReturnType<typeof createServiceClient>,
   job: CallJob
 ): Promise<{ callId: string; retellCallId: string } | null> {
-  const { data } = await supabase
+  const phoneIndex = job.phoneIndex ?? 0;
+  let query = supabase
     .from("calls")
     .select("id, retell_call_id")
     .eq("agent_id", job.agentId)
     .eq("contact_id", job.contactId)
     .eq("attempt_number", job.attemptNumber)
+    .eq("phone_index", phoneIndex)
     .in("status", ["dialing", "completed"])
-    .not("retell_call_id", "is", null)
-    .maybeSingle<{ id: string; retell_call_id: string | null }>();
+    .not("retell_call_id", "is", null);
+
+  const { data } = await query.maybeSingle<{ id: string; retell_call_id: string | null }>();
   if (!data?.retell_call_id) return null;
   return { callId: data.id, retellCallId: data.retell_call_id };
 }
@@ -129,12 +133,14 @@ export function startCallWorker(): Worker<CallJob> {
           return deferDial(job.data, decision.deferMs, decision.reason);
         }
 
-        const queueDay = todayInTz(timezone);
-        const claimed = await claimQueueEntryForDial(supabase, {
-          agentId: job.data.agentId,
-          contactId: job.data.contactId,
-          queueDay,
-        });
+        const queueDay = job.data.queueDay ?? todayInTz(timezone);
+        const claimed = job.data.queueEntryId
+          ? await claimQueueEntryById(supabase, { id: job.data.queueEntryId })
+          : await claimQueueEntryForDial(supabase, {
+              agentId: job.data.agentId,
+              contactId: job.data.contactId,
+              queueDay,
+            });
         if (!claimed) {
           const existing = await findExistingDial(supabase, job.data);
           if (existing) return existing;
@@ -187,6 +193,8 @@ export function startCallWorker(): Worker<CallJob> {
           .update({ status: "failed", error_message: err.message })
           .eq("agent_id", job.data.agentId)
           .eq("contact_id", job.data.contactId)
+          .eq("attempt_number", job.data.attemptNumber)
+          .eq("phone_index", job.data.phoneIndex ?? 0)
           .eq("status", "queued");
         await failQueueEntry(supabase, {
           agentId: job.data.agentId,

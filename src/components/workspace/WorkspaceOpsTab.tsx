@@ -222,6 +222,9 @@ type QueueEntry = {
   contactId: string;
   contactName: string;
   phone: string | null;
+  phoneIndex?: number;
+  phoneCount?: number;
+  phoneProgress?: string | null;
   status: "pending" | "dialing";
   position: number;
   scheduledFor: string | null;
@@ -1390,7 +1393,14 @@ function WorkspaceOpsTabInner({
                         <td className="px-5 py-3.5">
                           <div className="font-medium text-ink-900">{entry.contactName}</div>
                           {entry.phone && (
-                            <div className="font-mono text-xs text-ink-400">{entry.phone}</div>
+                            <div className="font-mono text-xs text-ink-400">
+                              {entry.phone}
+                              {entry.phoneProgress && (
+                                <span className="ml-2 font-sans text-ink-500">
+                                  ({entry.phoneProgress})
+                                </span>
+                              )}
+                            </div>
                           )}
                         </td>
                         <td className="px-5 py-3.5 text-ink-600">{entry.agentName}</td>

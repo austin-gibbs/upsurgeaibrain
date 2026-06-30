@@ -6,6 +6,43 @@ homeowner's real-estate goals, and **book a 15-minute phone consultation**. She 
 the workspace's **already-connected Follow Up Boss** integration and books live via
 **Cal.com**.
 
+## Status: ✅ PROVISIONED (2026-06-30)
+
+Created live via the `/admin` console (`POST /api/console/provision`) into the Retell account
+from `.env.local` and the existing Nil Patel Realty workspace. Landed as **draft** (no calls).
+
+| Resource | ID |
+| --- | --- |
+| Retell LLM | `llm_890e5bf05337343fac7239956d10` |
+| Retell agent | `agent_b50407cecd1888fb6d9b15bda3` |
+| Outbound number | **+1 470‑333‑7394** |
+| App agent row | `fafbdf14-5a00-49e2-90ac-bb2064aa5d37` |
+| Workspace | `28803e2d-a78d-4377-a718-824c58116151` (Nil Patel Realty, FUB) |
+| Enroll tag | `upsurge.circle.ai` |
+| Status | `draft` (activation not blocked — CRM inherited) |
+
+**Cal.com booking: ✅ wired (2026-06-30).** Copied the Probate agent's exact `check_availability_cal`
++ `book_appointment_cal` tools onto Ava's LLM (`llm_890e5bf05337343fac7239956d10`) — same Cal.com
+event `5936698`, same keys, America/New_York. (They share the Probate calendar/event; create a
+separate 15-min event later if you want Ava's consults booked on their own calendar.)
+
+**Prompt: ✅ updated (2026-06-30) — dual-direction + full memory fields.** Ava's live LLM prompt
+now (a) documents and uses the exact app-injected memory the probate agent gets — the 7 dynamic
+variables + the real `FACT_KEYS` for `{{known_facts}}` (no invented keys), and (b) branches on
+`{{call_direction}}`: the existing script is the **OUTBOUND** branch; a full **INBOUND** branch was
+added for callbacks. Engine change: `call_direction:"outbound"` is now injected by
+`buildDynamicVariables()` (+ the test-call path) — takes effect on the next app deploy. Until then,
+the prompt safely defaults to outbound and self-corrects to inbound from the caller's words.
+
+> Inbound options: (a) keep using the workspace's dedicated **Incoming Call Agent** for the main
+> line, or (b) bind Ava as the inbound agent on **+1 470‑333‑7394** so callbacks hit her — in which
+> case have the inbound path pass `call_direction:"inbound"`. A single Retell agent has one begin
+> message (outbound-oriented), so for a flawless inbound greeting prefer the dedicated inbound agent.
+
+**Remaining before go-live:** (6) verify prompt/voice in Retell → (8) tag FUB contacts
+`upsurge.circle.ai` → (9) test one call → (10) activate. The provisioning steps below are kept
+for reference / re-runs.
+
 ## Files
 
 - `circle-prospecting-agent-prompt.md` — canonical Retell `general_prompt` + begin message for "Ava".

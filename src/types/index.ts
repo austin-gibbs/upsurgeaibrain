@@ -41,6 +41,12 @@ export interface CallQueueEntry {
   call_id: string | null;
   bullmq_job_id: string | null;
   error_message: string | null;
+  /** Cadence attempt number for this queued outreach cycle. */
+  attempt_number: number;
+  /** Snapshot of dialable phones for this attempt (FUB may include all numbers). */
+  phone_numbers: string[];
+  /** Index into phone_numbers for the next dial in this attempt. */
+  next_phone_index: number;
 }
 
 /** Outcomes that remove a contact from the call flow entirely. */
@@ -187,6 +193,10 @@ export interface Call {
   contact_id: string | null;
   direction: AgentDirection;
   attempt_number: number;
+  /** Zero-based index into the attempt's phone list. */
+  phone_index: number;
+  /** Total phones scheduled for this cadence attempt. */
+  phone_count: number;
   to_number: string;
   retell_call_id: string | null;
   crm_contact_id: string | null;

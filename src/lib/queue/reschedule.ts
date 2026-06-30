@@ -83,6 +83,18 @@ export async function rescheduleAgentCallQueue(agentId: string): Promise<number>
     const scheduledFor = new Date(Date.now() + safeDelay).toISOString();
     const jobId = `${agentId}:${job.contactId}:${today}`;
 
+    const { data: queueRow } = await supabase
+      .from("call_queue_entries")
+      .select("attempt_number, phone_numbers, next_phone_index")
+      .eq("agent_id", agentId)
+      .eq("contact_id", job.contactId)
+      .eq("queue_day", today)
+      .maybeSingle<{
+        attempt_number: number;
+        phone_numbers: string[];
+        next_phone_index: number;
+      }>();
+
     await upsertQueueEntry(supabase, {
       workspaceId: agent.workspace_id,
       agentId,
@@ -91,6 +103,10 @@ export async function rescheduleAgentCallQueue(agentId: string): Promise<number>
       position: i + 1,
       scheduledFor,
       bullmqJobId: jobId,
+      attemptNumber: queueRow?.attempt_number ?? job.attemptNumber,
+      phoneNumbers:
+        queueRow?.phone_numbers?.length ? queueRow.phone_numbers : [job.toNumber],
+      nextPhoneIndex: queueRow?.next_phone_index ?? job.phoneIndex ?? 0,
     });
 
     await queue.add("dial", job, {

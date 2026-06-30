@@ -34,6 +34,7 @@ import { applyPollStageRouting } from "./pipeline-routing";
 import { computeNewPollCapacity, excludeActiveQueuedContacts } from "./rollover-priority";
 import { buildMergedContactRows, enrolledCrmIds } from "./poller-sync";
 import { writePollRun, type PollTriggerSource } from "./poll-runs";
+import { buildDialAttempt } from "./enqueue-dial";
 
 export interface PollOptions {
   testMode?: boolean;
@@ -301,28 +302,39 @@ export async function pollAgent(
   for (let i = 0; i < capped.length; i++) {
     const contact = capped[i];
     const delay = baseDelay + i * config.drip_seconds * 1000;
-    const jobId = `${agentId}:${contact.id}:${today}`;
+    const baseJobId = `${agentId}:${contact.id}:${today}`;
     const scheduledFor = new Date(Date.now() + delay).toISOString();
 
-    await upsertQueueEntry(supabase, {
+    const attempt = buildDialAttempt({
+      agent,
+      workspace,
+      contact,
+      agentId,
+      baseJobId,
+      queueDay: today,
+      testMode: options?.testMode,
+    });
+    if (!attempt) continue;
+
+    const queueEntryId = await upsertQueueEntry(supabase, {
       workspaceId: workspace.id,
       agentId,
       contactId: contact.id,
       queueDay: today,
       position: rolloverBacklog + i + 1,
       scheduledFor,
-      bullmqJobId: jobId,
+      bullmqJobId: attempt.jobId,
+      attemptNumber: attempt.attemptNumber,
+      phoneNumbers: attempt.phoneNumbers,
+      nextPhoneIndex: attempt.phoneIndex,
     });
 
     jobSpecs.push({
       delay,
-      jobId,
+      jobId: attempt.jobId,
       data: {
-        agentId,
-        contactId: contact.id,
-        toNumber: contact.phones[0],
-        attemptNumber: contact.attempt_count + 1,
-        testMode: options?.testMode,
+        ...attempt.jobData,
+        queueEntryId,
       },
     });
   }
@@ -446,27 +458,38 @@ export async function enqueueContactsNow(
     const contact = toQueue[i];
     const slot = basePosition + i;
     const delay = slot * config.drip_seconds * 1000;
-    const jobId = `manual:${agentId}:${contact.id}:${today}`;
+    const baseJobId = `manual:${agentId}:${contact.id}:${today}`;
     const scheduledFor = new Date(Date.now() + delay).toISOString();
 
     try {
-      await upsertQueueEntry(supabase, {
+      const attempt = buildDialAttempt({
+        agent,
+        workspace,
+        contact,
+        agentId,
+        baseJobId,
+        queueDay: today,
+      });
+      if (!attempt) continue;
+
+      const queueEntryId = await upsertQueueEntry(supabase, {
         workspaceId: workspace.id,
         agentId,
         contactId: contact.id,
         queueDay: today,
         position: slot + 1,
         scheduledFor,
-        bullmqJobId: jobId,
+        bullmqJobId: attempt.jobId,
+        attemptNumber: attempt.attemptNumber,
+        phoneNumbers: attempt.phoneNumbers,
+        nextPhoneIndex: attempt.phoneIndex,
       });
       jobSpecs.push({
         delay,
-        jobId,
+        jobId: attempt.jobId,
         data: {
-          agentId,
-          contactId: contact.id,
-          toNumber: contact.phones[0],
-          attemptNumber: contact.attempt_count + 1,
+          ...attempt.jobData,
+          queueEntryId,
         },
       });
     } catch (e) {

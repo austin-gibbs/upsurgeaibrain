@@ -21,6 +21,14 @@ export interface CallJob {
   contactId: string;
   toNumber: string;
   attemptNumber: number;
+  /** Zero-based phone index within this cadence attempt. */
+  phoneIndex?: number;
+  /** Total phones in this attempt snapshot. */
+  phoneCount?: number;
+  /** Durable queue row driving this dial. */
+  queueEntryId?: string;
+  /** Workspace-local queue day (YYYY-MM-DD). */
+  queueDay?: string;
   testMode?: boolean;
 }
 

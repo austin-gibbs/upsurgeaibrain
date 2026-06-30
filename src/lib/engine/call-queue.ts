@@ -16,13 +16,17 @@ export interface EnqueueQueueEntryInput {
   position: number;
   scheduledFor: string | null;
   bullmqJobId: string;
+  attemptNumber: number;
+  phoneNumbers: string[];
+  nextPhoneIndex?: number;
 }
 
-/** Insert or refresh a queue row when a dial job is enqueued. */
+/** Insert or refresh a queue row when a dial job is enqueued. Returns row id. */
 export async function upsertQueueEntry(
   supabase: DbClient,
   input: EnqueueQueueEntryInput
-): Promise<void> {
+): Promise<string> {
+  const nextPhoneIndex = input.nextPhoneIndex ?? 0;
   const { data: existing, error: fetchErr } = await supabase
     .from("call_queue_entries")
     .select("id, status")
@@ -43,13 +47,16 @@ export async function upsertQueueEntry(
         position: input.position,
         scheduled_for: input.scheduledFor,
         bullmq_job_id: input.bullmqJobId,
+        attempt_number: input.attemptNumber,
+        phone_numbers: input.phoneNumbers,
+        next_phone_index: nextPhoneIndex,
       })
       .eq("id", existing.id);
     if (error) throw new Error(error.message);
-    return;
+    return existing.id;
   }
 
-  const { error } = await supabase.from("call_queue_entries").upsert(
+  const { data: inserted, error } = await supabase.from("call_queue_entries").upsert(
     {
       workspace_id: input.workspaceId,
       agent_id: input.agentId,
@@ -64,10 +71,15 @@ export async function upsertQueueEntry(
       completed_at: null,
       call_id: null,
       error_message: null,
+      attempt_number: input.attemptNumber,
+      phone_numbers: input.phoneNumbers,
+      next_phone_index: nextPhoneIndex,
     },
     { onConflict: "agent_id,contact_id,queue_day" }
-  );
+  ).select("id").single<{ id: string }>();
   if (error) throw new Error(error.message);
+  if (!inserted?.id) throw new Error("failed to upsert queue entry");
+  return inserted.id;
 }
 
 export interface ClaimedQueueEntry {
@@ -79,6 +91,9 @@ export interface ClaimedQueueEntry {
   position: number;
   scheduled_for: string | null;
   bullmq_job_id: string | null;
+  attempt_number: number;
+  phone_numbers: string[];
+  next_phone_index: number;
 }
 
 /** Look up today's pending queue row for a contact dial job. */
@@ -128,7 +143,7 @@ export async function claimQueueEntry(
     .eq("id", params.id)
     .eq("status", "pending")
     .select(
-      "id, agent_id, contact_id, workspace_id, queue_day, position, scheduled_for, bullmq_job_id"
+      "id, agent_id, contact_id, workspace_id, queue_day, position, scheduled_for, bullmq_job_id, attempt_number, phone_numbers, next_phone_index"
     )
     .maybeSingle<ClaimedQueueEntry>();
 
@@ -136,7 +151,67 @@ export async function claimQueueEntry(
   return data;
 }
 
-/** Revert a claim when dialing is deferred (e.g. outside call window). */
+/** Revert a dialing queue row to pending for the next phone in a FUB attempt. */
+export async function revertQueueForNextPhone(
+  supabase: DbClient,
+  params: {
+    id: string;
+    nextPhoneIndex: number;
+    scheduledFor: string;
+    bullmqJobId: string;
+  }
+): Promise<void> {
+  const { error } = await supabase
+    .from("call_queue_entries")
+    .update({
+      status: "pending",
+      started_at: null,
+      call_id: null,
+      next_phone_index: params.nextPhoneIndex,
+      scheduled_for: params.scheduledFor,
+      bullmq_job_id: params.bullmqJobId,
+    })
+    .eq("id", params.id);
+  if (error) throw new Error(error.message);
+}
+
+/** Load a queue entry by id (for chained phone dials). */
+export async function getQueueEntryById(
+  supabase: DbClient,
+  id: string
+): Promise<ClaimedQueueEntry | null> {
+  const { data, error } = await supabase
+    .from("call_queue_entries")
+    .select(
+      "id, agent_id, contact_id, workspace_id, queue_day, position, scheduled_for, bullmq_job_id, attempt_number, phone_numbers, next_phone_index"
+    )
+    .eq("id", id)
+    .maybeSingle<ClaimedQueueEntry>();
+  if (error) throw new Error(error.message);
+  return data;
+}
+
+/** Claim a specific queue row by primary key. */
+export async function claimQueueEntryById(
+  supabase: DbClient,
+  params: { id: string }
+): Promise<ClaimedQueueEntry | null> {
+  const { data, error } = await supabase
+    .from("call_queue_entries")
+    .update({
+      status: "dialing",
+      started_at: new Date().toISOString(),
+    })
+    .eq("id", params.id)
+    .eq("status", "pending")
+    .select(
+      "id, agent_id, contact_id, workspace_id, queue_day, position, scheduled_for, bullmq_job_id, attempt_number, phone_numbers, next_phone_index"
+    )
+    .maybeSingle<ClaimedQueueEntry>();
+  if (error) throw new Error(error.message);
+  return data;
+}
+
 export async function revertQueueClaim(
   supabase: DbClient,
   params: { id: string; scheduledFor?: string }
@@ -395,6 +470,9 @@ export interface ActiveQueueRow {
   enqueued_at: string;
   started_at: string | null;
   call_id: string | null;
+  attempt_number: number;
+  phone_numbers: string[];
+  next_phone_index: number;
   contacts: { full_name: string | null; phones: string[] } | null;
   agents: { name: string } | null;
 }
@@ -523,7 +601,7 @@ export async function listActiveQueueEntries(
   const { data } = await supabase
     .from("call_queue_entries")
     .select(
-      "id, agent_id, contact_id, status, position, scheduled_for, enqueued_at, started_at, call_id, contacts(full_name, phones), agents(name)"
+      "id, agent_id, contact_id, status, position, scheduled_for, enqueued_at, started_at, call_id, attempt_number, phone_numbers, next_phone_index, contacts(full_name, phones), agents(name)"
     )
     .eq("workspace_id", workspaceId)
     .in("status", ["pending", "dialing"])

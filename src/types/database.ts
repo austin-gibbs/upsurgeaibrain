@@ -390,6 +390,8 @@ export type Database = {
           note_logged: boolean | null
           outcome: Database["public"]["Enums"]["call_outcome"] | null
           outcome_claimed_at: string | null
+          phone_count: number
+          phone_index: number
           queued_at: string
           raw_payload: Json | null
           recording_logged: boolean | null
@@ -421,6 +423,8 @@ export type Database = {
           note_logged?: boolean | null
           outcome?: Database["public"]["Enums"]["call_outcome"] | null
           outcome_claimed_at?: string | null
+          phone_count?: number
+          phone_index?: number
           queued_at?: string
           raw_payload?: Json | null
           recording_logged?: boolean | null
@@ -452,6 +456,8 @@ export type Database = {
           note_logged?: boolean | null
           outcome?: Database["public"]["Enums"]["call_outcome"] | null
           outcome_claimed_at?: string | null
+          phone_count?: number
+          phone_index?: number
           queued_at?: string
           raw_payload?: Json | null
           recording_logged?: boolean | null
@@ -491,6 +497,7 @@ export type Database = {
       call_queue_entries: {
         Row: {
           agent_id: string
+          attempt_number: number
           bullmq_job_id: string | null
           call_id: string | null
           completed_at: string | null
@@ -498,6 +505,8 @@ export type Database = {
           enqueued_at: string
           error_message: string | null
           id: string
+          next_phone_index: number
+          phone_numbers: string[]
           position: number
           queue_day: string
           scheduled_for: string | null
@@ -507,6 +516,7 @@ export type Database = {
         }
         Insert: {
           agent_id: string
+          attempt_number: number
           bullmq_job_id?: string | null
           call_id?: string | null
           completed_at?: string | null
@@ -514,6 +524,8 @@ export type Database = {
           enqueued_at?: string
           error_message?: string | null
           id?: string
+          next_phone_index?: number
+          phone_numbers?: string[]
           position?: number
           queue_day: string
           scheduled_for?: string | null
@@ -523,6 +535,7 @@ export type Database = {
         }
         Update: {
           agent_id?: string
+          attempt_number?: number
           bullmq_job_id?: string | null
           call_id?: string | null
           completed_at?: string | null
@@ -530,6 +543,8 @@ export type Database = {
           enqueued_at?: string
           error_message?: string | null
           id?: string
+          next_phone_index?: number
+          phone_numbers?: string[]
           position?: number
           queue_day?: string
           scheduled_for?: string | null

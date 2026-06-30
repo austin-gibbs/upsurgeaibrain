@@ -20,6 +20,7 @@ import { createServiceClient } from "@/lib/supabase/server";
 import { getCallQueue } from "./queues";
 import { probeRedisQueueHealth } from "./redis-health";
 import { msUntilQueueSlot, todayInTz } from "@/lib/engine/cadence";
+import { resolveQueueDialTarget } from "@/lib/engine/multi-phone";
 import type { AgentCallConfig } from "@/types";
 import type { Queue } from "bullmq";
 import type { CallJob } from "./queues";
@@ -35,6 +36,9 @@ interface PendingRow {
   position: number;
   scheduled_for: string | null;
   bullmq_job_id: string | null;
+  attempt_number: number;
+  phone_numbers: string[];
+  next_phone_index: number;
 }
 
 interface AgentDial {
@@ -134,7 +138,7 @@ export async function resyncCallQueue(opts?: { limit?: number }): Promise<SweepR
   const { data: rows } = await supabase
     .from("call_queue_entries")
     .select(
-      "id, agent_id, contact_id, workspace_id, queue_day, position, enqueued_at, scheduled_for, bullmq_job_id"
+      "id, agent_id, contact_id, workspace_id, queue_day, position, enqueued_at, scheduled_for, bullmq_job_id, attempt_number, phone_numbers, next_phone_index"
     )
     .eq("status", "pending")
     .or(`scheduled_for.is.null,scheduled_for.lte.${nowIso}`)
@@ -192,12 +196,23 @@ export async function resyncCallQueue(opts?: { limit?: number }): Promise<SweepR
       }>();
 
     const today = todayInTz(dial.timezone);
+    const continuingAttempt = row.next_phone_index > 0;
     if (
       !contact ||
       contact.is_terminal ||
       !contact.phones?.length ||
-      contact.last_called_on === today
+      (contact.last_called_on === today && !continuingAttempt)
     ) {
+      skipped++;
+      continue;
+    }
+
+    const dialTarget = resolveQueueDialTarget({
+      phoneNumbers: row.phone_numbers,
+      nextPhoneIndex: row.next_phone_index,
+      fallbackPhones: contact.phones,
+    });
+    if (!dialTarget) {
       skipped++;
       continue;
     }
@@ -222,8 +237,12 @@ export async function resyncCallQueue(opts?: { limit?: number }): Promise<SweepR
       {
         agentId: row.agent_id,
         contactId: row.contact_id,
-        toNumber: contact.phones[0],
-        attemptNumber: contact.attempt_count + 1,
+        toNumber: dialTarget.toNumber,
+        attemptNumber: row.attempt_number,
+        phoneIndex: dialTarget.phoneIndex,
+        phoneCount: dialTarget.phoneCount,
+        queueEntryId: row.id,
+        queueDay: row.queue_day,
       },
       { delay, jobId }
     );

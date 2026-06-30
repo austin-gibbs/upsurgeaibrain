@@ -28,6 +28,11 @@ import {
   type FinalizedBy,
 } from "./crm-writeback";
 import { completeQueueEntry } from "./call-queue";
+import {
+  cancelRemainingChainedPhoneJobs,
+  chainNextPhoneDial,
+} from "./chain-next-phone";
+import { shouldFinalizeAttempt } from "./multi-phone";
 import type {
   Agent, AgentCallConfig, AgentMemory, AgentTaskConfig,
   Contact, OutcomeTag, Workspace,
@@ -126,6 +131,8 @@ export async function processRetellWebhook(
 
   const outcome = classifyOutcome({ rawOutcome: parsed.rawOutcome, inVoicemail: parsed.inVoicemail });
   const crm = getCrmAdapterForAgent(agent, workspace);
+  const phoneIndex = call.phone_index ?? 0;
+  const phoneCount = call.phone_count ?? 1;
   // Gate provider-specific side effects on the same effective provider that the
   // adapter factory uses. Workspace CRM wins so one HighLevel OAuth token store
   // fans out to every agent.
@@ -154,7 +161,50 @@ export async function processRetellWebhook(
     inVoicemail: parsed.inVoicemail,
   });
 
-  // 3. Tags.
+  const { data: callConfig } = await supabase
+    .from("agent_call_configs").select("*").eq("agent_id", agent.id).single<AgentCallConfig>();
+
+  const { data: queueEntry } = await supabase
+    .from("call_queue_entries")
+    .select("id, bullmq_job_id, queue_day")
+    .eq("call_id", call.id)
+    .maybeSingle<{ id: string; bullmq_job_id: string | null; queue_day: string }>();
+
+  const finalizeAttempt = shouldFinalizeAttempt(outcome, phoneIndex, phoneCount);
+
+  // Persist this phone's call record before deciding whether the cadence attempt ends.
+  await supabase
+    .from("calls")
+    .update({
+      status: "completed",
+      outcome,
+      in_voicemail: parsed.inVoicemail,
+      summary: parsed.summary,
+      transcript: parsed.transcript,
+      raw_payload: body,
+      completed_at: new Date().toISOString(),
+      crm_contact_id: contact.crm_contact_id,
+      contact_name: contact.full_name,
+      contact_email: contact.email,
+      finalized_by: finalizedBy,
+      note_logged: crmFlags.noteLogged,
+      recording_logged: crmFlags.recordingLogged,
+      crm_error: summarizeCrmErrors(crmFlags.crmErrors),
+    })
+    .eq("id", call.id);
+
+  if (!finalizeAttempt && queueEntry && callConfig) {
+    await chainNextPhoneDial({
+      queueEntryId: queueEntry.id,
+      outcome,
+      phoneIndex,
+      phoneCount,
+      dripSeconds: callConfig.drip_seconds,
+    });
+    return { ok: true, reason: "chained next phone" };
+  }
+
+  // 3. Tags — only when the full cadence attempt is complete.
   const reconciled = reconcileTags({
     currentTags: contact.tags,
     taxonomy: taxonomy ?? [],
@@ -250,9 +300,7 @@ export async function processRetellWebhook(
   }
 
   // 5. Cadence state.
-  const { data: config } = await supabase
-    .from("agent_call_configs").select("*").eq("agent_id", agent.id).single<AgentCallConfig>();
-  const nextEligible = config ? nextEligibleDate(call.attempt_number, config, today) : null;
+  const nextEligible = callConfig ? nextEligibleDate(call.attempt_number, callConfig, today) : null;
   await supabase
     .from("contacts")
     .update({
@@ -263,29 +311,23 @@ export async function processRetellWebhook(
     })
     .eq("id", contact.id);
 
-  // Persist call record.
+  // Persist call record outcome fields set above; add attempt-level CRM flags.
   await supabase
     .from("calls")
     .update({
-      status: "completed",
-      outcome,
-      in_voicemail: parsed.inVoicemail,
-      summary: parsed.summary,
-      transcript: parsed.transcript,
-      raw_payload: body,
       applied_tag: reconciled.appliedTag,
       task_created: taskCreated,
-      completed_at: new Date().toISOString(),
-      crm_contact_id: contact.crm_contact_id,
-      contact_name: contact.full_name,
-      contact_email: contact.email,
-      finalized_by: finalizedBy,
-      note_logged: crmFlags.noteLogged,
-      recording_logged: crmFlags.recordingLogged,
       tags_synced: crmFlags.tagsSynced,
-      crm_error: summarizeCrmErrors(crmFlags.crmErrors),
     })
     .eq("id", call.id);
+
+  if (queueEntry?.bullmq_job_id) {
+    await cancelRemainingChainedPhoneJobs({
+      baseJobId: queueEntry.bullmq_job_id.replace(/:p\d+$/, ""),
+      phoneIndex,
+      phoneCount,
+    });
+  }
 
   await completeQueueEntry(supabase, { callId: call.id });
 

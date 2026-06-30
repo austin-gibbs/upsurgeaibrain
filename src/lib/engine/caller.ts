@@ -76,6 +76,8 @@ export async function cancelPendingDials(
 
 export async function placeCall(job: CallJob): Promise<{ callId: string; retellCallId: string }> {
   const supabase = createServiceClient();
+  const phoneIndex = job.phoneIndex ?? 0;
+  const phoneCount = job.phoneCount ?? 1;
 
   const { data: agent } = await supabase
     .from("agents").select("*").eq("id", job.agentId).single<Agent>();
@@ -140,6 +142,7 @@ export async function placeCall(job: CallJob): Promise<{ callId: string; retellC
     .eq("agent_id", agent.id)
     .eq("contact_id", contact.id)
     .eq("attempt_number", job.attemptNumber)
+    .eq("phone_index", phoneIndex)
     .in("status", ["dialing", "completed"])
     .not("retell_call_id", "is", null)
     .maybeSingle<{ id: string; retell_call_id: string | null }>();
@@ -162,6 +165,7 @@ export async function placeCall(job: CallJob): Promise<{ callId: string; retellC
     .eq("agent_id", agent.id)
     .eq("contact_id", contact.id)
     .eq("attempt_number", job.attemptNumber)
+    .eq("phone_index", phoneIndex)
     .eq("status", "queued")
     .maybeSingle<{ id: string }>();
 
@@ -174,6 +178,8 @@ export async function placeCall(job: CallJob): Promise<{ callId: string; retellC
         agent_id: agent.id,
         contact_id: contact.id,
         attempt_number: job.attemptNumber,
+        phone_index: phoneIndex,
+        phone_count: phoneCount,
         to_number: job.toNumber,
         status: "queued",
       })
@@ -186,6 +192,7 @@ export async function placeCall(job: CallJob): Promise<{ callId: string; retellC
         .eq("agent_id", agent.id)
         .eq("contact_id", contact.id)
         .eq("attempt_number", job.attemptNumber)
+        .eq("phone_index", phoneIndex)
         .in("status", ["queued", "dialing", "completed"])
         .maybeSingle<{ id: string; retell_call_id: string | null; status: string }>();
       if (conflict?.retell_call_id) {
@@ -253,24 +260,26 @@ export async function placeCall(job: CallJob): Promise<{ callId: string; retellC
     queueDay: today,
   });
 
-  // Stamp the attempt + mark dialed-today so the same-day filter excludes it.
-  await supabase
-    .from("contacts")
-    .update({ attempt_count: job.attemptNumber, last_called_on: today })
-    .eq("id", contact.id);
+  // Stamp cadence only on the first phone of a multi-number attempt.
+  if (phoneIndex === 0) {
+    await supabase
+      .from("contacts")
+      .update({ attempt_count: job.attemptNumber, last_called_on: today })
+      .eq("id", contact.id);
 
-  // Best-effort CRM "dialed" marker (mirrors WF1's Mark Contact Dialed).
-  try {
-    const crm = getCrmAdapterForAgent(agent, workspace);
-    const dialedTag = `upsurgecalled${today.replace(/-/g, "")}`;
-    if (!contact.tags.includes(dialedTag) && contact.crm_contact_id) {
-      await crm.setTags(
-        contact.crm_contact_id,
-        Array.from(new Set([...contact.tags, dialedTag]))
-      );
+    // Best-effort CRM "dialed" marker (mirrors WF1's Mark Contact Dialed).
+    try {
+      const crm = getCrmAdapterForAgent(agent, workspace);
+      const dialedTag = `upsurgecalled${today.replace(/-/g, "")}`;
+      if (!contact.tags.includes(dialedTag) && contact.crm_contact_id) {
+        await crm.setTags(
+          contact.crm_contact_id,
+          Array.from(new Set([...contact.tags, dialedTag]))
+        );
+      }
+    } catch {
+      // non-fatal — the local last_called_on already guards same-day re-dials
     }
-  } catch {
-    // non-fatal — the local last_called_on already guards same-day re-dials
   }
 
   return { callId: call.id, retellCallId };
@@ -324,6 +333,7 @@ export async function placeTestCall(params: {
   const dynamicVariables: Record<string, string> = {
     contact_name: "there",
     objective: agent.objective ?? "",
+    call_direction: "outbound",
     attempt_number: "1",
     is_returning_contact: "false",
     prior_call_count: "0",

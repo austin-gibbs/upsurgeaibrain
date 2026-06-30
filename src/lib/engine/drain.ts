@@ -10,6 +10,7 @@ import {
   countDialedTodayForAgent,
 } from "./call-queue";
 import { evaluateDialWindow } from "./cadence";
+import { resolveQueueDialTarget } from "./multi-phone";
 import { remainingDailyDialBudget } from "./rollover-priority";
 import type { AgentCallConfig } from "@/types";
 
@@ -24,6 +25,9 @@ interface DueQueueRow {
   position: number;
   enqueued_at: string | null;
   scheduled_for: string | null;
+  attempt_number: number;
+  phone_numbers: string[];
+  next_phone_index: number;
   contacts: {
     is_terminal: boolean;
     last_called_on: string | null;
@@ -106,6 +110,7 @@ export async function drainDueDials(opts?: {
     .from("call_queue_entries")
     .select(
       `id, agent_id, contact_id, workspace_id, queue_day, position, enqueued_at, scheduled_for,
+       attempt_number, phone_numbers, next_phone_index,
        contacts(is_terminal, last_called_on, phones, attempt_count),
        agents(status, direction, retell_agent_id, retell_from_number,
          agent_call_configs(call_window_start, call_window_end, call_window_days, drip_seconds, max_calls_per_day)),
@@ -178,7 +183,17 @@ export async function drainDueDials(opts?: {
       month: "2-digit",
       day: "2-digit",
     }).format(new Date());
-    if (contact.last_called_on === today) {
+    if (contact.last_called_on === today && row.next_phone_index === 0) {
+      result.skipped++;
+      continue;
+    }
+
+    const dialTarget = resolveQueueDialTarget({
+      phoneNumbers: row.phone_numbers,
+      nextPhoneIndex: row.next_phone_index,
+      fallbackPhones: contact.phones,
+    });
+    if (!dialTarget) {
       result.skipped++;
       continue;
     }
@@ -228,8 +243,12 @@ export async function drainDueDials(opts?: {
       await placeCall({
         agentId: row.agent_id,
         contactId: row.contact_id,
-        toNumber: contact.phones[0],
-        attemptNumber: contact.attempt_count + 1,
+        toNumber: dialTarget.toNumber,
+        attemptNumber: row.attempt_number,
+        phoneIndex: dialTarget.phoneIndex,
+        phoneCount: dialTarget.phoneCount,
+        queueEntryId: row.id,
+        queueDay: row.queue_day,
       });
       result.dialed++;
     } catch (err) {
