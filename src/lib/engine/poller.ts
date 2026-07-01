@@ -28,7 +28,10 @@ import {
   reconcileZombieDialingRows,
 } from "./call-queue";
 import { applyPollStageRouting } from "./pipeline-routing";
-import { computeNewPollCapacity, excludeActiveQueuedContacts } from "./rollover-priority";
+import {
+  computeRepeatedPollCapacity,
+  excludeActiveQueuedContacts,
+} from "./rollover-priority";
 import { buildMergedContactRows, enrolledCrmIds } from "./poller-sync";
 import { writePollRun, type PollTriggerSource } from "./poll-runs";
 import { buildDialAttempt } from "./enqueue-dial";
@@ -235,9 +238,20 @@ export async function pollAgent(
         config.call_window_days
       );
   const dailyCap = Math.min(config.max_calls_per_day, windowCapacity);
-  const newCallCapacity = computeNewPollCapacity(dailyCap, rolloverBacklog);
+  const sameDayQueued = await countActiveQueueForAgent(supabase, agentId, today);
+  const dialedToday = await countDialedTodayForAgent(supabase, agentId, workspace.timezone);
+  const newCallCapacity = computeRepeatedPollCapacity({
+    dailyCap,
+    rolloverBacklogCount: rolloverBacklog,
+    sameDayQueuedCount: sameDayQueued,
+    dialedTodayCount: dialedToday,
+  });
 
   if (newCallCapacity === 0 && eligibleNotQueued.length > 0) {
+    const skippedReason =
+      rolloverBacklog > 0 && rolloverBacklog >= dailyCap
+        ? "capacity reserved for rollover backlog"
+        : "daily capacity exhausted";
     return finishPoll(supabase, {
       workspaceId: workspace.id,
       agentId,
@@ -250,7 +264,7 @@ export async function pollAgent(
         enqueued: 0,
         cancelled,
         tagsStripped,
-        skippedReason: "capacity reserved for rollover backlog",
+        skippedReason,
       },
     });
   }

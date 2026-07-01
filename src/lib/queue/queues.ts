@@ -1,7 +1,8 @@
 // =====================================================================
 // Queue definitions + job payload types.
 //
-//  poll  — one job per agent per day: scans the CRM and enqueues calls.
+//  poll  — one job per agent per 2-minute bucket during the call window: scans
+//          the CRM and enqueues calls.
 //  call  — one job per dial. Drip throttle is enforced with per-job delay
 //          so dials for an agent are spaced `drip_seconds` apart.
 // =====================================================================

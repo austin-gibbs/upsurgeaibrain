@@ -1,7 +1,7 @@
 // =====================================================================
 // GET/POST /api/cron/poll-fallback
 // When the Railway worker heartbeat is stale, run pollAgent directly for
-// each active outbound agent at/after its daily_run_at. Writes durable
+// each active outbound agent inside its calling window. Writes durable
 // call_queue_entries without Redis. Protect with CRON_SECRET.
 // =====================================================================
 import { NextRequest, NextResponse } from "next/server";
@@ -9,8 +9,8 @@ import { createServiceClient } from "@/lib/supabase/server";
 import { bearerMatches } from "@/lib/secure";
 import { isHeartbeatStale, heartbeatAgeMs } from "@/lib/engine/heartbeat";
 import { pollAgent } from "@/lib/engine/poller";
+import { isAgentEligibleForPollTick } from "@/lib/engine/poll-schedule";
 import { probeRedisQueueHealth } from "@/lib/queue/redis-health";
-import { nowHHMMInTz, isCallDayAllowed } from "@/lib/engine/cadence";
 import type { Agent, AgentCallConfig } from "@/types";
 
 export const runtime = "nodejs";
@@ -25,11 +25,19 @@ type AgentRow = Pick<Agent, "id" | "status" | "direction" | "workspace_id"> & {
   agent_call_configs:
     | Pick<
         AgentCallConfig,
-        "daily_run_at" | "call_window_end" | "call_window_days" | "max_attempts_per_contact"
+        | "daily_run_at"
+        | "call_window_start"
+        | "call_window_end"
+        | "call_window_days"
+        | "max_attempts_per_contact"
       >
     | Pick<
         AgentCallConfig,
-        "daily_run_at" | "call_window_end" | "call_window_days" | "max_attempts_per_contact"
+        | "daily_run_at"
+        | "call_window_start"
+        | "call_window_end"
+        | "call_window_days"
+        | "max_attempts_per_contact"
       >[]
     | null;
   workspaces: { timezone: string; is_active: boolean } | null;
@@ -53,7 +61,7 @@ async function handle(req: NextRequest) {
     ms == null ? null : Math.round(ms / 1000)
   );
 
-  // Worker + Redis healthy: skip entirely. Avoids N×3 COUNT queries per minute
+  // Worker + Redis healthy: skip entirely. Avoids N CRM scans per 2 minutes
   // during call windows when nothing is wrong.
   if (!stale && redisOk) {
     return NextResponse.json({
@@ -69,7 +77,7 @@ async function handle(req: NextRequest) {
     .select(
       `id, status, direction,
        workspace_id,
-       agent_call_configs(daily_run_at, call_window_end, call_window_days, max_attempts_per_contact),
+       agent_call_configs(daily_run_at, call_window_start, call_window_end, call_window_days, max_attempts_per_contact),
        workspaces(timezone, is_active)`
     )
     .eq("status", "active")
@@ -83,21 +91,20 @@ async function handle(req: NextRequest) {
   for (const agent of agents ?? []) {
     const config = pickConfig(agent);
     const workspace = agent.workspaces;
-    if (!config || !workspace?.is_active) {
+    if (!config?.daily_run_at || !workspace?.is_active) {
       skippedAgents.push(agent.id);
       continue;
     }
 
-    const now = nowHHMMInTz(workspace.timezone);
-    if (now < config.daily_run_at) {
-      skippedAgents.push(agent.id);
-      continue;
-    }
-    if (!isCallDayAllowed(workspace.timezone, config.call_window_days)) {
-      skippedAgents.push(agent.id);
-      continue;
-    }
-    if (now > config.call_window_end) {
+    if (
+      !isAgentEligibleForPollTick({
+        timezone: workspace.timezone,
+        dailyRunAt: config.daily_run_at,
+        callWindowStart: config.call_window_start,
+        callWindowEnd: config.call_window_end,
+        callWindowDays: config.call_window_days,
+      })
+    ) {
       skippedAgents.push(agent.id);
       continue;
     }

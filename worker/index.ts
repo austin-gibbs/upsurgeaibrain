@@ -5,7 +5,7 @@
 //   npm run worker:prod   (production)
 //
 // Starts the BullMQ workers (poll + call) and a 60s scheduler tick that
-// enqueues daily polls. This is the always-on backend that replaces n8n.
+// enqueues 2-minute-bucketed polls during each agent's call window.
 // =====================================================================
 process.env.UPSURGE_WORKER = "true";
 

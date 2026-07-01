@@ -1,30 +1,40 @@
 // =====================================================================
-// Scheduler — enqueues a poll job for every active agent whose configured
-// daily_run_at matches the current minute in its workspace timezone.
+// Scheduler — enqueues a poll job for every active outbound agent that is
+// inside its configured calling window.
 //
 // Designed to be invoked once per minute, either by:
 //   - the worker process's internal interval (worker/index.ts), or
 //   - an external cron hitting /api/cron/daily-poll (Vercel Cron, etc.).
-// Idempotent: the poll job id is keyed to agent + local date + run time.
+// Idempotent: poll job ids are keyed to agent + local date + 2-minute bucket,
+// so ticks at 09:00 and 09:01 share one job while 09:02 gets the next.
 // =====================================================================
 import { createServiceClient } from "@/lib/supabase/server";
 import { getPollQueue } from "@/lib/queue/queues";
-import { nowHHMMInTz, todayInTz } from "./cadence";
+import {
+  buildPollJobId,
+  isAgentEligibleForPollTick,
+  pollJobBucketForTimezone,
+} from "./poll-schedule";
 import type { Agent, AgentCallConfig, Workspace } from "@/types";
 
 type SchedulerAgentRow = Pick<Agent, "id" | "workspace_id" | "status" | "direction"> & {
   agent_call_configs:
-    | Pick<AgentCallConfig, "daily_run_at">
-    | Pick<AgentCallConfig, "daily_run_at">[]
+    | Pick<
+        AgentCallConfig,
+        "daily_run_at" | "call_window_start" | "call_window_end" | "call_window_days"
+      >
+    | Pick<
+        AgentCallConfig,
+        "daily_run_at" | "call_window_start" | "call_window_end" | "call_window_days"
+      >[]
     | null;
   workspaces: Pick<Workspace, "timezone" | "is_active"> | null;
 };
 
-function pickDailyRunAt(row: SchedulerAgentRow): string | null {
+function pickCallConfig(row: SchedulerAgentRow) {
   const configs = row.agent_call_configs;
   if (!configs) return null;
-  const config = Array.isArray(configs) ? configs[0] : configs;
-  return config?.daily_run_at ?? null;
+  return Array.isArray(configs) ? configs[0] : configs;
 }
 
 export async function tickScheduler(): Promise<{ enqueued: string[] }> {
@@ -35,7 +45,7 @@ export async function tickScheduler(): Promise<{ enqueued: string[] }> {
     .from("agents")
     .select(
       `id, workspace_id, status, direction,
-       agent_call_configs(daily_run_at),
+       agent_call_configs(daily_run_at, call_window_start, call_window_end, call_window_days),
        workspaces(timezone, is_active)`
     )
     .eq("status", "active")
@@ -47,15 +57,27 @@ export async function tickScheduler(): Promise<{ enqueued: string[] }> {
   const candidates: { agentId: string; jobId: string }[] = [];
 
   for (const agent of agents) {
-    const dailyRunAt = pickDailyRunAt(agent);
+    const config = pickCallConfig(agent);
     const workspace = agent.workspaces;
-    if (!dailyRunAt || !workspace?.is_active) continue;
+    if (!config?.daily_run_at || !workspace?.is_active) continue;
 
-    const now = nowHHMMInTz(workspace.timezone);
-    if (now < dailyRunAt) continue;
+    if (
+      !isAgentEligibleForPollTick({
+        timezone: workspace.timezone,
+        dailyRunAt: config.daily_run_at,
+        callWindowStart: config.call_window_start,
+        callWindowEnd: config.call_window_end,
+        callWindowDays: config.call_window_days,
+      })
+    ) {
+      continue;
+    }
 
-    const today = todayInTz(workspace.timezone);
-    candidates.push({ agentId: agent.id, jobId: `poll:${agent.id}:${today}` });
+    const { today, bucket } = pollJobBucketForTimezone(workspace.timezone);
+    candidates.push({
+      agentId: agent.id,
+      jobId: buildPollJobId(agent.id, today, bucket),
+    });
   }
 
   if (!candidates.length) return { enqueued };

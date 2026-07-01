@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import {
   compareQueueRowsForRollover,
   computeNewPollCapacity,
+  computeRepeatedPollCapacity,
   remainingDailyDialBudget,
   excludeActiveQueuedContacts,
   findUnenrolledPendingQueueRows,
@@ -51,6 +52,44 @@ describe("computeNewPollCapacity", () => {
 
   it("never returns negative capacity", () => {
     assert.equal(computeNewPollCapacity(50, -5), 50);
+  });
+});
+
+describe("computeRepeatedPollCapacity", () => {
+  it("subtracts rollover backlog, same-day queued, and dialed counts", () => {
+    assert.equal(
+      computeRepeatedPollCapacity({
+        dailyCap: 100,
+        rolloverBacklogCount: 10,
+        sameDayQueuedCount: 40,
+        dialedTodayCount: 20,
+      }),
+      30
+    );
+  });
+
+  it("returns zero when same-day commitments exhaust the budget", () => {
+    assert.equal(
+      computeRepeatedPollCapacity({
+        dailyCap: 50,
+        rolloverBacklogCount: 40,
+        sameDayQueuedCount: 5,
+        dialedTodayCount: 5,
+      }),
+      0
+    );
+  });
+
+  it("never returns negative capacity", () => {
+    assert.equal(
+      computeRepeatedPollCapacity({
+        dailyCap: 10,
+        rolloverBacklogCount: 20,
+        sameDayQueuedCount: 5,
+        dialedTodayCount: 5,
+      }),
+      0
+    );
   });
 });
 

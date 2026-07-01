@@ -126,11 +126,16 @@ export function nowHHMMInTz(timezone: string): string {
   }).format(new Date());
 }
 
-export function withinCallWindow(timezone: string, start: string, end: string): boolean {
-  const now = nowHHMMInTz(timezone);
+/** Compare a workspace-local HH:MM against inclusive call-window bounds. */
+export function isHHMMWithinCallWindow(nowHHMM: string, start: string, end: string): boolean {
+  const now = normalizeHHMM(nowHHMM);
   const windowStart = normalizeHHMM(start);
   const windowEnd = normalizeHHMM(end);
   return now >= windowStart && now <= windowEnd;
+}
+
+export function withinCallWindow(timezone: string, start: string, end: string): boolean {
+  return isHHMMWithinCallWindow(nowHHMMInTz(timezone), start, end);
 }
 
 /** True when the workspace-local clock is past today's call_window_end. */

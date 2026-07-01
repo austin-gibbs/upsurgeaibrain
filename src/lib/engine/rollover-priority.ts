@@ -21,6 +21,26 @@ export function computeNewPollCapacity(dailyCap: number, rolloverBacklogCount: n
   return Math.max(0, dailyCap - Math.max(0, rolloverBacklogCount));
 }
 
+/**
+ * Remaining enqueue slots for a repeated poll within the same calendar day.
+ * Reserves rollover backlog first, then subtracts same-day queued and dialed rows
+ * so 2-minute polls cannot exceed max_calls_per_day.
+ */
+export function computeRepeatedPollCapacity(params: {
+  dailyCap: number;
+  rolloverBacklogCount: number;
+  sameDayQueuedCount: number;
+  dialedTodayCount: number;
+}): number {
+  const afterRollover = computeNewPollCapacity(
+    params.dailyCap,
+    params.rolloverBacklogCount
+  );
+  const committedToday =
+    Math.max(0, params.sameDayQueuedCount) + Math.max(0, params.dialedTodayCount);
+  return Math.max(0, afterRollover - committedToday);
+}
+
 /** Remaining daily dial budget after calls already placed today. */
 export function remainingDailyDialBudget(
   maxCallsPerDay: number,
