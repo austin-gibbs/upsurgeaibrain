@@ -1,5 +1,6 @@
 // Redis + BullMQ liveness — PING alone is insufficient on Upstash because quota
 // exhaustion still allows PING while Lua/eval (used by BullMQ) fails.
+import { sleep } from "@/lib/http";
 import { closeRedis, getRedis } from "./connection";
 import { closeCallQueue, getCallQueue } from "./queues";
 
@@ -49,4 +50,25 @@ export async function probeRedisQueueHealth(opts?: {
       closeRedis();
     }
   }
+}
+
+/**
+ * Retry Redis/BullMQ readiness — avoids a false stale heartbeat on worker boot
+ * when BullMQ workers are still connecting.
+ */
+export async function waitForRedisQueueHealth(opts?: {
+  maxAttempts?: number;
+  delayMs?: number;
+}): Promise<RedisHealthResult> {
+  const maxAttempts = opts?.maxAttempts ?? 12;
+  const delayMs = opts?.delayMs ?? 500;
+  let last: RedisHealthResult = { ok: false, reason: "queue_unavailable" };
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    last = await probeRedisQueueHealth();
+    if (last.ok) return last;
+    if (attempt < maxAttempts) await sleep(delayMs);
+  }
+
+  return last;
 }

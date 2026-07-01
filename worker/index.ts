@@ -17,7 +17,7 @@ import { startCallWorker } from "@/lib/queue/workers/call.worker";
 import { tickScheduler } from "@/lib/engine/scheduler";
 import { reconcileStuckCalls } from "@/lib/engine/reconcile";
 import { resyncCallQueue } from "@/lib/queue/sweeper";
-import { probeRedisQueueHealth } from "@/lib/queue/redis-health";
+import { probeRedisQueueHealth, waitForRedisQueueHealth } from "@/lib/queue/redis-health";
 import { writeHeartbeat } from "@/lib/engine/heartbeat";
 
 const BOOTED_AT = Date.now();
@@ -80,8 +80,10 @@ async function main() {
   // Heartbeat for Vercel failover crons — written only when BullMQ can run.
   // Upstash quota exhaustion still allows PING; probe queue ops to avoid a
   // zombie worker that looks healthy while dials are stuck.
-  const writeHealthyHeartbeat = async () => {
-    const health = await probeRedisQueueHealth();
+  const writeHealthyHeartbeat = async (opts?: { boot?: boolean }) => {
+    const health = opts?.boot
+      ? await waitForRedisQueueHealth()
+      : await probeRedisQueueHealth();
     if (!health.ok) {
       throw new Error(`Redis queue unhealthy: ${health.reason ?? "unknown"}`);
     }
@@ -108,7 +110,7 @@ async function main() {
   };
 
   try {
-    await writeHealthyHeartbeat();
+    await writeHealthyHeartbeat({ boot: true });
   } catch (e) {
     console.error("[heartbeat] initial health/write error:", e);
     heartbeatDelayMs = Math.min(heartbeatDelayMs * 2, HEARTBEAT_MAX_MS);
