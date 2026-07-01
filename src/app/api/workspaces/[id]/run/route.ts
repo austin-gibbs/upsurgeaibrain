@@ -1,7 +1,8 @@
 // =====================================================================
 // POST /api/workspaces/:id/run — manually poll all active outbound agents
 // in a workspace (CRM enroll-tag scan → eligible contacts → dial queue).
-// Optional testMode bypasses per-agent call windows at poll time.
+// Optional testMode bypasses per-agent call windows at dial time.
+// Poll always syncs CRM contacts; after-hours runs schedule dials for the next window.
 // =====================================================================
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase/server";

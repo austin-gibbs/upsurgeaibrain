@@ -11,12 +11,9 @@ import { getCallQueue, addCallJobsBulk, closeCallQueue, type CallJobSpec } from 
 import { getRedis } from "@/lib/queue/connection";
 import {
   isEligible,
-  isCallDayAllowed,
-  isCallWindowClosedForToday,
   msUntilCallWindowOpens,
-  remainingWindowCapacity,
+  pollEnqueueCapacity,
   todayInTz,
-  evaluateDialWindow,
 } from "./cadence";
 import type { Agent, AgentCallConfig, AgentTaskConfig, Contact, Workspace } from "@/types";
 import {
@@ -116,25 +113,6 @@ export async function pollAgent(
     .single<Workspace>();
   if (!workspace || !workspace.is_active) {
     return { agentId, scanned: 0, eligible: 0, enqueued: 0, skippedReason: "workspace inactive" };
-  }
-
-  if (
-    !options?.testMode &&
-    isCallWindowClosedForToday(
-      workspace.timezone,
-      config.call_window_end,
-      config.call_window_days
-    )
-  ) {
-    return {
-      agentId,
-      scanned: 0,
-      eligible: 0,
-      enqueued: 0,
-      skippedReason: isCallDayAllowed(workspace.timezone, config.call_window_days)
-        ? "call window closed for today"
-        : "not a call day",
-    };
   }
 
   const today = todayInTz(workspace.timezone);
@@ -249,7 +227,7 @@ export async function pollAgent(
 
   const windowCapacity = options?.testMode
     ? config.max_calls_per_day
-    : remainingWindowCapacity(
+    : pollEnqueueCapacity(
         workspace.timezone,
         config.call_window_start,
         config.call_window_end,
@@ -412,17 +390,14 @@ export async function enqueueContactsNow(
     return { ...base, skippedReason: "workspace inactive" };
   }
 
-  const windowDecision = evaluateDialWindow(
+  const today = todayInTz(workspace.timezone);
+
+  const baseDelay = msUntilCallWindowOpens(
     workspace.timezone,
     config.call_window_start,
     config.call_window_end,
     config.call_window_days
   );
-  if (!windowDecision.allowed) {
-    return { ...base, skippedReason: windowDecision.reason };
-  }
-
-  const today = todayInTz(workspace.timezone);
 
   const { data: rows } = await supabase
     .from("contacts")
@@ -457,7 +432,7 @@ export async function enqueueContactsNow(
   for (let i = 0; i < toQueue.length; i++) {
     const contact = toQueue[i];
     const slot = basePosition + i;
-    const delay = slot * config.drip_seconds * 1000;
+    const delay = baseDelay + slot * config.drip_seconds * 1000;
     const baseJobId = `manual:${agentId}:${contact.id}:${today}`;
     const scheduledFor = new Date(Date.now() + delay).toISOString();
 

@@ -320,6 +320,38 @@ export function remainingWindowCapacity(
   return Math.floor(remainingSeconds / dripSeconds) + 1;
 }
 
+/**
+ * How many contacts a poll may enqueue right now. During an open call window,
+ * respects remaining slots today. After hours or before open, uses the full
+ * daily window capacity — dial jobs are delayed via msUntilCallWindowOpens.
+ */
+export function pollEnqueueCapacity(
+  timezone: string,
+  start: string,
+  end: string,
+  dripSeconds: number,
+  days?: number[] | null
+): number {
+  const windowStart = normalizeHHMM(start);
+  const windowEnd = normalizeHHMM(end);
+  const allowedDays = normalizeCallWindowDays(days);
+
+  if (
+    isCallDayAllowed(timezone, allowedDays) &&
+    withinCallWindow(timezone, windowStart, windowEnd)
+  ) {
+    return remainingWindowCapacity(
+      timezone,
+      start,
+      end,
+      dripSeconds,
+      days
+    );
+  }
+
+  return dailyWindowCapacity(windowStart, windowEnd, dripSeconds);
+}
+
 /** Milliseconds until the next call-window open in a timezone (0 if open right now). */
 export function msUntilCallWindowOpens(
   timezone: string,

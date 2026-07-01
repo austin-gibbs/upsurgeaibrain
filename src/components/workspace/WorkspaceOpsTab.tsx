@@ -927,11 +927,14 @@ function WorkspaceOpsTabInner({
               className="h-4 w-4 rounded border-ink-300 text-brand-600 focus:ring-brand-500"
             />
             Run test{" "}
-            <span className="text-xs text-ink-400">(ignores call windows)</span>
+            <span className="text-xs text-ink-400">(dials immediately, ignores windows)</span>
           </Label>
           <Button onClick={runPoll} disabled={running || !canRun}>
             {running ? "Running…" : "Run poll"}
           </Button>
+          <p className="w-full text-xs text-ink-400 sm:w-auto">
+            Polls sync enroll-tagged contacts anytime; dials schedule for the next call window when after hours.
+          </p>
           <StatusBadge status={workspace.is_active ? "active" : "paused"} />
         </div>
       </div>
