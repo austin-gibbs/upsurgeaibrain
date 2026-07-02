@@ -37,7 +37,7 @@ import { buildMergedContactRows, enrolledCrmIds } from "./poller-sync";
 import { writePollRun, type PollTriggerSource } from "./poll-runs";
 import { buildDialAttempt } from "./enqueue-dial";
 import { sendOpsAlert } from "@/lib/alerts";
-import { shouldGuardZeroCrmScan } from "./zero-crm-scan-guard";
+import { shouldGuardCrmScan } from "./zero-crm-scan-guard";
 
 export interface PollOptions {
   testMode?: boolean;
@@ -139,11 +139,13 @@ export async function pollAgent(
     enrollTag
   );
 
-  if (shouldGuardZeroCrmScan(crmContacts.length, localEnrolledCount)) {
+  if (shouldGuardCrmScan(crmContacts.length, localEnrolledCount)) {
+    const crmCount = crmContacts.length;
     await sendOpsAlert(
-      `:warning: *Zero CRM scan guard* — ${workspace.name} / ${agent.name}\n` +
-        `CRM returned 0 contacts for tag \`${enrollTag}\` but ${localEnrolledCount} local contacts still carry the tag. ` +
-        "Skipping enroll-tag strip; investigate CRM auth, tag mismatch, or location scope."
+      `:warning: *CRM scan guard* — ${workspace.name} / ${agent.name}\n` +
+        `CRM returned ${crmCount} contact${crmCount === 1 ? "" : "s"} for tag \`${enrollTag}\` ` +
+        `but ${localEnrolledCount} local contacts still carry the tag. ` +
+        "Skipping enroll-tag strip; investigate CRM auth, tag mismatch, pagination, or location scope."
     ).catch(() => {});
     return finishPoll(supabase, {
       workspaceId: workspace.id,
@@ -151,10 +153,10 @@ export async function pollAgent(
       options,
       result: {
         agentId,
-        scanned: 0,
+        scanned: crmCount,
         eligible: 0,
         enqueued: 0,
-        skippedReason: "zero_crm_scan_guard",
+        skippedReason: "crm_scan_guard",
       },
     });
   }
