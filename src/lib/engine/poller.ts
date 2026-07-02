@@ -26,6 +26,7 @@ import {
   reconcileUnenrolledQueueOnPoll,
   stripStaleLocalEnrollTags,
   reconcileZombieDialingRows,
+  countLocalEnrolledContacts,
 } from "./call-queue";
 import { applyPollStageRouting } from "./pipeline-routing";
 import {
@@ -35,6 +36,8 @@ import {
 import { buildMergedContactRows, enrolledCrmIds } from "./poller-sync";
 import { writePollRun, type PollTriggerSource } from "./poll-runs";
 import { buildDialAttempt } from "./enqueue-dial";
+import { sendOpsAlert } from "@/lib/alerts";
+import { shouldGuardZeroCrmScan } from "./zero-crm-scan-guard";
 
 export interface PollOptions {
   testMode?: boolean;
@@ -130,6 +133,31 @@ export async function pollAgent(
   const enrollTag = agent.enroll_tag ?? workspace.enroll_tag;
   const crmContacts = await crm.getContactsByTag(enrollTag);
   const scannedCrmIds = enrolledCrmIds(crmContacts);
+  const localEnrolledCount = await countLocalEnrolledContacts(
+    supabase,
+    workspace.id,
+    enrollTag
+  );
+
+  if (shouldGuardZeroCrmScan(crmContacts.length, localEnrolledCount)) {
+    await sendOpsAlert(
+      `:warning: *Zero CRM scan guard* — ${workspace.name} / ${agent.name}\n` +
+        `CRM returned 0 contacts for tag \`${enrollTag}\` but ${localEnrolledCount} local contacts still carry the tag. ` +
+        "Skipping enroll-tag strip; investigate CRM auth, tag mismatch, or location scope."
+    ).catch(() => {});
+    return finishPoll(supabase, {
+      workspaceId: workspace.id,
+      agentId,
+      options,
+      result: {
+        agentId,
+        scanned: 0,
+        eligible: 0,
+        enqueued: 0,
+        skippedReason: "zero_crm_scan_guard",
+      },
+    });
+  }
 
   // 2. Upsert into our cache, preserving cadence state we already track.
   const crmIds = crmContacts.map((c) => c.id);

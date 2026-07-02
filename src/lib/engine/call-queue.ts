@@ -409,6 +409,21 @@ export async function stripStaleLocalEnrollTags(
   return stripped;
 }
 
+/** Count local contacts carrying the enroll tag (for zero-CRM-scan guard). */
+export async function countLocalEnrolledContacts(
+  supabase: DbClient,
+  workspaceId: string,
+  enrollTag: string
+): Promise<number> {
+  const { count, error } = await supabase
+    .from("contacts")
+    .select("id", { count: "exact", head: true })
+    .eq("workspace_id", workspaceId)
+    .contains("tags", [enrollTag]);
+  if (error) throw new Error(error.message);
+  return count ?? 0;
+}
+
 const ZOMBIE_DIALING_DEFAULT_HOURS = 4;
 
 /**

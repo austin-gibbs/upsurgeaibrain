@@ -12,6 +12,7 @@ import {
 } from "@/lib/engine/call-queue";
 import { evaluateDialWindow, todayInTz } from "@/lib/engine/cadence";
 import { createServiceClient } from "@/lib/supabase/server";
+import { writeCallWorkerLiveness } from "@/lib/engine/heartbeat";
 
 type AgentWindowRow = {
   agent_call_configs: {
@@ -99,6 +100,9 @@ export function startCallWorker(): Worker<CallJob> {
   const worker = new Worker<CallJob>(
     CALL_QUEUE,
     async (job) => {
+      await writeCallWorkerLiveness().catch((err) => {
+        console.error("[call.worker] liveness write failed:", err);
+      });
       // Fast pre-check: a job can become ready outside the window via drip
       // spillover or retry backoff. When that happens, re-queue it to fire when
       // the window next opens instead of placing the call now. The deterministic

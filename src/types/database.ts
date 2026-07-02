@@ -644,16 +644,34 @@ export type Database = {
       }
       engine_heartbeat: {
         Row: {
+          call_worker_last_seen_at: string | null
           id: string
           last_seen_at: string
+          poll_worker_last_seen_at: string | null
+          redis_last_ok: boolean | null
+          redis_last_ok_at: string | null
+          scheduler_last_enqueued_at: string | null
+          scheduler_last_tick_at: string | null
         }
         Insert: {
+          call_worker_last_seen_at?: string | null
           id?: string
           last_seen_at?: string
+          poll_worker_last_seen_at?: string | null
+          redis_last_ok?: boolean | null
+          redis_last_ok_at?: string | null
+          scheduler_last_enqueued_at?: string | null
+          scheduler_last_tick_at?: string | null
         }
         Update: {
+          call_worker_last_seen_at?: string | null
           id?: string
           last_seen_at?: string
+          poll_worker_last_seen_at?: string | null
+          redis_last_ok?: boolean | null
+          redis_last_ok_at?: string | null
+          scheduler_last_enqueued_at?: string | null
+          scheduler_last_tick_at?: string | null
         }
         Relationships: []
       }

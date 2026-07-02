@@ -1,6 +1,10 @@
 {
   "crons": [
     {
+      "path": "/api/cron/daily-poll",
+      "schedule": "*/1 * * * *"
+    },
+    {
       "path": "/api/admin/reconcile-stuck-calls?olderThanMinutes=1&limit=250",
       "schedule": "*/2 * * * *"
     },

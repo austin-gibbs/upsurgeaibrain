@@ -10,6 +10,7 @@
 // =====================================================================
 import { createServiceClient } from "@/lib/supabase/server";
 import { getPollQueue } from "@/lib/queue/queues";
+import { writeSchedulerLiveness } from "./heartbeat";
 import {
   buildPollJobId,
   isAgentEligibleForPollTick,
@@ -51,7 +52,12 @@ export async function tickScheduler(): Promise<{ enqueued: string[] }> {
     .eq("status", "active")
     .eq("direction", "outbound")
     .returns<SchedulerAgentRow[]>();
-  if (!agents?.length) return { enqueued };
+  if (!agents?.length) {
+    await writeSchedulerLiveness(0).catch((err) => {
+      console.error("[scheduler] failed to write liveness:", err);
+    });
+    return { enqueued };
+  }
 
   const queue = getPollQueue();
   const candidates: { agentId: string; jobId: string }[] = [];
@@ -80,7 +86,12 @@ export async function tickScheduler(): Promise<{ enqueued: string[] }> {
     });
   }
 
-  if (!candidates.length) return { enqueued };
+  if (!candidates.length) {
+    await writeSchedulerLiveness(0).catch((err) => {
+      console.error("[scheduler] failed to write liveness:", err);
+    });
+    return { enqueued };
+  }
 
   const existingJobs = await Promise.all(
     candidates.map(async (c) => ({
@@ -94,6 +105,10 @@ export async function tickScheduler(): Promise<{ enqueued: string[] }> {
     await queue.add("poll", { agentId: candidate.agentId }, { jobId: candidate.jobId });
     enqueued.push(candidate.agentId);
   }
+
+  await writeSchedulerLiveness(enqueued.length).catch((err) => {
+    console.error("[scheduler] failed to write liveness:", err);
+  });
 
   return { enqueued };
 }

@@ -36,11 +36,25 @@ CALL_WORKER_RATE_DURATION_MS=1000
 
 | Route | Schedule | Notes |
 | --- | --- | --- |
-| `/api/cron/poll-fallback` | `*/2 * * * *` | Returns immediately when worker heartbeat + Redis are healthy |
+| `/api/cron/daily-poll` | `*/1 * * * *` | Redundant scheduler tick (idempotent poll job IDs) |
+| `/api/cron/poll-fallback` | `*/2 * * * *` | Polls when worker/Redis unhealthy **or** poll coverage is missing in-window |
 | `/api/cron/drain-queue` | `*/1 * * * *` | Postgres drain when worker stall / Redis down |
-| `/api/cron/dial-watchdog` | `*/5 * * * *` | Ops alert only |
+| `/api/cron/dial-watchdog` | `*/5 * * * *` | Ops alert for dial stalls **and** poll coverage gaps |
 
 Requires `CRON_SECRET` on Vercel.
+
+## Worker process (Railway)
+
+| Setting | Required | Notes |
+| --- | --- | --- |
+| Start command | `npm run worker:prod` | Runs poll + call workers and internal scheduler |
+| `REDIS_URL` | Yes (prod) | Worker throws on boot if missing in production |
+| `USE_EXTERNAL_CRON` | No / `false` | Leave unset so the worker's 60s scheduler runs. Set `true` only if `/api/cron/daily-poll` is confirmed active on Vercel |
+| Supabase service role + encryption key | Yes | Same as Vercel app |
+
+Apply migration `0023_engine_liveness.sql` before deploying liveness-aware failover code.
+
+On boot the worker logs `scheduler mode: internal 60s tick` or warns when external cron is expected.
 
 ## Audit remediation status (2026-06-28)
 

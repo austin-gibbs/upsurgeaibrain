@@ -1,8 +1,8 @@
 // =====================================================================
 // GET/POST /api/cron/poll-fallback
-// When the Railway worker heartbeat is stale, run pollAgent directly for
-// each active outbound agent inside its calling window. Writes durable
-// call_queue_entries without Redis. Protect with CRON_SECRET.
+// Failover polling when the worker is unhealthy OR poll coverage is missing
+// during an open call window. Writes durable call_queue_entries without Redis.
+// Protect with CRON_SECRET.
 // =====================================================================
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/server";
@@ -10,6 +10,10 @@ import { bearerMatches } from "@/lib/secure";
 import { isHeartbeatStale, heartbeatAgeMs } from "@/lib/engine/heartbeat";
 import { pollAgent } from "@/lib/engine/poller";
 import { isAgentEligibleForPollTick } from "@/lib/engine/poll-schedule";
+import {
+  agentLacksRecentPollCoverage,
+  shouldPollAgentInFailover,
+} from "@/lib/engine/poll-coverage";
 import { probeRedisQueueHealth } from "@/lib/queue/redis-health";
 import type { Agent, AgentCallConfig } from "@/types";
 
@@ -49,28 +53,7 @@ function pickConfig(agent: AgentRow) {
     : agent.agent_call_configs;
 }
 
-async function handle(req: NextRequest) {
-  if (!authorized(req)) {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  }
-
-  const stale = await isHeartbeatStale();
-  const redisHealth = await probeRedisQueueHealth({ closeAfter: true });
-  const redisOk = redisHealth.ok;
-  const heartbeatAgeSec = await heartbeatAgeMs().then((ms) =>
-    ms == null ? null : Math.round(ms / 1000)
-  );
-
-  // Worker + Redis healthy: skip entirely. Avoids N CRM scans per 2 minutes
-  // during call windows when nothing is wrong.
-  if (!stale && redisOk) {
-    return NextResponse.json({
-      skipped: "worker_healthy",
-      heartbeatAgeSec,
-      redis: redisHealth,
-    });
-  }
-
+async function loadOutboundAgents() {
   const supabase = createServiceClient();
   const { data: agents } = await supabase
     .from("agents")
@@ -83,12 +66,29 @@ async function handle(req: NextRequest) {
     .eq("status", "active")
     .eq("direction", "outbound")
     .returns<AgentRow[]>();
+  return { supabase, agents: agents ?? [] };
+}
 
+async function handle(req: NextRequest) {
+  if (!authorized(req)) {
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
+
+  const stale = await isHeartbeatStale();
+  const redisHealth = await probeRedisQueueHealth({ closeAfter: true });
+  const redisOk = redisHealth.ok;
+  const heartbeatAgeSec = await heartbeatAgeMs().then((ms) =>
+    ms == null ? null : Math.round(ms / 1000)
+  );
+  const infrastructureFailover = stale || !redisOk;
+
+  const { supabase, agents } = await loadOutboundAgents();
   const polled: string[] = [];
   const skippedAgents: string[] = [];
+  const coverageBackfill: string[] = [];
   const results: Awaited<ReturnType<typeof pollAgent>>[] = [];
 
-  for (const agent of agents ?? []) {
+  for (const agent of agents) {
     const config = pickConfig(agent);
     const workspace = agent.workspaces;
     if (!config?.daily_run_at || !workspace?.is_active) {
@@ -96,26 +96,49 @@ async function handle(req: NextRequest) {
       continue;
     }
 
+    const pollTickEligible = isAgentEligibleForPollTick({
+      timezone: workspace.timezone,
+      dailyRunAt: config.daily_run_at,
+      callWindowStart: config.call_window_start,
+      callWindowEnd: config.call_window_end,
+      callWindowDays: config.call_window_days,
+    });
+    const lacksPollCoverage = await agentLacksRecentPollCoverage(agent.id, {
+      db: supabase,
+    });
+
     if (
-      !isAgentEligibleForPollTick({
-        timezone: workspace.timezone,
-        dailyRunAt: config.daily_run_at,
-        callWindowStart: config.call_window_start,
-        callWindowEnd: config.call_window_end,
-        callWindowDays: config.call_window_days,
+      !shouldPollAgentInFailover({
+        infrastructureFailover,
+        pollTickEligible,
+        lacksPollCoverage,
       })
     ) {
       skippedAgents.push(agent.id);
       continue;
     }
 
-    // Failover mode (stale heartbeat or Redis down): poll every eligible agent.
-    const result = await pollAgent(agent.id, { skipRedis: true, triggerSource: "failover" });
+    if (!infrastructureFailover && lacksPollCoverage) {
+      coverageBackfill.push(agent.id);
+    }
+
+    const result = await pollAgent(agent.id, {
+      skipRedis: true,
+      triggerSource: "failover",
+    });
     results.push(result);
     polled.push(agent.id);
   }
 
   if (polled.length === 0) {
+    if (!infrastructureFailover) {
+      return NextResponse.json({
+        skipped: "worker_healthy",
+        heartbeatAgeSec,
+        redis: redisHealth,
+        skippedAgents,
+      });
+    }
     return NextResponse.json({
       skipped: "no_eligible_agents",
       heartbeatAgeSec,
@@ -124,7 +147,11 @@ async function handle(req: NextRequest) {
     });
   }
 
-  const trigger = !redisOk ? "redis_unavailable" : "heartbeat_stale";
+  const trigger = !redisOk
+    ? "redis_unavailable"
+    : stale
+      ? "heartbeat_stale"
+      : "poll_coverage_gap";
 
   return NextResponse.json({
     failover: true,
@@ -132,6 +159,7 @@ async function handle(req: NextRequest) {
     heartbeatAgeSec,
     redis: redisHealth,
     polled,
+    coverageBackfill,
     skippedAgents,
     results,
   });

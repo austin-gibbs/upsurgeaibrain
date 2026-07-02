@@ -18,7 +18,7 @@ import { tickScheduler } from "@/lib/engine/scheduler";
 import { reconcileStuckCalls } from "@/lib/engine/reconcile";
 import { resyncCallQueue } from "@/lib/queue/sweeper";
 import { probeRedisQueueHealth, waitForRedisQueueHealth } from "@/lib/queue/redis-health";
-import { writeHeartbeat } from "@/lib/engine/heartbeat";
+import { writeHeartbeat, writeRedisLiveness } from "@/lib/engine/heartbeat";
 
 const BOOTED_AT = Date.now();
 
@@ -73,6 +73,15 @@ async function main() {
     throw new Error("REDIS_URL is required in production — the worker cannot consume jobs without it");
   }
 
+  const schedulerMode =
+    process.env.USE_EXTERNAL_CRON === "true" ? "external cron (/api/cron/daily-poll)" : "internal 60s tick";
+  console.log(`[worker] scheduler mode: ${schedulerMode}`);
+  if (process.env.USE_EXTERNAL_CRON === "true") {
+    console.warn(
+      "[worker] USE_EXTERNAL_CRON=true — internal scheduler disabled; ensure /api/cron/daily-poll is configured in vercel.json"
+    );
+  }
+
   const healthServer = startHealthServer();
   const pollWorker = startPollWorker();
   const callWorker = startCallWorker();
@@ -85,8 +94,10 @@ async function main() {
       ? await waitForRedisQueueHealth()
       : await probeRedisQueueHealth();
     if (!health.ok) {
+      await writeRedisLiveness(false).catch(() => {});
       throw new Error(`Redis queue unhealthy: ${health.reason ?? "unknown"}`);
     }
+    await writeRedisLiveness(true).catch(() => {});
     await writeHeartbeat();
   };
 

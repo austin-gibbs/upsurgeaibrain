@@ -81,4 +81,62 @@ describe("isAgentEligibleForPollTick", () => {
       false
     );
   });
+
+  it("matches Nil Patel Probate window on a weekday", () => {
+    const nilPatel = {
+      timezone: "America/New_York",
+      dailyRunAt: "08:00",
+      callWindowStart: "11:00",
+      callWindowEnd: "19:00",
+      callWindowDays: [2, 3, 4, 5, 6] as number[],
+      isoDate: "2026-07-01", // Wednesday
+    };
+    assert.equal(
+      isAgentEligibleForPollTick({ ...nilPatel, nowHHMM: "10:59" }),
+      false
+    );
+    assert.equal(
+      isAgentEligibleForPollTick({ ...nilPatel, nowHHMM: "11:00" }),
+      true
+    );
+    assert.equal(
+      isAgentEligibleForPollTick({ ...nilPatel, nowHHMM: "18:59" }),
+      true
+    );
+    assert.equal(
+      isAgentEligibleForPollTick({ ...nilPatel, nowHHMM: "19:00" }),
+      true
+    );
+    assert.equal(
+      isAgentEligibleForPollTick({ ...nilPatel, nowHHMM: "19:01" }),
+      false
+    );
+  });
+
+  it("matches Diamond Seller Outgoing all-week window", () => {
+    const diamondSeller = {
+      timezone: "America/Los_Angeles",
+      dailyRunAt: "09:00",
+      callWindowStart: "09:00",
+      callWindowEnd: "20:00",
+      callWindowDays: [1, 2, 3, 4, 5, 6, 7] as number[],
+      isoDate: "2026-07-01",
+    };
+    assert.equal(
+      isAgentEligibleForPollTick({ ...diamondSeller, nowHHMM: "08:59" }),
+      false
+    );
+    assert.equal(
+      isAgentEligibleForPollTick({ ...diamondSeller, nowHHMM: "12:30" }),
+      true
+    );
+    assert.equal(
+      isAgentEligibleForPollTick({ ...diamondSeller, nowHHMM: "20:00" }),
+      true
+    );
+    assert.equal(
+      isAgentEligibleForPollTick({ ...diamondSeller, nowHHMM: "20:01" }),
+      false
+    );
+  });
 });

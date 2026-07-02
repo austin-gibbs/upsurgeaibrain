@@ -96,6 +96,9 @@ const CHECKS = [
   { table: "calls", column: "crm_error", migration: "0011" },
   { table: "call_queue_entries", column: "status", migration: "0012" },
   { table: "call_queue_entries", column: "queue_day", migration: "0012" },
+  { table: "engine_heartbeat", column: "scheduler_last_tick_at", migration: "0023" },
+  { table: "engine_heartbeat", column: "poll_worker_last_seen_at", migration: "0023" },
+  { table: "engine_heartbeat", column: "redis_last_ok", migration: "0023" },
 ];
 
 async function verifyViaManagementApi() {

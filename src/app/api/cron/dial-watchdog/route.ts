@@ -7,6 +7,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { bearerMatches } from "@/lib/secure";
 import { sendOpsAlert } from "@/lib/alerts";
 import { checkDialStalls, formatDialStallAlert } from "@/lib/engine/dial-watchdog";
+import { checkPollGaps, formatPollGapAlert } from "@/lib/engine/poll-watchdog";
 import { reconcileZombieDialingRows } from "@/lib/engine/call-queue";
 import { createServiceClient } from "@/lib/supabase/server";
 import { probeRedisQueueHealth } from "@/lib/queue/redis-health";
@@ -24,6 +25,7 @@ async function handle(req: NextRequest) {
   }
 
   const result = await checkDialStalls();
+  const pollGaps = await checkPollGaps();
   const redisHealth = await probeRedisQueueHealth({ closeAfter: true });
   const zombiesCleared = await reconcileZombieDialingRows(createServiceClient()).catch(
     () => 0
@@ -35,6 +37,8 @@ async function handle(req: NextRequest) {
       ? `\nRedis: *UNAVAILABLE* (${redisHealth.reason ?? "unknown"}) — failover drain should be active.`
       : "";
     alerted = await sendOpsAlert(formatDialStallAlert(result) + redisLine);
+  } else if (pollGaps.gaps.length > 0) {
+    alerted = await sendOpsAlert(formatPollGapAlert(pollGaps));
   } else if (!redisHealth.ok) {
     alerted = await sendOpsAlert(
       `:warning: *Redis queue unavailable* (${redisHealth.reason ?? "unknown"}). ` +
@@ -42,7 +46,7 @@ async function handle(req: NextRequest) {
     );
   }
 
-  return NextResponse.json({ ...result, redis: redisHealth, alerted, zombiesCleared });
+  return NextResponse.json({ ...result, pollGaps, redis: redisHealth, alerted, zombiesCleared });
 }
 
 export const GET = handle;
