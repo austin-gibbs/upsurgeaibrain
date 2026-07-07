@@ -28,6 +28,7 @@ export type TaskConfig = {
   assignee_label: string | null;
   due_offset_minutes: number;
   due_at_time: string | null;
+  min_duration_seconds: number;
   only_outcomes: string[] | null;
   post_call_webhook_enabled: boolean;
   post_call_webhook_url: string | null;
@@ -104,6 +105,7 @@ export function defaultTaskConfig(): TaskConfig {
     assignee_label: null,
     due_offset_minutes: 0,
     due_at_time: null,
+    min_duration_seconds: 0,
     only_outcomes: null,
     post_call_webhook_enabled: false,
     post_call_webhook_url: null,

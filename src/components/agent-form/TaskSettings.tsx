@@ -120,6 +120,12 @@ export function TaskSettings({
               }
             />
           </div>
+          <NumField
+            label="Minimum call duration (seconds)"
+            hint="0 = no minimum; tasks only created when call is at least this long"
+            value={cfg.min_duration_seconds}
+            onChange={(v) => onChange({ min_duration_seconds: v ?? 0 })}
+          />
           <div className="space-y-1.5 sm:col-span-2">
             <Label hint="leave all unchecked = every outcome makes a task">
               Only on these outcomes

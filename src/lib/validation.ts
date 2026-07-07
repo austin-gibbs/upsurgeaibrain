@@ -80,6 +80,7 @@ export const taskConfigSchema = z
       .union([z.string().regex(/^\d{1,2}:\d{2}$/), z.literal(""), z.null()])
       .default(null)
       .transform((v) => (v === "" ? null : v)),
+    min_duration_seconds: z.number().int().min(0).default(0),
     only_outcomes: z.array(callOutcomeSchema).nullable().default(null),
     post_call_webhook_enabled: z.boolean().default(false),
     post_call_webhook_url: z

@@ -27,6 +27,7 @@ import {
   syncTagsToCrm,
   type FinalizedBy,
 } from "./crm-writeback";
+import { parseAssignees, shouldCreateTask } from "./task-eligibility";
 import { completeQueueEntry } from "./call-queue";
 import {
   cancelRemainingChainedPhoneJobs,
@@ -232,7 +233,7 @@ export async function processRetellWebhook(
   let taskCreated = false;
   const { data: taskConfig } = await supabase
     .from("agent_task_configs").select("*").eq("agent_id", agent.id).maybeSingle<AgentTaskConfig>();
-  if (taskConfig?.enabled && shouldCreateTask(taskConfig, outcome)) {
+  if (taskConfig?.enabled && shouldCreateTask(taskConfig, outcome, parsed.durationSeconds)) {
     const name = taskConfig.name_template
       .replace("{contact_name}", contact.full_name ?? "Contact")
       .replace("{date}", today);
@@ -350,21 +351,9 @@ export async function processRetellWebhook(
   return { ok: true };
 }
 
-function shouldCreateTask(cfg: AgentTaskConfig, outcome: string): boolean {
-  if (!cfg.only_outcomes || cfg.only_outcomes.length === 0) return true;
-  return cfg.only_outcomes.includes(outcome as any);
-}
-
 function shouldDispatchWebhook(cfg: AgentTaskConfig, outcome: string): boolean {
   if (!cfg.post_call_webhook_only_outcomes || cfg.post_call_webhook_only_outcomes.length === 0) {
     return true;
   }
   return cfg.post_call_webhook_only_outcomes.includes(outcome as any);
-}
-
-// assignee_crm_id may hold a single CRM user id ("17") or several
-// comma/space-separated ids ("1,17"). Split so each listed user gets a task.
-function parseAssignees(raw: string | null): string[] {
-  if (!raw) return [];
-  return raw.split(/[,\s]+/).map((s) => s.trim()).filter(Boolean);
 }

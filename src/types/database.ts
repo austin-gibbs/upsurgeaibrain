@@ -213,6 +213,7 @@ export type Database = {
           due_at_time: string | null
           due_offset_minutes: number
           enabled: boolean
+          min_duration_seconds: number
           name_template: string
           only_outcomes: Database["public"]["Enums"]["call_outcome"][] | null
           pipeline_automation_enabled: boolean
@@ -243,6 +244,7 @@ export type Database = {
           due_at_time?: string | null
           due_offset_minutes?: number
           enabled?: boolean
+          min_duration_seconds?: number
           name_template?: string
           only_outcomes?: Database["public"]["Enums"]["call_outcome"][] | null
           pipeline_automation_enabled?: boolean
@@ -273,6 +275,7 @@ export type Database = {
           due_at_time?: string | null
           due_offset_minutes?: number
           enabled?: boolean
+          min_duration_seconds?: number
           name_template?: string
           only_outcomes?: Database["public"]["Enums"]["call_outcome"][] | null
           pipeline_automation_enabled?: boolean

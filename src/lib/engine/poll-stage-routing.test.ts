@@ -31,6 +31,7 @@ function makeTaskConfig(overrides: Partial<AgentTaskConfig> = {}): AgentTaskConf
     assignee_label: null,
     due_offset_minutes: 0,
     due_at_time: null,
+    min_duration_seconds: 0,
     only_outcomes: null,
     post_call_webhook_enabled: false,
     post_call_webhook_url: null,

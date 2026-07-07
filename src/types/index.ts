@@ -136,6 +136,8 @@ export interface AgentTaskConfig {
   /** Fixed task due time-of-day (HH:MM) in the workspace timezone. When set, it
    * overrides due_offset_minutes and pins the task to today at this time. */
   due_at_time: string | null;
+  /** When > 0, create CRM tasks only when call duration is >= this many seconds. */
+  min_duration_seconds: number;
   only_outcomes: CallOutcome[] | null;
   post_call_webhook_enabled: boolean;
   post_call_webhook_url: string | null;

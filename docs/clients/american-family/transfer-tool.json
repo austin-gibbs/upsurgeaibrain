@@ -1,0 +1,19 @@
+{
+  "_comment": "Live-transfer tool for the Policy PathFinder agent. This is a Retell LLM built-in 'transfer_call' tool — it is NOT created by the UpSurge provision spec. Add it to the agent's Retell LLM AFTER provisioning (Retell dashboard → the agent's LLM → Add function → Transfer call). The tool NAME must be exactly 'transfer_to_agent' to match the prompt.",
+  "type": "transfer_call",
+  "name": "transfer_to_agent",
+  "description": "Warm-transfer the caller to a licensed insurance agent. ONLY call this after the caller has given a clear, explicit 'yes' to being connected right now.",
+  "transfer_destination": {
+    "type": "predefined",
+    "number": "+14352887434"
+  },
+  "transfer_option": {
+    "type": "warm_transfer",
+    "_transfer_option_note": "Warm = the AI plays a short handoff to the agent before dropping off. Switch to {\"type\":\"cold_transfer\"} for a faster blind transfer if the team prefers.",
+    "public_handoff_option": {
+      "_note": "Whisper message spoken to the RECEIVING licensed agent so they know it's a consented quote lead. {{city}} is injected from the HighLevel City field.",
+      "prompt": "You're being connected to a homeowner in {{city}} who asked to be connected for a free home or cabin insurance quote. They've consented to the transfer — take it from here."
+    }
+  },
+  "_on_failure_note": "If the transfer fails or the line is busy, Retell returns control to the AI. The prompt handles this: the agent apologizes, captures a callback number, and ends — it does NOT re-attempt blindly."
+}

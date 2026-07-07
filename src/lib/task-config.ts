@@ -106,6 +106,8 @@ export function taskConfigFromRow(row: Record<string, unknown> | null | undefine
     due_offset_minutes:
       typeof row.due_offset_minutes === "number" ? row.due_offset_minutes : 0,
     due_at_time: str("due_at_time"),
+    min_duration_seconds:
+      typeof row.min_duration_seconds === "number" ? row.min_duration_seconds : 0,
     only_outcomes: Array.isArray(row.only_outcomes)
       ? (row.only_outcomes as string[])
       : null,
