@@ -190,3 +190,21 @@ UpSurge default so outcomes map to the classifier correctly.
 The HighLevel-sourced variables require the engine field-injection change (see README).
 Until that ships and HighLevel is connected, those variables resolve empty and Drew will
 simply ask for campus/program conversationally (the prompt already handles the empty case).
+
+### Live stopgap applied to the Retell agent (2026-07-06)
+
+On the live LLM (`llm_312fa160e0e74ed3a382e8a4b599`) the campus + Plant City program
+references were patched to ALSO include the raw HighLevel field ids, because the field
+name→id lookup was failing (missing `locations/customFields.readonly` OAuth scope, fixed in
+`src/lib/crm/highlevel-oauth.ts`). Exactly one side resolves per state, so it works before
+the scope fix (via id) and stays clean after (via name):
+
+- Interested campus: `{{location}}{{ujhzwirtpqf2jyqzpl7p}}`
+- Plant City program: `{{plant_city_interested_programs}}{{xuo9b07dm3iqirah0ecf}}`
+
+Observed field ids from Retell test call `call_2e7103813bf26f61e1320c86588`:
+`contact.location` → `ujhzwirtpqf2jyqzpl7p`; `contact.plant_city_interested_programs` →
+`xuo9b07dm3iqirah0ecf`. Houma + Baton Rouge program ids are unknown (not populated on the
+test contact) and will resolve by name once the scope fix is deployed + HighLevel reconnected.
+**After that deploy + reconnect, this stopgap can be reverted to plain `{{location}}` /
+`{{plant_city_interested_programs}}` if you want the prompt clean.**

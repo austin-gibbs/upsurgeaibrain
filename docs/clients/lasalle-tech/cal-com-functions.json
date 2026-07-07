@@ -1,25 +1,29 @@
 {
-  "_comment": "Cal.com booking tools for Drew (Plant City only, for now). These are Retell LLM 'general_tools'. They are NOT created by the UpSurge provision spec — add them to Drew's Retell LLM AFTER provisioning (see instructions below). The tool NAMES (check_availability, book_appointment) must match the function names used in the prompt. Houma + Baton Rouge get their own tools once those Cal.com calendars exist.",
+  "_comment": "Cal.com booking tools for Drew (Plant City). WIRED LIVE 2026-07-06 — copied verbatim from the existing Retell agent 'LaSalle Tech | Drew' (LLM llm_041218816fc635d280d96a75f965) into the new agent's LLM llm_312fa160e0e74ed3a382e8a4b599 via api.retellai.com PATCH. Same event_type_id (3159259) + same cal_api_keys, so bookings land on the same Plant City calendar. Named check_availability / book_appointment to match Drew's prompt. Kept end_call. Houma + Baton Rouge get their own tools once those Cal.com calendars exist.",
 
-  "_what_you_need_from_cal_com": {
-    "CAL_API_KEY": "A Cal.com API key for the LaSalle Tech / Plant City Cal.com account (Cal.com -> Settings -> Developer -> API Keys).",
-    "PLANT_CITY_EVENT_TYPE_ID": "The numeric Event Type ID of the Plant City admissions appointment in Cal.com (open the event type; the id is in the URL / API)."
-  },
+  "_status": "LIVE on llm_312fa160e0e74ed3a382e8a4b599 (Plant City). check_availability + book_appointment both present alongside end_call.",
 
-  "general_tools_to_add": [
+  "general_tools_added": [
     {
       "type": "check_availability_cal",
       "name": "check_availability",
-      "cal_api_key": "<CAL_API_KEY>",
-      "event_type_id": "<PLANT_CITY_EVENT_TYPE_ID>",
+      "description": "When users ask for availability, check the calendar and provide available slots.",
+      "cal_api_key": "<CAL_API_KEY_REDACTED>",
+      "event_type_id": 3159259,
       "timezone": "America/New_York"
     },
     {
       "type": "book_appointment_cal",
       "name": "book_appointment",
-      "cal_api_key": "<CAL_API_KEY>",
-      "event_type_id": "<PLANT_CITY_EVENT_TYPE_ID>",
-      "timezone": "America/New_York"
+      "description": "When users ask to book an appointment, book it on the calendar.",
+      "cal_api_key": "<CAL_API_KEY_REDACTED>",
+      "event_type_id": 3159259,
+      "timezone": "America/New_York",
+      "location_type": "integrations:daily",
+      "cal_fields": [
+        { "name": "name", "description": "attendee name", "type": "string", "required": true },
+        { "name": "email", "description": "attendee email", "type": "string", "required": true }
+      ]
     }
   ],
 

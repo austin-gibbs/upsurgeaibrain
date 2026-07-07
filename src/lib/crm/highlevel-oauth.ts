@@ -148,6 +148,10 @@ export function highLevelAuthorizeUrl(opts: {
     "opportunities.readonly",
     "opportunities.write",
     "locations.readonly",
+    // Read the location's custom-field definitions (id -> key/name) so contact
+    // custom fields (interested campus/program) resolve to readable dynamic-
+    // variable names instead of raw field ids. Required by getContactFieldValues.
+    "locations/customFields.readonly",
     "users.readonly",
     // Conversations scopes — required to log a playable external call entry
     // (search/create conversation + add outbound call log with recording).

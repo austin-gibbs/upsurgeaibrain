@@ -41,15 +41,45 @@ Typecheck passes (`npm run typecheck`). **Commit + push from Cursor and deploy t
 variables resolve empty and Drew simply asks for them conversationally (the prompt handles
 the empty case).
 
+## HighLevel custom-field injection — root cause + fix (2026-07-06)
+
+Symptom: on a test call Drew knew the contact's name but not their **interested campus** or
+**program**. Diagnosis (from the Retell test call's `retell_llm_dynamic_variables`): the values
+DO reach Retell, but keyed by **raw HighLevel field id** (e.g. `ujhzwirtpqf2jyqzpl7p` =
+"Plant City, Florida", `xuo9b07dm3iqirah0ecf` = "Medical Assistant") instead of readable names —
+so `{{location}}` / `{{plant_city_interested_programs}}` render empty. The name resolves because
+it's a hardcoded base variable.
+
+Cause: `getContactFieldValues` maps field id → readable name via `loadContactFieldDefs()`
+(`GET /locations/{id}/customFields`), which needs the **`locations/customFields.readonly`** OAuth
+scope. That scope was missing from `src/lib/crm/highlevel-oauth.ts`, so the definitions call 401s
+and every custom field falls back to its raw id.
+
+Fix (shipped in this branch): added `locations/customFields.readonly` to the OAuth scopes.
+**Deploy via Cursor, then RECONNECT HighLevel** in the app so the new token carries the scope.
+After that, the existing readable-name prompt resolves all four fields
+(`{{location}}`, `{{houma_interested_program}}`, `{{baton_rouge_interested_programs}}`,
+`{{plant_city_interested_programs}}`) with **no prompt change**.
+
+Stopgap already applied (Retell prompt, no deploy needed): campus + Plant City program now also
+reference the raw field ids (`{{location}}{{ujhzwirtpqf2jyqzpl7p}}`,
+`{{plant_city_interested_programs}}{{xuo9b07dm3iqirah0ecf}}`) so the Plant City path works right
+now; exactly one side resolves per state, so it stays correct after the scope fix. Houma + Baton
+Rouge programs resolve once the scope fix is deployed + HighLevel reconnected.
+
+## Cal.com booking — DONE (Plant City)
+
+Copied the two Cal.com tools verbatim from the existing Retell agent **"LaSalle Tech | Drew"**
+into the new agent's LLM: same **event type id 3159259** and same `cal_live_...` keys, so
+bookings land on the same Plant City calendar. Tools named `check_availability` /
+`book_appointment` to match Drew's prompt (see `cal-com-functions.json`).
+
 ## What I still need from you
 
-1. **Cal.com**: an API key for the Plant City Cal.com account + the **Plant City event type
-   ID** (so I can wire `check_availability` / `book_appointment`).
+1. **Deploy the OAuth-scope change** (Cursor → commit/push → Vercel) **then reconnect HighLevel**
+   so campus + all three program fields resolve by name for every campus.
 2. **Houma + Baton Rouge** Cal.com calendars (event type IDs) whenever they're ready — then
-   Drew books live for those campuses too.
-3. **Connect HighLevel** to the LaSalle Tech workspace in the app (you do this step).
-4. **Confirm the HighLevel custom-field keys** for interested campus + per-campus program so
-   the prompt variable names line up exactly (I'll verify via the console once connected).
+   Drew books live for those campuses too (today they hand off to a human rep).
 
 ## Live runbook (in order)
 
@@ -74,7 +104,7 @@ the empty case).
 | Timezone | America/New_York (EST). Note Houma/Baton Rouge are Central — 9–6 ET = 8–5 CT there |
 | Agent | "LaSalle Tech \| Drew AI Agent", outbound |
 | Agent enroll tag | `lasalleadmissions` |
-| Cadence | 1 call/day × 5 consecutive days (`cadence_day_gaps:[1]`, `max_attempts_per_contact:5`) |
+| Cadence | 1 call/day × 5 consecutive days, then 1 call/month × 12 months (`cadence_day_gaps:[1,1,1,1,1,30]`, `max_attempts_per_contact:17`) |
 | Call window | 09:00–18:00, all 7 days (so the 5-day run isn't broken by a weekend) |
 | Phone | new Retell number, area code 985 (Houma) |
 | Voice | 11labs-Adrian (swap in dashboard if desired) |
