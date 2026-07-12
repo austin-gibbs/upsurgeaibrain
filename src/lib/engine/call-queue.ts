@@ -488,7 +488,7 @@ export interface ActiveQueueRow {
   attempt_number: number;
   phone_numbers: string[];
   next_phone_index: number;
-  contacts: { full_name: string | null; phones: string[] } | null;
+  contacts: { full_name: string | null; phones: string[]; crm_contact_id: string } | null;
   agents: { name: string } | null;
 }
 
@@ -616,7 +616,7 @@ export async function listActiveQueueEntries(
   const { data } = await supabase
     .from("call_queue_entries")
     .select(
-      "id, agent_id, contact_id, status, position, scheduled_for, enqueued_at, started_at, call_id, attempt_number, phone_numbers, next_phone_index, contacts(full_name, phones), agents(name)"
+      "id, agent_id, contact_id, status, position, scheduled_for, enqueued_at, started_at, call_id, attempt_number, phone_numbers, next_phone_index, contacts(full_name, phones, crm_contact_id), agents(name)"
     )
     .eq("workspace_id", workspaceId)
     .in("status", ["pending", "dialing"])

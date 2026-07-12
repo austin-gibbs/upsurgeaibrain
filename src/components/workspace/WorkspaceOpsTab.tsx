@@ -1276,6 +1276,7 @@ function WorkspaceOpsTabInner({
         {agents.map((a) => {
           const cc = firstEmbed(a.agent_call_configs);
           const tc = firstEmbed(a.agent_task_configs);
+          const queued = queueByAgent[a.id] ?? 0;
           return (
             <Card
               key={a.id}
@@ -1298,6 +1299,9 @@ function WorkspaceOpsTabInner({
                   )}
                   <p className="mt-0.5 font-mono text-xs text-ink-400">
                     enroll: {a.enroll_tag ?? workspace.enroll_tag}
+                  </p>
+                  <p className="mt-1 text-xs font-medium text-ink-500">
+                    {queued} scheduled call{queued === 1 ? "" : "s"}
                   </p>
                 </div>
               </Link>
@@ -1323,6 +1327,12 @@ function WorkspaceOpsTabInner({
                   <Copy className="h-3.5 w-3.5" />
                   Duplicate
                 </Button>
+                <Link href={`/agents/${a.id}?tab=schedule`}>
+                  <Button variant="secondary" size="sm" className="gap-1.5">
+                    <CalendarClock className="h-3.5 w-3.5" />
+                    Schedule
+                  </Button>
+                </Link>
                 <Link
                   href={`/agents/${a.id}`}
                   className="text-ink-300 transition-colors hover:text-brand-500"
