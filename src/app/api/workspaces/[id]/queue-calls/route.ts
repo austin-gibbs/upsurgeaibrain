@@ -43,6 +43,14 @@ export async function GET(
 
   const agentId = req.nextUrl.searchParams.get("agentId");
   const rows = await listActiveQueueEntries(createServiceClient(), params.id);
+
+  // Per-agent totals always cover the full workspace so the Ops scope
+  // selector can surface which outbound agent has a populated queue.
+  const byAgent: Record<string, number> = {};
+  for (const row of rows) {
+    byAgent[row.agent_id] = (byAgent[row.agent_id] ?? 0) + 1;
+  }
+
   const filtered = agentId ? rows.filter((row) => row.agent_id === agentId) : rows;
   const entries = filtered.map((row) => {
     const phoneNumbers =
@@ -80,6 +88,7 @@ export async function GET(
       pending: entries.filter((e) => e.status === "pending").length,
       dialing: entries.filter((e) => e.status === "dialing").length,
     },
+    byAgent,
   });
 }
 
