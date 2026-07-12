@@ -418,12 +418,11 @@ describe("evaluateDialWindow with call days", () => {
 describe("msUntilCallWindowOpens with call days", () => {
   it("defers to the next allowed day when today is off", () => {
     const tz = "America/New_York";
-    const today = "2026-06-23"; // Tuesday
-    const weekday = isoWeekdayInTz(tz, today);
-    const offDay = weekday === 7 ? 6 : 7;
-    if (weekday === offDay) return;
-    assert.equal(isCallDayAllowed(tz, [offDay], today), false);
-    const ms = msUntilCallWindowOpens(tz, "09:00", "18:00", [offDay]);
+    const todayWd = isoWeekdayInTz(tz);
+    // Only allow a weekday that is not today so the live clock is always "off".
+    const onlyOtherDay = todayWd === 3 ? 4 : 3;
+    assert.equal(isCallDayAllowed(tz, [onlyOtherDay]), false);
+    const ms = msUntilCallWindowOpens(tz, "09:00", "18:00", [onlyOtherDay]);
     assert.ok(ms > 0);
   });
 });
@@ -431,12 +430,10 @@ describe("msUntilCallWindowOpens with call days", () => {
 describe("remainingWindowCapacity with call days", () => {
   it("returns zero on disallowed weekdays", () => {
     const tz = "America/New_York";
-    const today = "2026-06-23";
-    const weekday = isoWeekdayInTz(tz, today);
-    const offDay = weekday === 7 ? 6 : 7;
-    if (weekday === offDay) return;
+    const todayWd = isoWeekdayInTz(tz);
+    const onlyOtherDay = todayWd === 3 ? 4 : 3;
     assert.equal(
-      remainingWindowCapacity(tz, "09:00", "18:00", 60, [offDay]),
+      remainingWindowCapacity(tz, "09:00", "18:00", 60, [onlyOtherDay]),
       0
     );
   });

@@ -97,12 +97,20 @@ It's verified with `RETELL_WEBHOOK_SECRET`. Only `call_analyzed` events are proc
 
 ### Scheduling
 
-The worker process runs an internal 60-second scheduler tick by default. To drive it
-from an external cron instead (e.g. Vercel Cron), set `USE_EXTERNAL_CRON=true` and hit:
+The worker process runs an internal 30-second scheduler tick by default. Vercel Cron
+hitting `/api/cron/daily-poll` is a redundant backup (BullMQ poll job ids are idempotent).
+To disable the worker's internal loop intentionally, set `DISABLE_INTERNAL_SCHEDULER=true`
+and ensure the external cron is active:
 
 ```
 POST  {NEXT_PUBLIC_APP_URL}/api/cron/daily-poll
 Authorization: Bearer {CRON_SECRET}
+```
+
+Health-check every outbound agent under a workspace:
+
+```
+npx tsx scripts/poll-doctor.ts <workspaceId>
 ```
 
 ---

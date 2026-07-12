@@ -7,19 +7,40 @@ import {
 } from "./cadence";
 
 /** Poll cadence during the call window — one BullMQ job per bucket per agent. */
-export const POLL_INTERVAL_MINUTES = 2;
+export const POLL_INTERVAL_SECONDS = 30;
 
-/** Floor HH:MM to the start of its 2-minute poll bucket (e.g. 09:01 → 09:00). */
-export function pollBucketFromHHMM(hhmm: string): string {
-  const [hRaw, mRaw] = hhmm.split(":");
-  const h = Number(hRaw);
-  const m = Number(mRaw);
-  if (!Number.isFinite(h) || !Number.isFinite(m)) return hhmm;
-  const bucketMinute = Math.floor(m / POLL_INTERVAL_MINUTES) * POLL_INTERVAL_MINUTES;
-  return `${String(h).padStart(2, "0")}:${String(bucketMinute).padStart(2, "0")}`;
+/** Max age without a poll_runs row before coverage is considered missing (~3 buckets). */
+export const POLL_COVERAGE_MAX_AGE_MS = POLL_INTERVAL_SECONDS * 3 * 1000;
+
+/** Current HH:MM:SS in a timezone, for 30-second poll buckets. */
+export function nowHHMMSSInTz(timezone: string): string {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: timezone,
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).formatToParts(new Date());
+  const val = (t: string) => parts.find((p) => p.type === t)?.value ?? "00";
+  const h = val("hour");
+  const m = val("minute");
+  const s = val("second");
+  return `${h}:${m}:${s}`;
 }
 
-/** Deterministic BullMQ poll job id for one agent + local day + 2-minute bucket. */
+/** Floor HH:MM:SS to the start of its 30-second poll bucket (e.g. 09:00:45 → 09:00:30). */
+export function pollBucketFromHHMMSS(hhmmss: string): string {
+  const [hRaw, mRaw, sRaw] = hhmmss.split(":");
+  const h = Number(hRaw);
+  const m = Number(mRaw);
+  const s = Number(sRaw ?? 0);
+  if (!Number.isFinite(h) || !Number.isFinite(m) || !Number.isFinite(s)) return hhmmss;
+  const bucketSecond =
+    Math.floor(s / POLL_INTERVAL_SECONDS) * POLL_INTERVAL_SECONDS;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(bucketSecond).padStart(2, "0")}`;
+}
+
+/** Deterministic BullMQ poll job id for one agent + local day + 30-second bucket. */
 export function buildPollJobId(agentId: string, today: string, bucket: string): string {
   return `poll:${agentId}:${today}:${bucket}`;
 }
@@ -50,14 +71,14 @@ export function isAgentEligibleForPollTick(input: PollTickEligibilityInput): boo
   return true;
 }
 
-/** Resolve local date + 2-minute bucket for poll job id construction. */
+/** Resolve local date + 30-second bucket for poll job id construction. */
 export function pollJobBucketForTimezone(
   timezone: string,
-  nowHHMM?: string
+  nowHHMMSS?: string
 ): { today: string; bucket: string } {
-  const hhmm = nowHHMM ?? nowHHMMInTz(timezone);
+  const hhmmss = nowHHMMSS ?? nowHHMMSSInTz(timezone);
   return {
     today: todayInTz(timezone),
-    bucket: pollBucketFromHHMM(hhmm),
+    bucket: pollBucketFromHHMMSS(hhmmss),
   };
 }

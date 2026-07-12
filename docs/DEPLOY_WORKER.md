@@ -79,7 +79,7 @@ browser anon-only set). All are documented in `.env.example`.
 | `HIGHLEVEL_CLIENT_ID` / `HIGHLEVEL_CLIENT_SECRET` | if any HighLevel agents | OAuth refresh |
 | `NEXT_PUBLIC_APP_URL` | yes | set to `https://upsurgeprosai.com` |
 | `NODE_ENV` | yes | `production` (enables the REDIS_URL startup guard) |
-| `USE_EXTERNAL_CRON` | no | leave unset/`false` so the worker runs its own scheduler |
+| `DISABLE_INTERNAL_SCHEDULER` | no | leave unset/`false` so the worker runs its own scheduler. External `/api/cron/daily-poll` remains a safe backup. Legacy `USE_EXTERNAL_CRON` no longer disables the internal loop. |
 
 `RETELL_WEBHOOK_SECRET` and `CRON_SECRET` are only needed on Vercel, not the worker.
 
@@ -90,9 +90,10 @@ browser anon-only set). All are documented in `.env.example`.
 call workers still must run to consume jobs). It's idempotent with the worker's internal
 scheduler (duplicate poll jobIds are ignored). Requires `CRON_SECRET` on Vercel.
 
-If you prefer a single scheduler, you can instead set `USE_EXTERNAL_CRON=true` on the
-worker and rely solely on this cron — but the default (worker scheduler on, cron as
-backup) is the most resilient.
+If you prefer a single scheduler (Vercel cron only), set `DISABLE_INTERNAL_SCHEDULER=true` on the
+worker and rely solely on `/api/cron/daily-poll` — but the default (worker scheduler on, cron as
+backup) is the most resilient. Legacy `USE_EXTERNAL_CRON=true` is ignored for disabling the
+internal loop.
 
 ## Step 6 — Safe cutover (run both, then stop local)
 

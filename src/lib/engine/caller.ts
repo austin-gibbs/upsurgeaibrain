@@ -13,6 +13,7 @@ import { appRetellWebhookUrl } from "@/lib/retell/webhook-bind";
 import { buildDynamicVariables } from "./memory";
 import { todayInTz, evaluateDialWindow } from "./cadence";
 import { cancelQueueEntries, markQueueDialing } from "./call-queue";
+import { isContactEnrolledForAgent } from "./enrollment";
 import { getCallQueue, type CallJob } from "@/lib/queue/queues";
 import type { Agent, AgentMemory, Contact, Workspace } from "@/types";
 
@@ -31,6 +32,18 @@ export class OutsideCallWindowError extends Error {
     this.name = "OutsideCallWindowError";
     this.deferMs = deferMs;
     this.reason = reason;
+  }
+}
+
+/** Thrown when a scheduled dial fires after the contact lost its enroll tag. */
+export class ContactNotEnrolledError extends Error {
+  readonly contactId: string;
+  readonly enrollTag: string;
+  constructor(contactId: string, enrollTag: string) {
+    super(`contact ${contactId} no longer carries enroll tag ${enrollTag}`);
+    this.name = "ContactNotEnrolledError";
+    this.contactId = contactId;
+    this.enrollTag = enrollTag;
   }
 }
 
@@ -104,6 +117,16 @@ export async function placeCall(job: CallJob): Promise<{ callId: string; retellC
   const { data: workspace } = await supabase
     .from("workspaces").select("*").eq("id", agent.workspace_id).single<Workspace>();
   if (!workspace) throw new Error(`workspace ${agent.workspace_id} not found`);
+
+  // Refuse dials for contacts unenrolled since the last poll (tag removed in CRM).
+  if (!job.testMode && !isContactEnrolledForAgent(contact, agent, workspace)) {
+    await cancelQueueEntries(supabase, {
+      agentId: agent.id,
+      contactId: contact.id,
+    });
+    const enrollTag = agent.enroll_tag ?? workspace.enroll_tag ?? "unknown";
+    throw new ContactNotEnrolledError(contact.id, enrollTag);
+  }
 
   // ── Authoritative call-window guard ────────────────────────────────────────
   // This is the LAST line of defense before a dial, and it runs BEFORE the

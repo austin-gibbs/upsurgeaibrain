@@ -4,8 +4,8 @@
 //   npm run worker        (dev, watches for changes)
 //   npm run worker:prod   (production)
 //
-// Starts the BullMQ workers (poll + call) and a 60s scheduler tick that
-// enqueues 2-minute-bucketed polls during each agent's call window.
+// Starts the BullMQ workers (poll + call) and a 30s non-overlapping scheduler
+// loop that enqueues 30-second-bucketed polls during each agent's call window.
 // =====================================================================
 process.env.UPSURGE_WORKER = "true";
 
@@ -15,6 +15,10 @@ import { createServer, type Server } from "node:http";
 import { startPollWorker } from "@/lib/queue/workers/poll.worker";
 import { startCallWorker } from "@/lib/queue/workers/call.worker";
 import { tickScheduler } from "@/lib/engine/scheduler";
+import {
+  describeSchedulerMode,
+  shouldRunInternalScheduler,
+} from "@/lib/engine/worker-scheduler";
 import { reconcileStuckCalls } from "@/lib/engine/reconcile";
 import { resyncCallQueue } from "@/lib/queue/sweeper";
 import { probeRedisQueueHealth, waitForRedisQueueHealth } from "@/lib/queue/redis-health";
@@ -73,12 +77,19 @@ async function main() {
     throw new Error("REDIS_URL is required in production — the worker cannot consume jobs without it");
   }
 
-  const schedulerMode =
-    process.env.USE_EXTERNAL_CRON === "true" ? "external cron (/api/cron/daily-poll)" : "internal 60s tick";
-  console.log(`[worker] scheduler mode: ${schedulerMode}`);
-  if (process.env.USE_EXTERNAL_CRON === "true") {
+  // Internal scheduler stays on by default. External cron is a redundant
+  // backup (idempotent BullMQ job ids). Opt out only via
+  // DISABLE_INTERNAL_SCHEDULER=true. Legacy USE_EXTERNAL_CRON no longer
+  // disables the worker loop.
+  const runInternalScheduler = shouldRunInternalScheduler();
+  console.log(`[worker] scheduler mode: ${describeSchedulerMode()}`);
+  if (!runInternalScheduler) {
     console.warn(
-      "[worker] USE_EXTERNAL_CRON=true — internal scheduler disabled; ensure /api/cron/daily-poll is configured in vercel.json"
+      "[worker] DISABLE_INTERNAL_SCHEDULER=true — internal scheduler off; ensure /api/cron/daily-poll is configured in vercel.json"
+    );
+  } else if (process.env.USE_EXTERNAL_CRON === "true") {
+    console.warn(
+      "[worker] USE_EXTERNAL_CRON=true is legacy and ignored for disabling the internal scheduler; both can coexist safely"
     );
   }
 
@@ -128,18 +139,35 @@ async function main() {
   }
   scheduleHeartbeat();
 
-  // Internal scheduler: tick every minute. (Disable and use external cron
-  // instead by setting USE_EXTERNAL_CRON=true.)
-  let timer: NodeJS.Timeout | null = null;
-  if (process.env.USE_EXTERNAL_CRON !== "true") {
-    timer = setInterval(async () => {
-      try {
-        const { enqueued } = await tickScheduler();
-        if (enqueued.length) console.log("[scheduler] enqueued polls:", enqueued);
-      } catch (e) {
-        console.error("[scheduler] tick error:", e);
-      }
-    }, 60_000);
+  // Internal scheduler: non-overlapping 30s loop. If a tick is still running
+  // when the next interval fires, skip stacking — the following tick picks up.
+  const SCHEDULER_INTERVAL_MS = 30_000;
+  let schedulerTimer: NodeJS.Timeout | null = null;
+  let schedulerTickInFlight = false;
+
+  const runSchedulerTick = async () => {
+    if (schedulerTickInFlight) return;
+    schedulerTickInFlight = true;
+    try {
+      const { enqueued } = await tickScheduler();
+      if (enqueued.length) console.log("[scheduler] enqueued polls:", enqueued);
+    } catch (e) {
+      console.error("[scheduler] tick error:", e);
+    } finally {
+      schedulerTickInFlight = false;
+    }
+  };
+
+  const scheduleNextSchedulerTick = () => {
+    schedulerTimer = setTimeout(async () => {
+      await runSchedulerTick();
+      scheduleNextSchedulerTick();
+    }, SCHEDULER_INTERVAL_MS);
+  };
+
+  if (runInternalScheduler) {
+    void runSchedulerTick();
+    scheduleNextSchedulerTick();
   }
 
   // Self-heal sweep: every 2 minutes, finalize calls stuck in `dialing`
@@ -180,7 +208,8 @@ async function main() {
     console.log("[worker] shutting down…");
     if (heartbeatTimer) clearTimeout(heartbeatTimer);
     heartbeatTimer = null;
-    if (timer) clearInterval(timer);
+    if (schedulerTimer) clearTimeout(schedulerTimer);
+    schedulerTimer = null;
     if (reconcileTimer) clearInterval(reconcileTimer);
     reconcileTimer = null;
     if (sweepTimer) clearInterval(sweepTimer);

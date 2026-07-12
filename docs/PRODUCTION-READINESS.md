@@ -36,7 +36,7 @@ CALL_WORKER_RATE_DURATION_MS=1000
 
 | Route | Schedule | Notes |
 | --- | --- | --- |
-| `/api/cron/daily-poll` | `*/1 * * * *` | Redundant scheduler tick (idempotent poll job IDs) |
+| `/api/cron/daily-poll` | `*/1 * * * *` | Backup scheduler tick (idempotent 30-second poll job IDs) |
 | `/api/cron/poll-fallback` | `*/2 * * * *` | Polls when worker/Redis unhealthy **or** poll coverage is missing in-window |
 | `/api/cron/drain-queue` | `*/1 * * * *` | Postgres drain when worker stall / Redis down |
 | `/api/cron/dial-watchdog` | `*/5 * * * *` | Ops alert for dial stalls **and** poll coverage gaps |
@@ -47,14 +47,17 @@ Requires `CRON_SECRET` on Vercel.
 
 | Setting | Required | Notes |
 | --- | --- | --- |
-| Start command | `npm run worker:prod` | Runs poll + call workers and internal scheduler |
+| Start command | `npm run worker:prod` | Runs poll + call workers and internal 30s scheduler loop |
 | `REDIS_URL` | Yes (prod) | Worker throws on boot if missing in production |
-| `USE_EXTERNAL_CRON` | No / `false` | Leave unset so the worker's 60s scheduler runs. Set `true` only if `/api/cron/daily-poll` is confirmed active on Vercel |
+| `USE_EXTERNAL_CRON` | No | Legacy. No longer disables the internal scheduler; external cron can run as a backup alongside the worker |
+| `DISABLE_INTERNAL_SCHEDULER` | No / `false` | Leave unset so the worker's 30s non-overlapping scheduler runs. Set `true` only if you intentionally rely solely on `/api/cron/daily-poll` |
 | Supabase service role + encryption key | Yes | Same as Vercel app |
 
 Apply migration `0023_engine_liveness.sql` before deploying liveness-aware failover code.
 
-On boot the worker logs `scheduler mode: internal 60s tick` or warns when external cron is expected.
+On boot the worker logs `scheduler mode: internal 30s non-overlapping loop…` or warns when `DISABLE_INTERNAL_SCHEDULER=true`.
+
+After deploy, confirm `poll_runs` shows `trigger_source = worker` for every active in-window outbound agent within ~90 seconds, and that dials only occur inside each agent's configured call window.
 
 ## Audit remediation status (2026-06-28)
 

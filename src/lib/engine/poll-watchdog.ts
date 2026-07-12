@@ -151,10 +151,10 @@ export async function checkPollGaps(opts?: {
 }
 
 export function formatPollGapAlert(result: PollWatchdogResult): string {
-  const coverageMin = Math.round(POLL_COVERAGE_MAX_AGE_MS / 60_000);
+  const coverageSec = Math.round(POLL_COVERAGE_MAX_AGE_MS / 1000);
   const lines = [
     ":rotating_light: *Poll coverage gap detected*",
-    `No poll_runs in the last ~${coverageMin} minutes during open call windows.`,
+    `No poll_runs in the last ~${coverageSec} seconds during open call windows.`,
     "",
   ];
 

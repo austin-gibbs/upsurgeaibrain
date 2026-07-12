@@ -8,10 +8,10 @@ import {
 } from "./poll-coverage";
 
 describe("pollCoverageCutoffIso", () => {
-  it("subtracts the coverage window from now", () => {
+  it("subtracts the 90-second coverage window from now", () => {
     const now = Date.parse("2026-07-01T15:00:00.000Z");
     const cutoff = pollCoverageCutoffIso(now, POLL_COVERAGE_MAX_AGE_MS);
-    assert.equal(cutoff, "2026-07-01T14:55:00.000Z");
+    assert.equal(cutoff, "2026-07-01T14:58:30.000Z");
   });
 });
 

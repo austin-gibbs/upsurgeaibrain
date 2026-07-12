@@ -20,6 +20,7 @@
     "db:verify-schema": "node scripts/verify-schema.mjs",
     "worker": "tsx watch worker/index.ts",
     "worker:prod": "tsx worker/index.ts",
+    "poll:doctor": "tsx scripts/poll-doctor.ts",
     "report:fulfillment": "tsx scripts/fulfillment-report.ts",
     "provision:agent": "tsx scripts/provision-agent.ts"
   },

@@ -5,8 +5,8 @@
 # reconcile + queue self-heal sweeps, and a /health endpoint.
 #
 # Setup: Railway -> New Service -> deploy from the GitHub repo, then add the
-# env vars listed in docs/DEPLOY_WORKER.md. Keep USE_EXTERNAL_CRON unset/false
-# so the worker runs its own 60s scheduler tick.
+# env vars listed in docs/DEPLOY_WORKER.md. Keep DISABLE_INTERNAL_SCHEDULER unset/false
+# so the worker runs its own 30s scheduler tick. External Vercel cron is a safe backup.
 
 [build]
 builder = "NIXPACKS"

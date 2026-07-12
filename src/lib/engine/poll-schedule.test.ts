@@ -1,29 +1,32 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
-  POLL_INTERVAL_MINUTES,
+  POLL_INTERVAL_SECONDS,
+  POLL_COVERAGE_MAX_AGE_MS,
   buildPollJobId,
   isAgentEligibleForPollTick,
-  pollBucketFromHHMM,
+  pollBucketFromHHMMSS,
 } from "./poll-schedule";
 
-describe("pollBucketFromHHMM", () => {
-  it("floors minutes to 2-minute buckets", () => {
-    assert.equal(POLL_INTERVAL_MINUTES, 2);
-    assert.equal(pollBucketFromHHMM("09:00"), "09:00");
-    assert.equal(pollBucketFromHHMM("09:01"), "09:00");
-    assert.equal(pollBucketFromHHMM("09:02"), "09:02");
-    assert.equal(pollBucketFromHHMM("09:03"), "09:02");
-    assert.equal(pollBucketFromHHMM("09:58"), "09:58");
-    assert.equal(pollBucketFromHHMM("09:59"), "09:58");
+describe("pollBucketFromHHMMSS", () => {
+  it("floors seconds to 30-second buckets", () => {
+    assert.equal(POLL_INTERVAL_SECONDS, 30);
+    assert.equal(POLL_COVERAGE_MAX_AGE_MS, 90_000);
+    assert.equal(pollBucketFromHHMMSS("09:00:00"), "09:00:00");
+    assert.equal(pollBucketFromHHMMSS("09:00:15"), "09:00:00");
+    assert.equal(pollBucketFromHHMMSS("09:00:29"), "09:00:00");
+    assert.equal(pollBucketFromHHMMSS("09:00:30"), "09:00:30");
+    assert.equal(pollBucketFromHHMMSS("09:00:45"), "09:00:30");
+    assert.equal(pollBucketFromHHMMSS("09:00:59"), "09:00:30");
+    assert.equal(pollBucketFromHHMMSS("09:01:00"), "09:01:00");
   });
 });
 
 describe("buildPollJobId", () => {
   it("keys jobs to agent, local date, and bucket", () => {
     assert.equal(
-      buildPollJobId("agent-1", "2026-06-30", "09:02"),
-      "poll:agent-1:2026-06-30:09:02"
+      buildPollJobId("agent-1", "2026-06-30", "09:00:30"),
+      "poll:agent-1:2026-06-30:09:00:30"
     );
   });
 });
@@ -109,6 +112,46 @@ describe("isAgentEligibleForPollTick", () => {
     );
     assert.equal(
       isAgentEligibleForPollTick({ ...nilPatel, nowHHMM: "19:01" }),
+      false
+    );
+  });
+
+  it("matches Nil Patel Circle Prospecting Sunday 3pm–7pm window", () => {
+    const circle = {
+      timezone: "America/New_York",
+      dailyRunAt: "15:00",
+      callWindowStart: "15:00",
+      callWindowEnd: "19:00",
+      callWindowDays: [2, 3, 4, 5, 6, 7] as number[],
+      isoDate: "2026-07-12", // Sunday
+    };
+    assert.equal(
+      isAgentEligibleForPollTick({ ...circle, nowHHMM: "14:59" }),
+      false
+    );
+    assert.equal(
+      isAgentEligibleForPollTick({ ...circle, nowHHMM: "15:00" }),
+      true
+    );
+    assert.equal(
+      isAgentEligibleForPollTick({ ...circle, nowHHMM: "17:30" }),
+      true
+    );
+    assert.equal(
+      isAgentEligibleForPollTick({ ...circle, nowHHMM: "19:00" }),
+      true
+    );
+    assert.equal(
+      isAgentEligibleForPollTick({ ...circle, nowHHMM: "19:01" }),
+      false
+    );
+    // Sunday excluded still blocks even inside clock window
+    assert.equal(
+      isAgentEligibleForPollTick({
+        ...circle,
+        callWindowDays: [2, 3, 4, 5, 6],
+        nowHHMM: "16:00",
+      }),
       false
     );
   });

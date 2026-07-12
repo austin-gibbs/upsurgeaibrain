@@ -2,11 +2,11 @@
 // Scheduler — enqueues a poll job for every active outbound agent that is
 // inside its configured calling window.
 //
-// Designed to be invoked once per minute, either by:
-//   - the worker process's internal interval (worker/index.ts), or
+// Designed to be invoked every 30 seconds, either by:
+//   - the worker process's internal loop (worker/index.ts), or
 //   - an external cron hitting /api/cron/daily-poll (Vercel Cron, etc.).
-// Idempotent: poll job ids are keyed to agent + local date + 2-minute bucket,
-// so ticks at 09:00 and 09:01 share one job while 09:02 gets the next.
+// Idempotent: poll job ids are keyed to agent + local date + 30-second bucket,
+// so ticks in the same bucket share one job while the next bucket gets another.
 // =====================================================================
 import { createServiceClient } from "@/lib/supabase/server";
 import { getPollQueue } from "@/lib/queue/queues";

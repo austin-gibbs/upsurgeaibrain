@@ -1,12 +1,10 @@
 // Poll coverage helpers — detect agents missing recent poll_runs during open windows.
 import { createServiceClient } from "@/lib/supabase/server";
-import { POLL_INTERVAL_MINUTES } from "./poll-schedule";
+import { POLL_COVERAGE_MAX_AGE_MS } from "./poll-schedule";
 
 type DbClient = ReturnType<typeof createServiceClient>;
 
-/** Max age without a poll_runs row before coverage is considered missing. */
-export const POLL_COVERAGE_MAX_AGE_MS =
-  (POLL_INTERVAL_MINUTES * 2 + 1) * 60 * 1000;
+export { POLL_COVERAGE_MAX_AGE_MS };
 
 export function pollCoverageCutoffIso(
   nowMs: number = Date.now(),

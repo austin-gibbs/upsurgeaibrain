@@ -2,7 +2,7 @@
 import { Worker } from "bullmq";
 import { getRedis } from "../connection";
 import { CALL_QUEUE, getCallQueue, type CallJob } from "../queues";
-import { placeCall, OutsideCallWindowError } from "@/lib/engine/caller";
+import { placeCall, OutsideCallWindowError, ContactNotEnrolledError } from "@/lib/engine/caller";
 import {
   claimQueueEntryById,
   claimQueueEntryForDial,
@@ -159,6 +159,13 @@ export function startCallWorker(): Worker<CallJob> {
       try {
         return await placeCall(job.data);
       } catch (err) {
+        if (err instanceof ContactNotEnrolledError) {
+          if (claimedQueueEntryId) {
+            await revertQueueClaim(supabase, { id: claimedQueueEntryId });
+          }
+          console.log(`[call.worker] ${err.message} — skipping dial`);
+          return { skipped: true, reason: "unenrolled" };
+        }
         // placeCall refuses to dial outside the window (defense in depth). Treat
         // that as a deferral, not a failure, so the contact is never dropped.
         if (err instanceof OutsideCallWindowError) {

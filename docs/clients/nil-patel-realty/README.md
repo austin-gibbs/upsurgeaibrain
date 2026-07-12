@@ -18,8 +18,8 @@ from `.env.local` and the existing Nil Patel Realty workspace. Landed as **draft
 | Outbound number | **+1 470‑333‑7394** |
 | App agent row | `fafbdf14-5a00-49e2-90ac-bb2064aa5d37` |
 | Workspace | `28803e2d-a78d-4377-a718-824c58116151` (Nil Patel Realty, FUB) |
-| Enroll tag | `upsurge.circle.ai` |
-| Status | `draft` (activation not blocked — CRM inherited) |
+| Enroll tag | `upsurge.circleprospecting.ai` |
+| Status | `active` |
 
 **Cal.com booking: ✅ wired (2026-06-30).** Copied the Probate agent's exact `check_availability_cal`
 + `book_appointment_cal` tools onto Ava's LLM (`llm_890e5bf05337343fac7239956d10`) — same Cal.com
@@ -39,9 +39,9 @@ the prompt safely defaults to outbound and self-corrects to inbound from the cal
 > case have the inbound path pass `call_direction:"inbound"`. A single Retell agent has one begin
 > message (outbound-oriented), so for a flawless inbound greeting prefer the dedicated inbound agent.
 
-**Remaining before go-live:** (6) verify prompt/voice in Retell → (8) tag FUB contacts
-`upsurge.circle.ai` → (9) test one call → (10) activate. The provisioning steps below are kept
-for reference / re-runs.
+**Go-live:** Tag FUB contacts with **`upsurge.circleprospecting.ai`** only. Older doc tags
+(`upsurge.circle.ai`, `nilpatelcircleprospecting`) are obsolete and will not enroll contacts.
+The provisioning steps below are kept for reference / re-runs.
 
 ## Files
 
@@ -57,10 +57,10 @@ for reference / re-runs.
 | Voice | `11labs-Grace` (warm, natural female; swap in Retell — alts: `11labs-Hailey`, `11labs-Sloane`) |
 | Objective | Find buyers, surface referrals, uncover goals, book a 15-min consult |
 | CRM | Inherits the workspace's **existing Follow Up Boss** connection |
-| **Enroll tag** | `nilpatelcircleprospecting` — tag a contact with this in FUB to enroll them |
+| **Enroll tag** | `upsurge.circleprospecting.ai` — tag a contact with this exact string in FUB to enroll them |
 | Booking | Live Cal.com (`check_availability_cal` / `book_appointment_cal`), wired after provisioning |
-| Call days | **Tue–Sat** (`call_window_days: [2,3,4,5,6]`) |
-| Call window | **1:00pm–7:00pm ET** (workspace timezone America/New_York) |
+| Call days | **Tue–Sun** (`call_window_days: [2,3,4,5,6,7]`) |
+| Call window | **3:00pm–7:00pm ET** (workspace timezone America/New_York) |
 | Max attempts | **77**, then terminal |
 | Cadence | Attempts **1–20 weekly**, **21–50 every 21 days**, **51–77 every 38 days** |
 
@@ -75,7 +75,7 @@ exactly (verified programmatically):
 - Attempts 50→77: 38-day spacing
 - After attempt 77: contact is terminal (no more calls)
 
-If a computed next-call date lands on a Sunday or Monday (non-call days), the poller simply
+If a computed next-call date lands on a Monday (non-call day for this agent), the poller simply
 rolls the contact to the next allowed day (Tuesday) — spacing is a floor, not an exact date.
 
 ## Provisioning steps (run locally in the UpSurge repo — needs `.env.local` + network)
@@ -132,16 +132,18 @@ the Nil Patel Realty Cal.com **15-minute consultation** event:
 (Mirror exactly how the "Mia" agent's Cal.com functions are configured. Provide the Cal.com
 event link / API key in the function config.)
 
-**8. Enroll contacts in Follow Up Boss** — apply the tag **`nilpatelcircleprospecting`** to any
+**8. Enroll contacts in Follow Up Boss** — apply the tag **`upsurge.circleprospecting.ai`** to any
 FUB contact you want Ava to call. The engine inherits the workspace's existing FUB connection,
 syncs tagged contacts, and starts the cadence. (No new FUB setup needed.)
 
-**9. Test** — tag one real contact, confirm a single dial happens inside the Tue–Sat 1–7pm ET
+**9. Test** — tag one real contact, confirm a single dial happens inside the Tue–Sun 3–7pm ET
 window and that the outcome writes back to FUB.
 
 **10. Activate** — once verified, flip the agent to active via the `/admin` console (or set
-`activate: true` in the spec and re-run). The scheduler then polls daily and dials enrolled
-contacts on the configured cadence.
+`activate: true` in the spec and re-run). The scheduler then polls every 30s during the call
+window and dials enrolled contacts on the configured cadence.
+
+**Health check:** `npx tsx scripts/poll-doctor.ts 28803e2d-a78d-4377-a718-824c58116151`
 
 ## Notes
 
