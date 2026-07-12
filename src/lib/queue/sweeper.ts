@@ -18,6 +18,7 @@
 // =====================================================================
 import { createServiceClient } from "@/lib/supabase/server";
 import { getCallQueue } from "./queues";
+import { sanitizeBullmqJobId } from "./job-id";
 import { probeRedisQueueHealth } from "./redis-health";
 import { msUntilQueueSlot, todayInTz } from "@/lib/engine/cadence";
 import { resolveQueueDialTarget } from "@/lib/engine/multi-phone";
@@ -162,8 +163,9 @@ export async function resyncCallQueue(opts?: { limit?: number }): Promise<SweepR
   let skipped = 0;
 
   for (const row of rows) {
-    const jobId =
-      row.bullmq_job_id ?? `${row.agent_id}:${row.contact_id}:${row.queue_day}`;
+    const jobId = sanitizeBullmqJobId(
+      row.bullmq_job_id ?? `${row.agent_id}-${row.contact_id}-${row.queue_day}`
+    );
 
     // Already has a live job → nothing to heal. Completed/failed jobs are not
     // in liveJobIds, so Postgres pending rows get rebuilt below.

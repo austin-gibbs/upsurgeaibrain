@@ -35,8 +35,8 @@ export async function chainNextPhoneDial(params: {
 
   const nextPhoneIndex = params.phoneIndex + 1;
   const baseJobId =
-    entry.bullmq_job_id?.replace(/:p\d+$/, "") ??
-    `${entry.agent_id}:${entry.contact_id}:${entry.queue_day}`;
+    entry.bullmq_job_id?.replace(/[:-]p\d+$/, "") ??
+    `${entry.agent_id}-${entry.contact_id}-${entry.queue_day}`;
   const nextJobId = bullmqJobIdForPhone(baseJobId, nextPhoneIndex);
   const delayMs = Math.max(params.dripSeconds, 1) * 1000;
   const scheduledFor = new Date(Date.now() + delayMs).toISOString();

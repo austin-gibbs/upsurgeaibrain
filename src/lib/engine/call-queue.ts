@@ -350,7 +350,7 @@ export async function reconcileUnenrolledQueueOnPoll(
 
   if (!params.skipRedis && process.env.REDIS_URL) {
     const jobIds = staleRows.map(
-      (row) => row.bullmq_job_id ?? `${params.agentId}:${row.contact_id}:${row.queue_day}`
+      (row) => row.bullmq_job_id ?? `${params.agentId}-${row.contact_id}-${row.queue_day}`
     );
     await removeCallJobsByIds(jobIds);
   }

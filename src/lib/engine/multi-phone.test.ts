@@ -111,14 +111,14 @@ describe("phone sequence decisions", () => {
 
 describe("bullmq job ids", () => {
   it("appends phone index for chained dials", () => {
-    assert.equal(bullmqJobIdForPhone("agent:contact:2026-06-30", 0), "agent:contact:2026-06-30");
-    assert.equal(bullmqJobIdForPhone("agent:contact:2026-06-30", 2), "agent:contact:2026-06-30:p2");
+    assert.equal(bullmqJobIdForPhone("agent:contact:2026-06-30", 0), "agent-contact-2026-06-30");
+    assert.equal(bullmqJobIdForPhone("agent:contact:2026-06-30", 2), "agent-contact-2026-06-30-p2");
   });
 
   it("lists remaining chained job ids", () => {
     assert.deepEqual(
       chainedPhoneJobIds("agent:contact:day", 0, 3),
-      ["agent:contact:day:p1", "agent:contact:day:p2"]
+      ["agent-contact-day-p1", "agent-contact-day-p2"]
     );
   });
 });

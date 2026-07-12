@@ -40,9 +40,12 @@ export function pollBucketFromHHMMSS(hhmmss: string): string {
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(bucketSecond).padStart(2, "0")}`;
 }
 
-/** Deterministic BullMQ poll job id for one agent + local day + 30-second bucket. */
+/** Deterministic BullMQ poll job id for one agent + local day + 30-second bucket.
+ * BullMQ 5 forbids `:` in custom ids, so the HH:MM:SS bucket is compacted.
+ */
 export function buildPollJobId(agentId: string, today: string, bucket: string): string {
-  return `poll:${agentId}:${today}:${bucket}`;
+  const compactBucket = bucket.replace(/:/g, "");
+  return `poll-${agentId}-${today}-${compactBucket}`;
 }
 
 export interface PollTickEligibilityInput {

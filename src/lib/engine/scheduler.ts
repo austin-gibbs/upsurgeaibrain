@@ -10,6 +10,7 @@
 // =====================================================================
 import { createServiceClient } from "@/lib/supabase/server";
 import { getPollQueue } from "@/lib/queue/queues";
+import { sanitizeBullmqJobId } from "@/lib/queue/job-id";
 import { writeSchedulerLiveness } from "./heartbeat";
 import {
   buildPollJobId,
@@ -82,7 +83,7 @@ export async function tickScheduler(): Promise<{ enqueued: string[] }> {
     const { today, bucket } = pollJobBucketForTimezone(workspace.timezone);
     candidates.push({
       agentId: agent.id,
-      jobId: buildPollJobId(agent.id, today, bucket),
+      jobId: sanitizeBullmqJobId(buildPollJobId(agent.id, today, bucket)),
     });
   }
 

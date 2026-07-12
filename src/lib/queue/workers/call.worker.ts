@@ -52,7 +52,7 @@ async function deferDial(
 
   await getCallQueue().add("dial", job, {
     delay,
-    jobId: `defer:${job.agentId}:${job.contactId}`,
+    jobId: `defer-${job.agentId}-${job.contactId}`,
   });
 
   const supabase = createServiceClient();

@@ -324,7 +324,7 @@ export async function pollAgent(
   for (let i = 0; i < capped.length; i++) {
     const contact = capped[i];
     const delay = baseDelay + i * config.drip_seconds * 1000;
-    const baseJobId = `${agentId}:${contact.id}:${today}`;
+    const baseJobId = `${agentId}-${contact.id}-${today}`;
     const scheduledFor = new Date(Date.now() + delay).toISOString();
 
     const attempt = buildDialAttempt({
@@ -477,7 +477,7 @@ export async function enqueueContactsNow(
     const contact = toQueue[i];
     const slot = basePosition + i;
     const delay = baseDelay + slot * config.drip_seconds * 1000;
-    const baseJobId = `manual:${agentId}:${contact.id}:${today}`;
+    const baseJobId = `manual-${agentId}-${contact.id}-${today}`;
     const scheduledFor = new Date(Date.now() + delay).toISOString();
 
     try {
@@ -529,7 +529,7 @@ export async function enqueueContactsNow(
       // Drop any scheduled poll jobs for these contacts so manual queue
       // doesn't double-dial alongside today's poll batch.
       for (const contact of toQueue) {
-        const pollJobId = `${agentId}:${contact.id}:${today}`;
+        const pollJobId = `${agentId}-${contact.id}-${today}`;
         const pollJob = await queue.getJob(pollJobId);
         if (pollJob) await pollJob.remove().catch(() => {});
       }

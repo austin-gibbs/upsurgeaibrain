@@ -28,9 +28,10 @@ export function dialPhonesForAttempt(
   return [phones[0]];
 }
 
-/** Deterministic BullMQ job id — chained phones append `:p{n}`. */
+/** Deterministic BullMQ job id — chained phones append `-p{n}` (no `:`). */
 export function bullmqJobIdForPhone(baseJobId: string, phoneIndex: number): string {
-  return phoneIndex === 0 ? baseJobId : `${baseJobId}:p${phoneIndex}`;
+  const base = baseJobId.replace(/:/g, "-");
+  return phoneIndex === 0 ? base : `${base}-p${phoneIndex}`;
 }
 
 /** Chained phone job ids to remove when an attempt ends early. */

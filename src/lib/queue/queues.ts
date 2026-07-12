@@ -8,6 +8,7 @@
 // =====================================================================
 import { Queue } from "bullmq";
 import { closeRedis, getRedis } from "./connection";
+import { sanitizeBullmqJobId } from "./job-id";
 
 export const POLL_QUEUE = "agent-poll";
 export const CALL_QUEUE = "outbound-call";
@@ -73,7 +74,8 @@ export async function addCallJobsBulk(specs: CallJobSpec[]): Promise<void> {
 
   // Replace any stale jobs with the same id (e.g. operator re-queues).
   for (const spec of specs) {
-    const existing = await queue.getJob(spec.jobId);
+    const jobId = sanitizeBullmqJobId(spec.jobId);
+    const existing = await queue.getJob(jobId);
     if (existing) await existing.remove().catch(() => {});
   }
 
@@ -81,7 +83,7 @@ export async function addCallJobsBulk(specs: CallJobSpec[]): Promise<void> {
     specs.map((s) => ({
       name: "dial",
       data: s.data,
-      opts: { delay: s.delay, jobId: s.jobId },
+      opts: { delay: s.delay, jobId: sanitizeBullmqJobId(s.jobId) },
     }))
   );
 }
@@ -105,7 +107,7 @@ export async function removeCallJobsByIds(jobIds: string[]): Promise<number> {
   const queue = getCallQueue();
   let removed = 0;
   for (const jobId of jobIds) {
-    const existing = await queue.getJob(jobId);
+    const existing = await queue.getJob(sanitizeBullmqJobId(jobId));
     if (!existing) continue;
     try {
       await existing.remove();

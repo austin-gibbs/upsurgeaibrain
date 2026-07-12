@@ -81,7 +81,7 @@ export async function rescheduleAgentCallQueue(agentId: string): Promise<number>
     );
     const safeDelay = Math.max(delay, 0);
     const scheduledFor = new Date(Date.now() + safeDelay).toISOString();
-    const jobId = `${agentId}:${job.contactId}:${today}`;
+    const jobId = `${agentId}-${job.contactId}-${today}`;
 
     const { data: queueRow } = await supabase
       .from("call_queue_entries")

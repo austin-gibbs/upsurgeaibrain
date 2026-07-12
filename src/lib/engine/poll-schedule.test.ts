@@ -26,7 +26,7 @@ describe("buildPollJobId", () => {
   it("keys jobs to agent, local date, and bucket", () => {
     assert.equal(
       buildPollJobId("agent-1", "2026-06-30", "09:00:30"),
-      "poll:agent-1:2026-06-30:09:00:30"
+      "poll-agent-1-2026-06-30-090030"
     );
   });
 });
