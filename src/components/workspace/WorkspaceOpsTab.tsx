@@ -37,6 +37,11 @@ import {
   enrollTagConflict,
   suggestDuplicateEnrollTag,
 } from "@/lib/agents/enroll-tag";
+import {
+  loadPersistedOpsAgent,
+  pickDefaultOpsAgentId,
+  savePersistedOpsAgent,
+} from "@/lib/workspaces/ops-agent-scope";
 
 type ContactRow = {
   id: string;
@@ -373,8 +378,10 @@ function WorkspaceOpsTabInner({
     pending: 0,
     dialing: 0,
   });
+  const [queueByAgent, setQueueByAgent] = useState<Record<string, number>>({});
   const [queueLoading, setQueueLoading] = useState(true);
   const [opsAgentId, setOpsAgentId] = useState("");
+  const [opsAgentReady, setOpsAgentReady] = useState(false);
   const [testAgentId, setTestAgentId] = useState<string>("");
   const [duplicateSource, setDuplicateSource] = useState<OpsData["agents"][number] | null>(
     null
@@ -439,21 +446,48 @@ function WorkspaceOpsTabInner({
   }));
 
   const outboundAgents = agents.filter((a) => a.direction === "outbound");
-  const defaultOpsAgentId =
-    outboundAgents.find((a) => a.status === "active")?.id ??
-    outboundAgents[0]?.id ??
-    "";
   const selectedOpsAgent =
-    outboundAgents.find((a) => a.id === opsAgentId) ?? outboundAgents[0] ?? null;
+    outboundAgents.find((a) => a.id === opsAgentId) ??
+    (opsAgentReady ? outboundAgents[0] ?? null : null);
   const selectedEnrollTag = selectedOpsAgent
     ? effectiveEnrollTag(selectedOpsAgent.enroll_tag, workspace.enroll_tag)
     : workspace.enroll_tag;
 
+  // Prefer persisted scope, else the outbound agent with the most queued
+  // contacts (then most enrolled) so a populated queue isn't hidden behind
+  // the oldest active agent in multi-outbound workspaces.
   useEffect(() => {
-    if (!opsAgentId && defaultOpsAgentId) {
-      setOpsAgentId(defaultOpsAgentId);
+    if (opsAgentReady || outboundAgents.length === 0) return;
+
+    const persisted = loadPersistedOpsAgent(workspaceId);
+    if (persisted && outboundAgents.some((a) => a.id === persisted)) {
+      setOpsAgentId(persisted);
+      setOpsAgentReady(true);
+      return;
     }
-  }, [defaultOpsAgentId, opsAgentId]);
+
+    // Wait for the first queue fetch so byAgent can rank populated agents.
+    if (queueLoading) return;
+
+    const bestId = pickDefaultOpsAgentId(
+      outboundAgents,
+      workspace.enroll_tag,
+      contacts,
+      queueByAgent
+    );
+    if (bestId) {
+      setOpsAgentId(bestId);
+      setOpsAgentReady(true);
+    }
+  }, [
+    opsAgentReady,
+    outboundAgents,
+    workspaceId,
+    workspace.enroll_tag,
+    contacts,
+    queueLoading,
+    queueByAgent,
+  ]);
 
   const fetchQueue = useCallback(async () => {
     try {
@@ -463,11 +497,13 @@ function WorkspaceOpsTabInner({
       const data = (await res.json()) as {
         entries: QueueEntry[];
         summary: QueueSummary;
+        byAgent?: Record<string, number>;
       };
       setQueueEntries(data.entries ?? []);
       setQueueSummary(
         data.summary ?? { total: 0, pending: 0, dialing: 0 }
       );
+      if (data.byAgent) setQueueByAgent(data.byAgent);
     } catch {
       /* keep last good snapshot */
     } finally {
@@ -492,6 +528,8 @@ function WorkspaceOpsTabInner({
     setOpsAgentId(nextId);
     setTestAgentId(nextId);
     setSelectedIds(new Set());
+    setOpsAgentReady(true);
+    savePersistedOpsAgent(workspaceId, nextId);
   }
 
   function closeDuplicateDialog() {
@@ -1094,11 +1132,14 @@ function WorkspaceOpsTabInner({
                 value={opsAgentId}
                 onChange={(e) => setOpsAgent(e.target.value)}
               >
-                {outboundAgents.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.name} ({a.status})
-                  </option>
-                ))}
+                {outboundAgents.map((a) => {
+                  const queued = queueByAgent[a.id] ?? 0;
+                  return (
+                    <option key={a.id} value={a.id}>
+                      {a.name} ({a.status}) — {queued} queued
+                    </option>
+                  );
+                })}
               </Select>
             </div>
           </div>
@@ -1166,8 +1207,7 @@ function WorkspaceOpsTabInner({
                       id="test-agent"
                       value={activeTestAgentId}
                       onChange={(e) => {
-                        setTestAgentId(e.target.value);
-                        setOpsAgentId(e.target.value);
+                        setOpsAgent(e.target.value);
                       }}
                     >
                       {callableAgents.map((a) => (
@@ -1236,6 +1276,7 @@ function WorkspaceOpsTabInner({
         {agents.map((a) => {
           const cc = firstEmbed(a.agent_call_configs);
           const tc = firstEmbed(a.agent_task_configs);
+          const queued = queueByAgent[a.id] ?? 0;
           return (
             <Card
               key={a.id}
@@ -1258,6 +1299,9 @@ function WorkspaceOpsTabInner({
                   )}
                   <p className="mt-0.5 font-mono text-xs text-ink-400">
                     enroll: {a.enroll_tag ?? workspace.enroll_tag}
+                  </p>
+                  <p className="mt-1 text-xs font-medium text-ink-500">
+                    {queued} scheduled call{queued === 1 ? "" : "s"}
                   </p>
                 </div>
               </Link>
@@ -1283,6 +1327,12 @@ function WorkspaceOpsTabInner({
                   <Copy className="h-3.5 w-3.5" />
                   Duplicate
                 </Button>
+                <Link href={`/agents/${a.id}?tab=schedule`}>
+                  <Button variant="secondary" size="sm" className="gap-1.5">
+                    <CalendarClock className="h-3.5 w-3.5" />
+                    Schedule
+                  </Button>
+                </Link>
                 <Link
                   href={`/agents/${a.id}`}
                   className="text-ink-300 transition-colors hover:text-brand-500"
@@ -1443,8 +1493,7 @@ function WorkspaceOpsTabInner({
                 <Select
                   value={activeTestAgentId}
                   onChange={(e) => {
-                    setTestAgentId(e.target.value);
-                    setOpsAgentId(e.target.value);
+                    setOpsAgent(e.target.value);
                   }}
                   className="w-44"
                   aria-label="Agent for test calls"

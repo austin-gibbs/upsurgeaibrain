@@ -3,7 +3,16 @@
 import { Suspense, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ArrowLeft, Phone, Settings, KeyRound } from "lucide-react";
+import {
+  ArrowLeft,
+  CalendarClock,
+  Clock,
+  ExternalLink,
+  KeyRound,
+  ListOrdered,
+  Phone,
+  Settings,
+} from "lucide-react";
 import { CallSettings } from "@/components/agent-form/CallSettings";
 import { TaskSettings } from "@/components/agent-form/TaskSettings";
 import { PostCallWebhookSettings } from "@/components/agent-form/PostCallWebhookSettings";
@@ -43,6 +52,7 @@ import {
   Select,
   SubTabs,
   cn,
+  EmptyState,
 } from "@/components/ui";
 
 type Direction = "inbound" | "outbound";
@@ -79,9 +89,83 @@ type CallRow = {
   completed_at: string | null;
 };
 
-type AgentTab = "overview" | "call" | "crm" | "tasks" | "history";
+type ScheduledCallRow = {
+  id: string;
+  contactId: string;
+  contactName: string;
+  phone: string | null;
+  phoneIndex: number;
+  phoneCount: number;
+  status: "pending" | "dialing";
+  position: number;
+  scheduledFor: string | null;
+  enqueuedAt: string;
+  startedAt: string | null;
+  callId: string | null;
+  attemptNumber: number;
+  crmUrl: string | null;
+};
 
-const AGENT_TABS: AgentTab[] = ["overview", "call", "crm", "tasks", "history"];
+type AgentTab = "overview" | "schedule" | "call" | "crm" | "tasks" | "history";
+
+const AGENT_TABS: AgentTab[] = [
+  "overview",
+  "schedule",
+  "call",
+  "crm",
+  "tasks",
+  "history",
+];
+
+function todayInTz(timezone: string): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+}
+
+function localDateFromIso(iso: string | null, timezone: string): string | null {
+  if (!iso) return null;
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date(iso));
+}
+
+function formatScheduleDate(iso: string | null, timezone: string): string {
+  if (!iso) return "Unscheduled";
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone,
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+  }).format(new Date(iso));
+}
+
+function formatScheduleTime(iso: string | null, timezone: string): string {
+  if (!iso) return "—";
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone,
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(new Date(iso));
+}
+
+function timezoneAbbrev(timezone: string): string {
+  try {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: timezone,
+      timeZoneName: "short",
+    }).formatToParts(new Date());
+    return parts.find((p) => p.type === "timeZoneName")?.value ?? timezone;
+  } catch {
+    return timezone;
+  }
+}
 
 function parseAgentTab(value: string | null): AgentTab {
   if (value && AGENT_TABS.includes(value as AgentTab)) {
@@ -113,6 +197,7 @@ function AgentDetail({
 
   const [agent, setAgent] = useState<Agent | null>(null);
   const [calls, setCalls] = useState<CallRow[]>([]);
+  const [scheduledCalls, setScheduledCalls] = useState<ScheduledCallRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [actionMsg, setActionMsg] = useState<string | null>(null);
@@ -175,6 +260,7 @@ function AgentDetail({
         if (d.error) return setError(d.error);
         setAgent(d.agent);
         setCalls(d.calls);
+        setScheduledCalls(d.scheduledCalls ?? []);
         setDirection(d.agent.direction ?? "outbound");
         setRetellId(d.agent.retell_agent_id ?? "");
         setFromNumber(d.agent.retell_from_number ?? "");
@@ -518,6 +604,18 @@ function AgentDetail({
 
   const isInbound = direction === "inbound";
   const tc = normalizeTaskConfigList(agent.agent_task_configs)[0];
+  const today = todayInTz(workspaceTimezone);
+  const todayScheduled = scheduledCalls.filter(
+    (call) => localDateFromIso(call.scheduledFor, workspaceTimezone) === today
+  );
+  const waitingScheduled = scheduledCalls.filter((call) => call.status === "pending");
+  const dialingScheduled = scheduledCalls.filter((call) => call.status === "dialing");
+  const nextScheduled = [...waitingScheduled].sort((a, b) => {
+    const aTime = a.scheduledFor ? new Date(a.scheduledFor).getTime() : Number.MAX_SAFE_INTEGER;
+    const bTime = b.scheduledFor ? new Date(b.scheduledFor).getTime() : Number.MAX_SAFE_INTEGER;
+    return aTime - bTime;
+  })[0];
+  const tzLabel = timezoneAbbrev(workspaceTimezone);
 
   const linkageReady = isInbound
     ? Boolean(agent.retell_agent_id && agent.has_retell_credentials)
@@ -585,6 +683,11 @@ function AgentDetail({
       <SubTabs
         items={[
           { id: "overview", label: "Overview" },
+          {
+            id: "schedule",
+            label: "Scheduled calls",
+            badge: scheduledCalls.length || undefined,
+          },
           { id: "call", label: "Call & Cadence" },
           { id: "crm", label: "CRM & Integrations" },
           { id: "tasks", label: "Tasks & Automations" },
@@ -670,6 +773,205 @@ function AgentDetail({
         </Card>
       </div>
       )}
+
+      {agentTab === "schedule" &&
+        (!isInbound ? (
+        <div className="space-y-6">
+          <div className="grid gap-4 md:grid-cols-3">
+            <Card className="p-5">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-ink-400">
+                    Active queue
+                  </p>
+                  <p className="mt-2 text-3xl font-semibold text-ink-900">
+                    {scheduledCalls.length}
+                  </p>
+                  <p className="mt-1 text-sm text-ink-500">
+                    Waiting or currently dialing
+                  </p>
+                </div>
+                <IconBadge icon={ListOrdered} tone="sky" className="h-11 w-11" />
+              </div>
+            </Card>
+            <Card className="p-5">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-ink-400">
+                    Scheduled today
+                  </p>
+                  <p className="mt-2 text-3xl font-semibold text-ink-900">
+                    {todayScheduled.length}
+                  </p>
+                  <p className="mt-1 text-sm text-ink-500">
+                    Workspace timezone ({tzLabel})
+                  </p>
+                </div>
+                <IconBadge icon={CalendarClock} tone="mint" className="h-11 w-11" />
+              </div>
+            </Card>
+            <Card className="p-5">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-ink-400">
+                    Next dial
+                  </p>
+                  <p className="mt-2 text-lg font-semibold text-ink-900">
+                    {nextScheduled
+                      ? `${formatScheduleTime(nextScheduled.scheduledFor, workspaceTimezone)} ${tzLabel}`
+                      : "None queued"}
+                  </p>
+                  <p className="mt-1 text-sm text-ink-500">
+                    {nextScheduled
+                      ? formatScheduleDate(nextScheduled.scheduledFor, workspaceTimezone)
+                      : "Run a poll to fill this schedule"}
+                  </p>
+                </div>
+                <IconBadge icon={Clock} tone="violet" className="h-11 w-11" />
+              </div>
+            </Card>
+          </div>
+
+          <Card className="overflow-hidden p-0">
+            <div className="flex flex-wrap items-start justify-between gap-4 border-b border-ink-100 bg-gradient-to-r from-brand-50/70 to-accent-sky-bg/60 px-6 py-5">
+              <div>
+                <div className="flex items-center gap-2">
+                  <CalendarClock className="h-5 w-5 text-brand-600" />
+                  <h2 className="text-base font-semibold text-ink-900">
+                    Scheduled calls
+                  </h2>
+                </div>
+                <p className="mt-1 max-w-2xl text-sm text-ink-600">
+                  Live queue for this agent. These rows are the calls the engine
+                  is waiting to place, ordered by scheduled time and queue position.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2 text-xs">
+                <Badge tone="blue">{waitingScheduled.length} waiting</Badge>
+                <Badge tone="amber">{dialingScheduled.length} on call</Badge>
+              </div>
+            </div>
+
+            {scheduledCalls.length === 0 ? (
+              <div className="p-8">
+                <EmptyState
+                  icon={CalendarClock}
+                  title="No calls scheduled for this agent"
+                  description="Run a poll from the workspace Operations page to enqueue contacts for this agent. Once queued, contacts will appear here with their scheduled dial time."
+                />
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-surface">
+                    <tr className="border-b border-ink-100 text-left text-xs font-medium uppercase tracking-wide text-ink-400">
+                      <th className="w-16 px-5 py-3">#</th>
+                      <th className="px-5 py-3">Contact</th>
+                      <th className="px-5 py-3">Scheduled</th>
+                      <th className="px-5 py-3">Status</th>
+                      <th className="px-5 py-3">Attempt</th>
+                      <th className="px-5 py-3 text-right">Open</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-ink-100">
+                    {[...scheduledCalls]
+                      .sort((a, b) => {
+                        const aTime = a.scheduledFor
+                          ? new Date(a.scheduledFor).getTime()
+                          : Number.MAX_SAFE_INTEGER;
+                        const bTime = b.scheduledFor
+                          ? new Date(b.scheduledFor).getTime()
+                          : Number.MAX_SAFE_INTEGER;
+                        if (aTime !== bTime) return aTime - bTime;
+                        return a.position - b.position;
+                      })
+                      .map((call) => {
+                        const isToday =
+                          localDateFromIso(call.scheduledFor, workspaceTimezone) === today;
+                        return (
+                          <tr
+                            key={call.id}
+                            className="transition-colors hover:bg-ink-50/70"
+                          >
+                            <td className="px-5 py-4 font-mono text-xs text-ink-400">
+                              {call.position}
+                            </td>
+                            <td className="px-5 py-4">
+                              <div className="font-medium text-ink-900">
+                                {call.crmUrl ? (
+                                  <a
+                                    href={call.crmUrl}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="inline-flex items-center gap-1.5 transition-colors hover:text-brand-600"
+                                  >
+                                    {call.contactName}
+                                    <ExternalLink className="h-3.5 w-3.5" />
+                                  </a>
+                                ) : (
+                                  call.contactName
+                                )}
+                              </div>
+                              {call.phone && (
+                                <div className="mt-0.5 font-mono text-xs text-ink-400">
+                                  {call.phone}
+                                  {call.phoneCount > 1 && (
+                                    <span className="ml-2 font-sans text-ink-500">
+                                      ({call.phoneIndex + 1} of {call.phoneCount})
+                                    </span>
+                                  )}
+                                </div>
+                              )}
+                            </td>
+                            <td className="px-5 py-4">
+                              <div className="font-medium text-ink-800">
+                                {formatScheduleTime(call.scheduledFor, workspaceTimezone)}{" "}
+                                {tzLabel}
+                              </div>
+                              <div className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-ink-500">
+                                <span>
+                                  {formatScheduleDate(call.scheduledFor, workspaceTimezone)}
+                                </span>
+                                {isToday && <Badge tone="green">Today</Badge>}
+                              </div>
+                            </td>
+                            <td className="px-5 py-4">
+                              <Badge tone={call.status === "dialing" ? "amber" : "blue"}>
+                                {call.status === "dialing" ? "On call" : "Waiting"}
+                              </Badge>
+                            </td>
+                            <td className="px-5 py-4 text-ink-600">
+                              #{call.attemptNumber}
+                            </td>
+                            <td className="px-5 py-4 text-right">
+                              {call.crmUrl ? (
+                                <a
+                                  href={call.crmUrl}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="inline-flex items-center gap-1.5 rounded-xl border border-ink-200 px-3 py-1.5 text-xs font-medium text-ink-700 transition-colors hover:border-brand-200 hover:bg-brand-50 hover:text-brand-700"
+                                >
+                                  Contact
+                                  <ExternalLink className="h-3.5 w-3.5" />
+                                </a>
+                              ) : (
+                                <span className="text-xs text-ink-400">No CRM link</span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </Card>
+        </div>
+        ) : (
+          <Card className="p-6 text-sm text-ink-500">
+            Inbound agents don&apos;t schedule outbound calls.
+          </Card>
+        ))}
 
       {agentTab === "crm" && (
       <div className="space-y-6">

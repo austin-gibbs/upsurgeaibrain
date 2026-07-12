@@ -21,6 +21,8 @@ import {
   normalizeHHMM,
   normalizeTaskConfigList,
 } from "@/lib/hhmm";
+import { listActiveQueueEntries } from "@/lib/engine/call-queue";
+import { crmContactUrl } from "@/lib/crm/url";
 import { rescheduleAgentCallQueue } from "@/lib/queue/reschedule";
 import { prepareTaskConfigForSave } from "@/lib/task-config";
 import { defaultTaskConfig } from "@/components/agent-form/types";
@@ -89,7 +91,7 @@ export async function GET(
         "retell_agent_id, retell_from_number, crm_provider, crm_status, " +
         "crm_credentials_encrypted, retell_credentials_encrypted, created_at, " +
         "agent_call_configs(*), agent_task_configs(*), " +
-        "workspaces(timezone, crm_provider, crm_status, crm_credentials_encrypted)"
+        "workspaces(timezone, crm_provider, crm_status, crm_account_url, crm_credentials_encrypted)"
     )
     .eq("id", params.id)
     .single<
@@ -98,6 +100,7 @@ export async function GET(
           timezone: string;
           crm_provider: "followupboss" | "highlevel" | null;
           crm_status: string | null;
+          crm_account_url: string | null;
           crm_credentials_encrypted: string | null;
         } | null;
       }
@@ -143,6 +146,41 @@ export async function GET(
     )
     .eq("agent_id", params.id);
 
+  const queueRows = await listActiveQueueEntries(createServiceClient(), agentRow.workspace_id);
+  const scheduledCalls = queueRows
+    .filter((row) => row.agent_id === params.id)
+    .map((row) => {
+      const phoneNumbers =
+        row.phone_numbers?.length > 0
+          ? row.phone_numbers
+          : row.contacts?.phones ?? [];
+      const phoneIndex = row.next_phone_index ?? 0;
+      const crmProvider = effectiveCrmProvider ?? workspaces?.crm_provider ?? null;
+      return {
+        id: row.id,
+        contactId: row.contact_id,
+        contactName: row.contacts?.full_name ?? "Unknown contact",
+        phone: phoneNumbers[phoneIndex] ?? phoneNumbers[0] ?? null,
+        phoneIndex,
+        phoneCount: phoneNumbers.length,
+        status: row.status,
+        position: row.position,
+        scheduledFor: row.scheduled_for,
+        enqueuedAt: row.enqueued_at,
+        startedAt: row.started_at,
+        callId: row.call_id,
+        attemptNumber: row.attempt_number,
+        crmUrl:
+          crmProvider && row.contacts?.crm_contact_id
+            ? crmContactUrl(
+                crmProvider,
+                workspaces?.crm_account_url ?? null,
+                row.contacts.crm_contact_id
+              )
+            : null,
+      };
+    });
+
   const normalizedAgent = {
     ...publicAgent(agentRow),
     agent_call_configs: normalizeCallConfigList(agentRow.agent_call_configs),
@@ -159,6 +197,7 @@ export async function GET(
     workspaceHasCrmCredentials: usesWorkspaceCrm,
     calls: calls ?? [],
     pipelineStageMap: pipelineStageMap ?? [],
+    scheduledCalls,
   });
 }
 
