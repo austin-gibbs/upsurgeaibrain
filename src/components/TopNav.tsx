@@ -44,6 +44,7 @@ export type PageNav = {
     | "dashboard"
     | "operations"
     | "agent"
+    | "home"
     | "workspaces"
     | "new-workspace"
     | "new-agent"
@@ -313,6 +314,17 @@ function WorkspaceSwitcher({
             </span>
             Home
           </Link>
+          <Link
+            href="/workspaces"
+            role="menuitem"
+            onClick={() => setOpen(false)}
+            className="flex items-center gap-2.5 border-b border-ink-100 px-3 py-2.5 text-[13px] font-semibold text-ink-700 transition-colors hover:bg-surface-2 hover:text-ink-900"
+          >
+            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-accent-violet-bg text-accent-violet-icon">
+              <LayoutGrid className="h-4 w-4" strokeWidth={1.75} />
+            </span>
+            Workspaces
+          </Link>
 
           <div className="max-h-72 overflow-y-auto p-1.5">
             {!workspaces && (
@@ -550,10 +562,16 @@ function Rail({ nav }: { nav?: PageNav }) {
         ) : (
           <>
             <div className="px-2.5 pb-1.5 pt-3.5 text-[10.5px] font-bold uppercase tracking-[0.07em] text-ink-400">
-              Workspace
+              Platform
             </div>
             <NavItem
               href="/"
+              icon={Home}
+              label="Home"
+              active={nav?.active === "home"}
+            />
+            <NavItem
+              href="/workspaces"
               icon={LayoutGrid}
               label="Workspaces"
               active={nav?.active === "workspaces"}

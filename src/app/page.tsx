@@ -190,7 +190,7 @@ export default function DashboardPage() {
   const totals = data?.totals;
 
   return (
-    <PageShell nav={{ active: "workspaces", crumb: "Workspaces" }}>
+    <PageShell nav={{ active: "home", crumb: "Home" }}>
       <div className="mb-8 flex flex-wrap items-start justify-between gap-4">
         <PageGreeting
           title="Command center"
