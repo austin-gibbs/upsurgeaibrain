@@ -22,6 +22,7 @@ import { sanitizeBullmqJobId } from "./job-id";
 import { probeRedisQueueHealth } from "./redis-health";
 import { msUntilQueueSlot, todayInTz } from "@/lib/engine/cadence";
 import { resolveQueueDialTarget } from "@/lib/engine/multi-phone";
+import { getAgentContactState } from "@/lib/engine/agent-contact-state";
 import type { AgentCallConfig } from "@/types";
 import type { Queue } from "bullmq";
 import type { CallJob } from "./queues";
@@ -188,22 +189,22 @@ export async function resyncCallQueue(opts?: { limit?: number }): Promise<SweepR
     // Contact-level safety rails (mirror placeCall + poller).
     const { data: contact } = await supabase
       .from("contacts")
-      .select("is_terminal, last_called_on, phones, attempt_count")
+      .select("phones")
       .eq("id", row.contact_id)
       .maybeSingle<{
-        is_terminal: boolean;
-        last_called_on: string | null;
         phones: string[];
-        attempt_count: number;
       }>();
 
     const today = todayInTz(dial.timezone);
     const continuingAttempt = row.next_phone_index > 0;
+    const state = contact
+      ? await getAgentContactState(supabase, row.agent_id, row.contact_id)
+      : null;
     if (
       !contact ||
-      contact.is_terminal ||
+      state?.is_terminal ||
       !contact.phones?.length ||
-      (contact.last_called_on === today && !continuingAttempt)
+      (state?.last_called_on === today && !continuingAttempt)
     ) {
       skipped++;
       continue;

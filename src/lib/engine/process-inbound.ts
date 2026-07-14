@@ -21,6 +21,7 @@ import { createServiceClient } from "@/lib/supabase/server";
 import { getCrmAdapterForAgent } from "@/lib/crm";
 import { extractFromRetellPayload } from "./outcome";
 import { todayInTz } from "./cadence";
+import { addTagsToCrm } from "./crm-writeback";
 import type { Agent, Workspace } from "@/types";
 import type { Database } from "@/types/database";
 
@@ -144,7 +145,7 @@ export async function processInboundCall(
         `Call Type: ${callType}`,
       ])
     );
-    await crm.setTags(contact.id, tags);
+    await addTagsToCrm(crm, contact.id, tags, contact.tags ?? []);
   } catch {
     /* non-fatal */
   }

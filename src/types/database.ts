@@ -92,6 +92,60 @@ export type Database = {
           },
         ]
       }
+      agent_contact_states: {
+        Row: {
+          agent_id: string
+          attempt_count: number
+          contact_id: string
+          created_at: string
+          id: string
+          is_terminal: boolean
+          last_called_on: string | null
+          next_eligible_on: string | null
+          terminal_outcome: Database["public"]["Enums"]["call_outcome"] | null
+          updated_at: string
+        }
+        Insert: {
+          agent_id: string
+          attempt_count?: number
+          contact_id: string
+          created_at?: string
+          id?: string
+          is_terminal?: boolean
+          last_called_on?: string | null
+          next_eligible_on?: string | null
+          terminal_outcome?: Database["public"]["Enums"]["call_outcome"] | null
+          updated_at?: string
+        }
+        Update: {
+          agent_id?: string
+          attempt_count?: number
+          contact_id?: string
+          created_at?: string
+          id?: string
+          is_terminal?: boolean
+          last_called_on?: string | null
+          next_eligible_on?: string | null
+          terminal_outcome?: Database["public"]["Enums"]["call_outcome"] | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agent_contact_states_agent_id_fkey"
+            columns: ["agent_id"]
+            isOneToOne: false
+            referencedRelation: "agents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agent_contact_states_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       agent_memory: {
         Row: {
           agent_id: string

@@ -125,8 +125,11 @@ export interface CrmAdapter {
 
   getContact(contactId: string): Promise<CrmContact | null>;
 
-  /** Replace the full tag set on a contact (PUT semantics). */
+  /** Replace the full tag set on a contact when the provider supports it safely. */
   setTags(contactId: string, tags: string[]): Promise<void>;
+
+  /** Add tags without removing existing CRM tags. FUB implements this via mergeTags. */
+  addTags?(contactId: string, tags: string[]): Promise<void>;
 
   /** Append a timeline note / activity. */
   addNote(contactId: string, note: string): Promise<void>;

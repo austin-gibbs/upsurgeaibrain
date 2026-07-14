@@ -38,6 +38,10 @@ import { writePollRun, type PollTriggerSource } from "./poll-runs";
 import { buildDialAttempt } from "./enqueue-dial";
 import { sendOpsAlert } from "@/lib/alerts";
 import { shouldGuardCrmScan } from "./zero-crm-scan-guard";
+import {
+  applyAgentContactState,
+  ensureAgentContactStates,
+} from "./agent-contact-state";
 
 export interface PollOptions {
   testMode?: boolean;
@@ -188,6 +192,14 @@ export async function pollAgent(
       .returns<Contact[]>();
     if (savedRows) contacts.push(...savedRows);
   }
+  const stateByContactId = await ensureAgentContactStates(
+    supabase,
+    agentId,
+    contacts.map((c) => c.id)
+  );
+  const contactsForAgent = contacts.map((contact) =>
+    applyAgentContactState(contact, stateByContactId.get(contact.id))
+  );
 
   // 2a. Strip enroll tag locally for contacts no longer returned by CRM scan.
   let tagsStripped = 0;
@@ -243,7 +255,7 @@ export async function pollAgent(
   }
 
   // 3. Filter eligible, sort for fair rollover, cap to what fits today's window.
-  const eligible = contacts
+  const eligible = contactsForAgent
     .filter((c) => isEligible(c, config, today) && c.phones.length > 0)
     .sort((a, b) => {
       const na = a.next_eligible_on ?? "0000-00-00";
@@ -451,7 +463,15 @@ export async function enqueueContactsNow(
     .returns<Contact[]>();
 
   // Preserve the operator's selection order.
-  const byId = new Map((rows ?? []).map((c) => [c.id, c]));
+  const stateByContactId = await ensureAgentContactStates(
+    supabase,
+    agentId,
+    (rows ?? []).map((c) => c.id)
+  );
+  const contactsForAgent = (rows ?? []).map((contact) =>
+    applyAgentContactState(contact, stateByContactId.get(contact.id))
+  );
+  const byId = new Map(contactsForAgent.map((c) => [c.id, c]));
   const dialable = contactIds
     .map((id) => byId.get(id))
     .filter((c): c is Contact => {

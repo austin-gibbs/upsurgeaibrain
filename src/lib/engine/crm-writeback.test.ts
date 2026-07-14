@@ -1,7 +1,13 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import type { CrmAdapter } from "@/lib/crm/types";
-import { logCallToCrm, noteWithRecording, summarizeCrmErrors } from "./crm-writeback";
+import {
+  addTagsToCrm,
+  logCallToCrm,
+  noteWithRecording,
+  summarizeCrmErrors,
+  tagsMissingFromExisting,
+} from "./crm-writeback";
 
 function mockCrm(overrides: Partial<CrmAdapter> = {}): CrmAdapter {
   return {
@@ -118,5 +124,70 @@ describe("summarizeCrmErrors", () => {
     assert.equal(summarizeCrmErrors(["logCall: 401", "addNote: 500"]), "logCall: 401 | addNote: 500");
     const long = summarizeCrmErrors(["x".repeat(3000)]);
     assert.ok(long && long.length <= 2000);
+  });
+});
+
+describe("addTagsToCrm", () => {
+  it("only sends tags missing from the known existing set", async () => {
+    let added: string[] = [];
+    const result = await addTagsToCrm(
+      mockCrm({
+        addTags: async (_id, tags) => {
+          added = tags;
+        },
+      }),
+      "contact-1",
+      ["existing", "new", "new", ""],
+      ["existing"]
+    );
+
+    assert.deepEqual(result, ["new"]);
+    assert.deepEqual(added, ["new"]);
+  });
+
+  it("skips the CRM call when no tags are missing", async () => {
+    let called = false;
+    const result = await addTagsToCrm(
+      mockCrm({
+        addTags: async () => {
+          called = true;
+        },
+      }),
+      "contact-1",
+      ["existing"],
+      ["existing"]
+    );
+
+    assert.deepEqual(result, []);
+    assert.equal(called, false);
+  });
+
+  it("falls back to setTags with a merged list for CRMs without addTags", async () => {
+    let written: string[] = [];
+    await addTagsToCrm(
+      mockCrm({
+        provider: "highlevel",
+        setTags: async (_id, tags) => {
+          written = tags;
+        },
+      }),
+      "contact-1",
+      ["new"],
+      ["existing"]
+    );
+
+    assert.deepEqual(written, ["existing", "new"]);
+  });
+});
+
+describe("tagsMissingFromExisting", () => {
+  it("dedupes requested tags and filters known existing tags", () => {
+    assert.deepEqual(
+      tagsMissingFromExisting(
+        ["existing", "new", "new", "  ", "another"],
+        ["existing"]
+      ),
+      ["new", "another"]
+    );
   });
 });

@@ -27,6 +27,7 @@ const LEGACY_NO_ANSWER_VOICEMAIL_TAGS = new Set([
   "upsurge-voicemail-ai",
   "upsurge-noanswer-ai",
 ]);
+const FALLBACK_NO_ANSWER_VOICEMAIL_TAG = "upsurge-noanswer-voicemail-ai";
 
 /**
  * Outcomes that are terminal by definition (the contact leaves the flow).
@@ -52,7 +53,7 @@ export function reconcileTags(input: TagReconcileInput): TagReconcileResult {
       `[tags] no workspace taxonomy tag for outcome "${outcome}" — using fallback. Seed a workspace_outcome_tags row for this outcome.`
     );
   }
-  const appliedTag = match?.tag ?? "upsurge-noanswer-voicemail-ai";
+  const appliedTag = match?.tag ?? FALLBACK_NO_ANSWER_VOICEMAIL_TAG;
   const isTerminal = match?.is_terminal ?? INTRINSIC_TERMINAL.has(outcome);
 
   // Keep everything that isn't an AI outcome tag. Drop the enroll marker only

@@ -12,6 +12,7 @@ import {
 import { evaluateDialWindow } from "./cadence";
 import { resolveQueueDialTarget } from "./multi-phone";
 import { remainingDailyDialBudget } from "./rollover-priority";
+import { getAgentContactState } from "./agent-contact-state";
 import type { AgentCallConfig } from "@/types";
 
 type DbClient = ReturnType<typeof createServiceClient>;
@@ -29,10 +30,7 @@ interface DueQueueRow {
   phone_numbers: string[];
   next_phone_index: number;
   contacts: {
-    is_terminal: boolean;
-    last_called_on: string | null;
     phones: string[];
-    attempt_count: number;
   } | null;
     agents: {
     status: string;
@@ -111,7 +109,7 @@ export async function drainDueDials(opts?: {
     .select(
       `id, agent_id, contact_id, workspace_id, queue_day, position, enqueued_at, scheduled_for,
        attempt_number, phone_numbers, next_phone_index,
-       contacts(is_terminal, last_called_on, phones, attempt_count),
+       contacts(phones),
        agents(status, direction, retell_agent_id, retell_from_number,
          agent_call_configs(call_window_start, call_window_end, call_window_days, drip_seconds, max_calls_per_day)),
        workspaces(timezone, is_active)`
@@ -159,9 +157,14 @@ export async function drainDueDials(opts?: {
       !workspace?.is_active ||
       !config ||
       !contact ||
-      contact.is_terminal ||
       !contact.phones?.length
     ) {
+      result.skipped++;
+      continue;
+    }
+
+    const state = await getAgentContactState(supabase, row.agent_id, row.contact_id);
+    if (state.is_terminal) {
       result.skipped++;
       continue;
     }
@@ -183,7 +186,7 @@ export async function drainDueDials(opts?: {
       month: "2-digit",
       day: "2-digit",
     }).format(new Date());
-    if (contact.last_called_on === today && row.next_phone_index === 0) {
+    if (state.last_called_on === today && row.next_phone_index === 0) {
       result.skipped++;
       continue;
     }

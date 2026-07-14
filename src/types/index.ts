@@ -188,6 +188,19 @@ export interface Contact {
   terminal_outcome: CallOutcome | null;
 }
 
+export interface AgentContactState {
+  id: string;
+  agent_id: string;
+  contact_id: string;
+  attempt_count: number;
+  last_called_on: string | null;
+  next_eligible_on: string | null;
+  is_terminal: boolean;
+  terminal_outcome: CallOutcome | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface Call {
   id: string;
   workspace_id: string;

@@ -15,6 +15,12 @@ import { todayInTz, evaluateDialWindow } from "./cadence";
 import { cancelQueueEntries, markQueueDialing } from "./call-queue";
 import { isContactEnrolledForAgent } from "./enrollment";
 import { getCallQueue, type CallJob } from "@/lib/queue/queues";
+import { addTagsToCrm } from "./crm-writeback";
+import {
+  applyAgentContactState,
+  getAgentContactState,
+  updateAgentContactState,
+} from "./agent-contact-state";
 import type { Agent, AgentMemory, Contact, Workspace } from "@/types";
 
 /**
@@ -107,7 +113,9 @@ export async function placeCall(job: CallJob): Promise<{ callId: string; retellC
       `contact ${job.contactId} belongs to workspace ${contact.workspace_id}, not agent workspace ${agent.workspace_id}`
     );
   }
-  if (contact.is_terminal) {
+  const contactState = await getAgentContactState(supabase, agent.id, contact.id);
+  const contactForAgent = applyAgentContactState(contact, contactState);
+  if (contactForAgent.is_terminal) {
     throw new Error(`contact ${job.contactId} is terminal — skipping`);
   }
   if (!job.toNumber?.trim()) {
@@ -237,7 +245,7 @@ export async function placeCall(job: CallJob): Promise<{ callId: string; retellC
   // Inject V2 memory + identity into the Retell prompt.
   let dynamicVariables = buildDynamicVariables({
     agent,
-    contact,
+    contact: contactForAgent,
     memory: memory ?? null,
     attemptNumber: job.attemptNumber,
   });
@@ -285,20 +293,29 @@ export async function placeCall(job: CallJob): Promise<{ callId: string; retellC
 
   // Stamp cadence only on the first phone of a multi-number attempt.
   if (phoneIndex === 0) {
-    await supabase
-      .from("contacts")
-      .update({ attempt_count: job.attemptNumber, last_called_on: today })
-      .eq("id", contact.id);
+    await updateAgentContactState(supabase, {
+      agentId: agent.id,
+      contactId: contact.id,
+      attemptCount: job.attemptNumber,
+      lastCalledOn: today,
+    });
 
     // Best-effort CRM "dialed" marker (mirrors WF1's Mark Contact Dialed).
     try {
       const crm = getCrmAdapterForAgent(agent, workspace);
       const dialedTag = `upsurgecalled${today.replace(/-/g, "")}`;
       if (!contact.tags.includes(dialedTag) && contact.crm_contact_id) {
-        await crm.setTags(
+        await addTagsToCrm(
+          crm,
           contact.crm_contact_id,
-          Array.from(new Set([...contact.tags, dialedTag]))
+          [dialedTag],
+          contact.tags
         );
+        const nextTags = Array.from(new Set([...contact.tags, dialedTag]));
+        await supabase
+          .from("contacts")
+          .update({ tags: nextTags })
+          .eq("id", contact.id);
       }
     } catch {
       // non-fatal — the local last_called_on already guards same-day re-dials

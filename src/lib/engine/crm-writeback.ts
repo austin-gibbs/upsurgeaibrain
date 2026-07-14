@@ -23,6 +23,43 @@ export function noteWithRecording(
   return `${note}\n\nRecording: ${recordingUrl.trim()}`;
 }
 
+export function dedupeTags(tags: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of tags) {
+    const tag = raw.trim();
+    if (!tag || seen.has(tag)) continue;
+    seen.add(tag);
+    out.push(tag);
+  }
+  return out;
+}
+
+export function tagsMissingFromExisting(
+  requestedTags: string[],
+  existingTags: string[] = []
+): string[] {
+  const existing = new Set(dedupeTags(existingTags));
+  return dedupeTags(requestedTags).filter((tag) => !existing.has(tag));
+}
+
+export async function addTagsToCrm(
+  crm: CrmAdapter,
+  contactId: string,
+  tags: string[],
+  existingTags: string[] = []
+): Promise<string[]> {
+  const addedTags = tagsMissingFromExisting(tags, existingTags);
+  if (!addedTags.length) return [];
+
+  if (crm.addTags) {
+    await crm.addTags(contactId, addedTags);
+  } else {
+    await crm.setTags(contactId, dedupeTags([...existingTags, ...addedTags]));
+  }
+  return addedTags;
+}
+
 export interface LogCallToCrmInput {
   crm: CrmAdapter;
   contactId: string;
@@ -100,15 +137,23 @@ export async function syncTagsToCrm(
   crm: CrmAdapter,
   contactId: string,
   tags: string[],
-  flags: CrmWriteFlags
-): Promise<void> {
+  flags: CrmWriteFlags,
+  options: { existingTags?: string[] } = {}
+): Promise<string[]> {
   try {
-    await crm.setTags(contactId, tags);
+    await addTagsToCrm(
+      crm,
+      contactId,
+      tags,
+      options.existingTags
+    );
     flags.tagsSynced = true;
+    return dedupeTags(tags);
   } catch (e) {
     const err = formatCrmError(e);
-    flags.crmErrors.push(`setTags: ${err}`);
-    console.error(`[crm-writeback] setTags failed for contact ${contactId}: ${err}`);
+    flags.crmErrors.push(`addTags: ${err}`);
+    console.error(`[crm-writeback] addTags failed for contact ${contactId}: ${err}`);
+    return tags;
   }
 }
 

@@ -34,6 +34,7 @@ import {
   chainNextPhoneDial,
 } from "./chain-next-phone";
 import { shouldFinalizeAttempt } from "./multi-phone";
+import { updateAgentContactState } from "./agent-contact-state";
 import type {
   Agent, AgentCallConfig, AgentMemory, AgentTaskConfig,
   Contact, OutcomeTag, Workspace,
@@ -212,7 +213,13 @@ export async function processRetellWebhook(
     outcome,
     enrollTag: agent.enroll_tag ?? workspace.enroll_tag,
   });
-  await syncTagsToCrm(crm, contact.crm_contact_id, reconciled.tags, crmFlags);
+  const syncedTags = await syncTagsToCrm(
+    crm,
+    contact.crm_contact_id,
+    reconciled.tags,
+    crmFlags,
+    { existingTags: contact.tags }
+  );
 
   // Parity guard: on a TERMINAL outcome we always stop calling locally (below),
   // which is the safe direction — it prevents re-dialing someone who asked for
@@ -302,13 +309,17 @@ export async function processRetellWebhook(
 
   // 5. Cadence state.
   const nextEligible = callConfig ? nextEligibleDate(call.attempt_number, callConfig, today) : null;
+  await updateAgentContactState(supabase, {
+    agentId: agent.id,
+    contactId: contact.id,
+    nextEligibleOn: reconciled.isTerminal ? null : nextEligible,
+    isTerminal: reconciled.isTerminal,
+    terminalOutcome: reconciled.isTerminal ? outcome : null,
+  });
   await supabase
     .from("contacts")
     .update({
-      tags: reconciled.tags,
-      is_terminal: reconciled.isTerminal,
-      terminal_outcome: reconciled.isTerminal ? outcome : null,
-      next_eligible_on: reconciled.isTerminal ? null : nextEligible,
+      tags: syncedTags,
     })
     .eq("id", contact.id);
 
