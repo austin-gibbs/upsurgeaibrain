@@ -35,7 +35,7 @@ export async function GET() {
   const { data: workspaces, error } = await userClient
     .from("workspaces")
     .select(
-      "id, name, timezone, crm_provider, enroll_tag, is_active, created_at, agents(id, name, status, enroll_tag)"
+      "id, name, timezone, crm_provider, enroll_tag, is_active, created_at, agents(id, name, status, direction, enroll_tag)"
     )
     .order("created_at", { ascending: false });
 

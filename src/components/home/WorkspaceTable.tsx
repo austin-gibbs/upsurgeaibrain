@@ -8,6 +8,7 @@ import {
   ChevronRight,
   ArrowUpRight,
   Bot,
+  Trash2,
 } from "lucide-react";
 import {
   Badge,
@@ -25,7 +26,7 @@ import type {
   OverviewWorkspaceRow,
 } from "@/lib/reporting/overview";
 
-const CRM_LABEL: Record<string, string> = {
+export const CRM_LABEL: Record<string, string> = {
   followupboss: "Follow Up Boss",
   highlevel: "HighLevel",
 };
@@ -139,12 +140,16 @@ function AgentDropdown({
 
 export function WorkspaceTable({
   workspaces,
+  onDeleteWorkspace,
 }: {
   workspaces: OverviewWorkspaceRow[];
+  /** When set, shows a delete action per row. */
+  onDeleteWorkspace?: (workspace: OverviewWorkspaceRow) => void;
 }) {
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const [sortKey, setSortKey] = useState<SortKey>("calls");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  const showActions = Boolean(onDeleteWorkspace);
 
   function toggleExpand(id: string) {
     setExpanded((prev) => {
@@ -194,10 +199,18 @@ export function WorkspaceTable({
 
   if (workspaces.length === 0) return null;
 
+  const headerGrid = showActions
+    ? "lg:grid-cols-[minmax(0,1.5fr)_repeat(5,minmax(0,0.65fr))_minmax(5.5rem,0.5fr)_2.75rem]"
+    : "lg:grid-cols-[minmax(0,1.6fr)_repeat(5,minmax(0,0.7fr))_minmax(5.5rem,0.55fr)]";
+
   return (
     <Card className="overflow-hidden">
-      {/* Header */}
-      <div className="hidden grid-cols-[minmax(0,1.6fr)_repeat(5,minmax(0,0.7fr))_minmax(5.5rem,0.55fr)] items-center gap-3 border-b border-ink-100 bg-surface-2/40 px-5 py-3 lg:grid lg:px-6">
+      <div
+        className={cn(
+          "hidden items-center gap-3 border-b border-ink-100 bg-surface-2/40 px-5 py-3 lg:grid lg:px-6",
+          headerGrid
+        )}
+      >
         <SortButton
           label="Workspace"
           active={sortKey === "name"}
@@ -234,6 +247,7 @@ export function WorkspaceTable({
         <span className="text-right text-[11px] font-semibold uppercase tracking-wide text-ink-400">
           Status
         </span>
+        {showActions && <span className="sr-only">Actions</span>}
       </div>
 
       <ul>
@@ -264,7 +278,10 @@ export function WorkspaceTable({
 
                 <Link
                   href={`/workspaces/${ws.id}`}
-                  className="group grid min-w-0 flex-1 grid-cols-1 gap-3 px-2 py-4 transition-colors hover:bg-ink-50/60 sm:px-3 lg:grid-cols-[minmax(0,1.6fr)_repeat(5,minmax(0,0.7fr))_minmax(5.5rem,0.55fr)] lg:items-center lg:gap-3 lg:py-3.5"
+                  className={cn(
+                    "group grid min-w-0 flex-1 grid-cols-1 gap-3 px-2 py-4 transition-colors hover:bg-ink-50/60 sm:px-3 lg:items-center lg:gap-3 lg:py-3.5",
+                    headerGrid
+                  )}
                 >
                   <div className="flex min-w-0 items-center gap-3">
                     <IconBadge icon={Building2} tone="sky" className="h-9 w-9" />
@@ -324,8 +341,27 @@ export function WorkspaceTable({
                         </Badge>
                       )}
                     </div>
+                    {showActions && <span className="hidden lg:block" />}
                   </div>
                 </Link>
+
+                {onDeleteWorkspace && (
+                  <div className="flex shrink-0 items-center pr-3">
+                    <button
+                      type="button"
+                      title={`Delete ${ws.name}`}
+                      aria-label={`Delete ${ws.name}`}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        onDeleteWorkspace(ws);
+                      }}
+                      className="flex h-9 w-9 items-center justify-center rounded-xl text-ink-400 transition-colors hover:bg-accent-rose-bg hover:text-accent-rose-fg"
+                    >
+                      <Trash2 className="h-4 w-4" strokeWidth={1.75} />
+                    </button>
+                  </div>
+                )}
               </div>
 
               {isOpen && (

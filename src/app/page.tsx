@@ -5,7 +5,6 @@ import Link from "next/link";
 import {
   Building2,
   CalendarCheck,
-  DollarSign,
   Phone,
   RefreshCw,
   Target,
@@ -56,9 +55,25 @@ type OverviewResponse = {
     dataSource: "database";
     completedInRange: number;
     missingRawPayload: number;
+    lean?: boolean;
     hint: string | null;
   };
   error?: string;
+};
+
+type WorkspaceShell = {
+  id: string;
+  name: string;
+  timezone: string;
+  crm_provider: string;
+  is_active: boolean;
+  agents: {
+    id: string;
+    name: string;
+    status: string;
+    direction?: string;
+    enroll_tag?: string | null;
+  }[];
 };
 
 const HOME_WIDGETS = new Set<DashboardWidgetId>([
@@ -70,14 +85,45 @@ const HOME_WIDGETS = new Set<DashboardWidgetId>([
   "kpiSuccess",
   "kpiAppointments",
   "kpiDuration",
-  "kpiCost",
-  "kpiSentiment",
+  // Cost/sentiment need raw_payload; lean overview omits them for speed.
   "chartCallsOverTime",
   "chartDirection",
   "chartOutcomes",
-  "chartSentiment",
   "chartHeatmap",
 ]);
+
+const EMPTY_KPIS = {
+  totalCalls: 0,
+  inboundCalls: 0,
+  outboundCalls: 0,
+  answerRate: 0,
+  successRate: 0,
+  appointmentCount: 0,
+  avgDurationSeconds: 0,
+  totalCost: 0,
+  sentimentPositive: 0,
+} as const;
+
+function shellToOverviewRows(shell: WorkspaceShell[]): OverviewWorkspaceRow[] {
+  return shell.map((ws) => ({
+    id: ws.id,
+    name: ws.name,
+    timezone: ws.timezone,
+    crm_provider: ws.crm_provider,
+    is_active: ws.is_active,
+    agentCount: ws.agents.length,
+    activeAgents: ws.agents.filter((a) => a.status === "active").length,
+    agents: ws.agents.map((a) => ({
+      id: a.id,
+      name: a.name,
+      status: a.status,
+      direction: a.direction ?? "outbound",
+      retell_agent_id: null,
+      calls: 0,
+    })),
+    kpis: { ...EMPTY_KPIS },
+  }));
+}
 
 function HeroMetric({
   label,
@@ -107,38 +153,60 @@ export default function DashboardPage() {
   const [rangeDays, setRangeDays] = useState<OverviewRangeDays>(30);
   const [interval, setInterval] = useState<OverviewInterval>("weekly");
   const [data, setData] = useState<OverviewResponse | null>(null);
+  const [workspaceShell, setWorkspaceShell] = useState<OverviewWorkspaceRow[] | null>(
+    null
+  );
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loadingReporting, setLoadingReporting] = useState(true);
 
-  // Only re-fetch when the date range changes. Interval toggles re-bucket locally.
-  const refresh = useCallback((opts?: { signal?: AbortSignal }) => {
-    setLoading(true);
-    setError(null);
-    const qs = new URLSearchParams({
-      range: String(rangeDays),
-      interval: "daily",
-    });
-    return fetch(`/api/reporting/overview?${qs}`, { signal: opts?.signal })
+  // Instant shell: workspaces + agents (no call aggregates).
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/workspaces")
       .then((r) => r.json())
-      .then((d: OverviewResponse) => {
-        if (opts?.signal?.aborted) return;
-        if (d.error) {
-          setError(d.error);
-          setData(null);
-        } else {
-          setData(d);
-        }
+      .then((d: { workspaces?: WorkspaceShell[]; error?: string }) => {
+        if (cancelled || d.error || !d.workspaces) return;
+        setWorkspaceShell(shellToOverviewRows(d.workspaces));
       })
-      .catch((e: unknown) => {
-        if (opts?.signal?.aborted) return;
-        if (e instanceof DOMException && e.name === "AbortError") return;
-        setError(e instanceof Error ? e.message : "Failed to load overview");
-        setData(null);
-      })
-      .finally(() => {
-        if (!opts?.signal?.aborted) setLoading(false);
+      .catch(() => {
+        /* reporting path still loads workspaces */
       });
-  }, [rangeDays]);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const refresh = useCallback(
+    (opts?: { signal?: AbortSignal }) => {
+      setLoadingReporting(true);
+      setError(null);
+      const qs = new URLSearchParams({
+        range: String(rangeDays),
+        interval: "daily",
+      });
+      return fetch(`/api/reporting/overview?${qs}`, { signal: opts?.signal })
+        .then((r) => r.json())
+        .then((d: OverviewResponse) => {
+          if (opts?.signal?.aborted) return;
+          if (d.error) {
+            setError(d.error);
+            setData(null);
+          } else {
+            setData(d);
+          }
+        })
+        .catch((e: unknown) => {
+          if (opts?.signal?.aborted) return;
+          if (e instanceof DOMException && e.name === "AbortError") return;
+          setError(e instanceof Error ? e.message : "Failed to load overview");
+          setData(null);
+        })
+        .finally(() => {
+          if (!opts?.signal?.aborted) setLoadingReporting(false);
+        });
+    },
+    [rangeDays]
+  );
 
   useEffect(() => {
     const controller = new AbortController();
@@ -186,8 +254,10 @@ export default function DashboardPage() {
     };
   }, [data, chartAggregates]);
 
-  const workspaces = data?.workspaces ?? [];
+  // Prefer enriched overview rows; fall back to instant shell.
+  const workspaces = data?.workspaces ?? workspaceShell ?? [];
   const totals = data?.totals;
+  const shellOnly = !data && workspaceShell !== null;
 
   return (
     <PageShell nav={{ active: "home", crumb: "Home" }}>
@@ -218,10 +288,10 @@ export default function DashboardPage() {
             variant="secondary"
             size="sm"
             onClick={() => void refresh()}
-            disabled={loading}
+            disabled={loadingReporting}
             className="gap-1.5"
           >
-            <RefreshCw className={cnSpin(loading)} />
+            <RefreshCw className={cnSpin(loadingReporting)} />
             Refresh
           </Button>
           <Link href="/setup">
@@ -236,8 +306,9 @@ export default function DashboardPage() {
         </Card>
       )}
 
-      {loading && !data && (
-        <div className="space-y-5">
+      {/* Hero / KPIs — skeleton until reporting lands */}
+      {loadingReporting && !data ? (
+        <div className="mb-8 space-y-5">
           <Skeleton className="h-40 w-full rounded-2xl" />
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
             {[1, 2, 3, 4, 5].map((i) => (
@@ -245,13 +316,11 @@ export default function DashboardPage() {
             ))}
           </div>
           <Skeleton className="h-72 w-full rounded-2xl" />
-          <Skeleton className="h-64 w-full rounded-2xl" />
         </div>
-      )}
+      ) : null}
 
       {data && totals && (
         <>
-          {/* Hero total overview */}
           <div className="mb-8 overflow-hidden rounded-2xl bg-insight-gradient p-6 text-white shadow-lifted sm:p-7">
             <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
               <div className="max-w-xl">
@@ -283,9 +352,9 @@ export default function DashboardPage() {
                 icon={CalendarCheck}
               />
               <HeroMetric
-                label="Spend"
-                value={formatCost(totals.totalCost)}
-                icon={DollarSign}
+                label="Workspaces"
+                value={String(totals.workspaceCount)}
+                icon={Building2}
               />
             </div>
           </div>
@@ -303,47 +372,37 @@ export default function DashboardPage() {
             </>
           )}
 
-          {reportingForCharts && reportingForCharts.kpis.totalCalls === 0 && workspaces.length > 0 && (
-            <Card className="mb-8 p-8 text-center">
-              <p className="text-sm font-medium text-ink-700">
-                No completed calls in this range
-              </p>
-              <p className="mt-2 text-sm text-ink-500">
-                Widen the date range or open a workspace to verify webhook delivery
-                and agent activity.
-              </p>
-            </Card>
-          )}
-
-          <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
-            <div>
-              <h2 className="text-lg font-semibold tracking-tight text-ink-900">
-                Workspaces
-              </h2>
-              <p className="mt-1 text-sm text-ink-500">
-                Expand a row to jump into any AI agent without opening the workspace.
-              </p>
-            </div>
-          </div>
-
-          {workspaces.length === 0 ? (
-            <EmptyState
-              icon={Building2}
-              title="No workspaces yet"
-              description="Create your first workspace to connect a CRM and deploy AI voice agents."
-              action={
-                <Link href="/setup">
-                  <Button>Create your first workspace</Button>
-                </Link>
-              }
-            />
-          ) : (
-            <WorkspaceTable workspaces={workspaces} />
-          )}
+          {reportingForCharts &&
+            reportingForCharts.kpis.totalCalls === 0 &&
+            workspaces.length > 0 && (
+              <Card className="mb-8 p-8 text-center">
+                <p className="text-sm font-medium text-ink-700">
+                  No completed calls in this range
+                </p>
+                <p className="mt-2 text-sm text-ink-500">
+                  Widen the date range or open a workspace to verify webhook delivery
+                  and agent activity.
+                </p>
+              </Card>
+            )}
         </>
       )}
 
-      {!loading && !data && !error && (
+      <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-semibold tracking-tight text-ink-900">
+            Workspaces
+          </h2>
+          <p className="mt-1 text-sm text-ink-500">
+            Expand a row to jump into any AI agent without opening the workspace.
+            {shellOnly ? " Loading call stats…" : ""}
+          </p>
+        </div>
+      </div>
+
+      {workspaceShell === null && !data && !error ? (
+        <Skeleton className="h-64 w-full rounded-2xl" />
+      ) : workspaces.length === 0 && !loadingReporting ? (
         <EmptyState
           icon={Building2}
           title="No workspaces yet"
@@ -354,7 +413,9 @@ export default function DashboardPage() {
             </Link>
           }
         />
-      )}
+      ) : workspaces.length > 0 ? (
+        <WorkspaceTable workspaces={workspaces} />
+      ) : null}
     </PageShell>
   );
 }

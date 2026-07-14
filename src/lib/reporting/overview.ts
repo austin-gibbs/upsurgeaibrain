@@ -10,6 +10,83 @@ import {
   type ReportingKpis,
   type TimeSeriesPoint,
 } from "@/lib/reporting/aggregate";
+import type { AgentDirection } from "@/types";
+
+/** Lean call row for home overview — no raw_payload (avoids multi-MB transfers). */
+export type LeanOverviewCallRow = {
+  id: string;
+  retell_call_id: string | null;
+  agent_id: string;
+  workspace_id: string;
+  outcome: string | null;
+  in_voicemail: boolean | null;
+  completed_at: string | null;
+  dialed_at: string | null;
+  queued_at: string;
+  direction: string;
+};
+
+/**
+ * Normalize a lean DB call row for overview aggregation without reading
+ * raw_payload. Cost / latency / sentiment stay at defaults; duration is
+ * estimated from dialed→completed when both timestamps exist.
+ */
+export function normalizeLeanOverviewCall(
+  row: LeanOverviewCallRow,
+  agentName: string | null
+): NormalizedCallRow & { workspaceId: string } {
+  const direction = (row.direction === "inbound" ? "inbound" : "outbound") as AgentDirection;
+  const completedMs = row.completed_at ? Date.parse(row.completed_at) : NaN;
+  const dialedMs = row.dialed_at ? Date.parse(row.dialed_at) : NaN;
+  const queuedMs = Date.parse(row.queued_at);
+  const startTimestamp = Number.isFinite(dialedMs)
+    ? dialedMs
+    : Number.isFinite(completedMs)
+      ? completedMs
+      : Number.isFinite(queuedMs)
+        ? queuedMs
+        : null;
+
+  let durationSeconds = 0;
+  if (Number.isFinite(completedMs) && Number.isFinite(dialedMs) && completedMs >= dialedMs) {
+    durationSeconds = Math.round((completedMs - dialedMs) / 1000);
+  }
+
+  const outcome = row.outcome;
+  const inVoicemail = row.in_voicemail === true;
+  const outcomeLower = (outcome ?? "").toLowerCase();
+  const noAnswer =
+    inVoicemail ||
+    outcomeLower.includes("no_answer") ||
+    outcomeLower.includes("voicemail");
+
+  return {
+    retellCallId: row.retell_call_id ?? row.id,
+    agentId: row.agent_id,
+    agentName,
+    direction,
+    startTimestamp,
+    completedAt: row.completed_at,
+    durationSeconds,
+    fromNumber: null,
+    toNumber: null,
+    phone: null,
+    contactName: null,
+    contactEmail: null,
+    crmContactId: null,
+    recordingUrl: null,
+    summary: null,
+    outcome,
+    callSuccessful: !noAnswer && !!outcome && outcome !== "error",
+    userSentiment: null,
+    inVoicemail,
+    disconnectionReason: null,
+    cost: 0,
+    latencyP50Ms: null,
+    latencyP90Ms: null,
+    workspaceId: row.workspace_id,
+  };
+}
 
 export type OverviewRangeDays = 7 | 30 | 90;
 export type OverviewInterval = "daily" | "weekly";
@@ -20,6 +97,7 @@ export type OverviewWorkspaceMeta = {
   timezone: string;
   crm_provider: string;
   is_active: boolean;
+  enroll_tag?: string | null;
 };
 
 export type OverviewAgentMeta = {

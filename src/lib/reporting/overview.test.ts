@@ -5,6 +5,7 @@ import {
   applyOverviewInterval,
   bucketCallsOverTimeWeekly,
   buildOverview,
+  normalizeLeanOverviewCall,
   pickReferenceTimezone,
   type OverviewAgentMeta,
   type OverviewWorkspaceMeta,
@@ -265,5 +266,50 @@ describe("buildOverview", () => {
     assert.equal(result.workspaces[0].id, "ws_a");
     assert.equal(result.workspaces[0].kpis.totalCalls, 0);
     assert.equal(result.referenceTimezone, "America/Denver");
+  });
+});
+
+describe("normalizeLeanOverviewCall", () => {
+  it("builds overview rows without raw_payload", () => {
+    const row = normalizeLeanOverviewCall(
+      {
+        id: "db1",
+        retell_call_id: "call_x",
+        agent_id: "agent_1",
+        workspace_id: "ws_a",
+        outcome: "appointment",
+        in_voicemail: false,
+        completed_at: "2026-06-03T14:05:00Z",
+        dialed_at: "2026-06-03T14:00:00Z",
+        queued_at: "2026-06-03T13:59:00Z",
+        direction: "outbound",
+      },
+      "Seller"
+    );
+    assert.equal(row.workspaceId, "ws_a");
+    assert.equal(row.agentName, "Seller");
+    assert.equal(row.durationSeconds, 300);
+    assert.equal(row.callSuccessful, true);
+    assert.equal(row.cost, 0);
+  });
+
+  it("marks voicemail as unsuccessful", () => {
+    const row = normalizeLeanOverviewCall(
+      {
+        id: "db2",
+        retell_call_id: null,
+        agent_id: "agent_1",
+        workspace_id: "ws_a",
+        outcome: "no_answer_voicemail",
+        in_voicemail: true,
+        completed_at: "2026-06-03T14:05:00Z",
+        dialed_at: "2026-06-03T14:04:00Z",
+        queued_at: "2026-06-03T14:03:00Z",
+        direction: "outbound",
+      },
+      null
+    );
+    assert.equal(row.callSuccessful, false);
+    assert.equal(row.inVoicemail, true);
   });
 });

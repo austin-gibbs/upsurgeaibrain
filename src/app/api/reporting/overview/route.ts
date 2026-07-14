@@ -1,17 +1,17 @@
 // =====================================================================
 // GET /api/reporting/overview — cross-workspace Retell reporting for home.
 // Query: range (7|30|90), interval (daily|weekly)
-// RLS on the user client scopes workspaces/calls to the caller's orgs.
+//
+// Performance: loads lean call columns only (no raw_payload). Shipping
+// payloads for ~3k calls was ~20MB and dominated homepage TTFB.
 // =====================================================================
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase/server";
 import {
-  normalizeStoredCall,
-  type AgentMeta,
-  type StoredCallJoinRow,
-} from "@/lib/reporting/normalize";
-import {
   buildOverview,
+  normalizeLeanOverviewCall,
+  pickReferenceTimezone,
+  type LeanOverviewCallRow,
   type OverviewAgentMeta,
   type OverviewInterval,
   type OverviewRangeDays,
@@ -23,11 +23,6 @@ export const runtime = "nodejs";
 const PAGE_SIZE = 1000;
 const DEFAULT_RANGE: OverviewRangeDays = 30;
 const DEFAULT_INTERVAL: OverviewInterval = "weekly";
-
-type OverviewCallRow = StoredCallJoinRow & {
-  workspace_id: string;
-  contact_id: string | null;
-};
 
 function ymdInTz(date: Date, timezone: string): string {
   return new Intl.DateTimeFormat("en-CA", {
@@ -85,7 +80,7 @@ function parseInterval(raw: string | null): OverviewInterval {
   return DEFAULT_INTERVAL;
 }
 
-async function loadOverviewCalls({
+async function loadLeanOverviewCalls({
   db,
   workspaceIds,
   fromIso,
@@ -95,17 +90,16 @@ async function loadOverviewCalls({
   workspaceIds: string[];
   fromIso: string;
   toExclusiveIso: string;
-}): Promise<OverviewCallRow[]> {
+}): Promise<LeanOverviewCallRow[]> {
   if (workspaceIds.length === 0) return [];
 
-  const rows: OverviewCallRow[] = [];
+  const rows: LeanOverviewCallRow[] = [];
   for (let offset = 0; ; offset += PAGE_SIZE) {
     const { data, error } = await db
       .from("calls")
       .select(
-        "id, retell_call_id, agent_id, workspace_id, contact_id, to_number, outcome, in_voicemail, " +
-          "summary, raw_payload, completed_at, dialed_at, queued_at, direction, " +
-          "crm_contact_id, contact_name, contact_email"
+        "id, retell_call_id, agent_id, workspace_id, outcome, in_voicemail, " +
+          "completed_at, dialed_at, queued_at, direction"
       )
       .in("workspace_id", workspaceIds)
       .eq("status", "completed")
@@ -113,7 +107,7 @@ async function loadOverviewCalls({
       .lt("completed_at", toExclusiveIso)
       .order("completed_at", { ascending: false })
       .range(offset, offset + PAGE_SIZE - 1)
-      .returns<OverviewCallRow[]>();
+      .returns<LeanOverviewCallRow[]>();
 
     if (error) throw new Error(`calls query failed: ${error.message}`);
     if (data?.length) rows.push(...data);
@@ -133,49 +127,36 @@ export async function GET(req: NextRequest) {
   const rangeDays = parseRangeDays(url.searchParams.get("range"));
   const interval = parseInterval(url.searchParams.get("interval"));
 
-  const { data: workspacesRaw, error: wsErr } = await db
-    .from("workspaces")
-    .select("id, name, timezone, crm_provider, is_active")
-    .order("created_at", { ascending: false })
-    .returns<OverviewWorkspaceMeta[]>();
+  // Parallel metadata fetch — workspaces + agents are tiny vs call pages.
+  const [wsResult, agentsResult] = await Promise.all([
+    db
+      .from("workspaces")
+      .select("id, name, timezone, crm_provider, is_active, enroll_tag")
+      .order("created_at", { ascending: false })
+      .returns<OverviewWorkspaceMeta[]>(),
+    db
+      .from("agents")
+      .select("id, name, status, direction, retell_agent_id, workspace_id")
+      .order("created_at", { ascending: true })
+      .returns<OverviewAgentMeta[]>(),
+  ]);
 
-  if (wsErr) {
-    return NextResponse.json({ error: wsErr.message }, { status: 500 });
+  if (wsResult.error) {
+    return NextResponse.json({ error: wsResult.error.message }, { status: 500 });
+  }
+  if (agentsResult.error) {
+    return NextResponse.json({ error: agentsResult.error.message }, { status: 500 });
   }
 
-  const workspaces = workspacesRaw ?? [];
-  const workspaceIds = workspaces.map((w) => w.id);
+  const workspaces = wsResult.data ?? [];
+  const workspaceIds = new Set(workspaces.map((w) => w.id));
+  // Agents query is org-wide via RLS; keep only agents in listed workspaces.
+  const agents = (agentsResult.data ?? []).filter((a) =>
+    workspaceIds.has(a.workspace_id)
+  );
+  const workspaceIdList = [...workspaceIds];
 
-  const { data: agentsRaw, error: agentsErr } = workspaceIds.length
-    ? await db
-        .from("agents")
-        .select("id, name, status, direction, retell_agent_id, workspace_id")
-        .in("workspace_id", workspaceIds)
-        .order("created_at", { ascending: true })
-        .returns<OverviewAgentMeta[]>()
-    : { data: [] as OverviewAgentMeta[], error: null };
-
-  if (agentsErr) {
-    return NextResponse.json({ error: agentsErr.message }, { status: 500 });
-  }
-
-  const agents = agentsRaw ?? [];
-
-  // Date window in a reference tz (most common workspace tz).
-  const tzCounts = new Map<string, number>();
-  for (const ws of workspaces) {
-    const tz = ws.timezone?.trim() || "America/Denver";
-    tzCounts.set(tz, (tzCounts.get(tz) ?? 0) + 1);
-  }
-  let referenceTimezone = "America/Denver";
-  let bestCount = 0;
-  for (const [tz, count] of tzCounts) {
-    if (count > bestCount) {
-      referenceTimezone = tz;
-      bestCount = count;
-    }
-  }
-
+  const referenceTimezone = pickReferenceTimezone(workspaces);
   const now = new Date();
   const toYmd = ymdInTz(now, referenceTimezone);
   const fromYmd = addDaysYmd(toYmd, -rangeDays);
@@ -185,11 +166,11 @@ export async function GET(req: NextRequest) {
     referenceTimezone
   ).toISOString();
 
-  let callRows: OverviewCallRow[] = [];
+  let callRows: LeanOverviewCallRow[] = [];
   try {
-    callRows = await loadOverviewCalls({
+    callRows = await loadLeanOverviewCalls({
       db,
-      workspaceIds,
+      workspaceIds: workspaceIdList,
       fromIso,
       toExclusiveIso,
     });
@@ -198,22 +179,10 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: message }, { status: 500 });
   }
 
-  const agentById = new Map<string, AgentMeta>(
-    agents.map((a) => [
-      a.id,
-      {
-        id: a.id,
-        name: a.name,
-        retell_agent_id: a.retell_agent_id,
-        direction: a.direction as AgentMeta["direction"],
-      },
-    ])
+  const agentNameById = new Map(agents.map((a) => [a.id, a.name]));
+  const normalized = callRows.map((row) =>
+    normalizeLeanOverviewCall(row, agentNameById.get(row.agent_id) ?? null)
   );
-
-  const normalized = callRows.map((row) => ({
-    ...normalizeStoredCall(row, agentById),
-    workspaceId: row.workspace_id,
-  }));
 
   const overview = buildOverview(
     normalized,
@@ -221,10 +190,6 @@ export async function GET(req: NextRequest) {
     agents,
     referenceTimezone
   );
-
-  // Always return daily-bucketed global series. The home page re-buckets
-  // to weekly via applyOverviewInterval without another network round-trip.
-  const missingRawPayload = callRows.filter((row) => !row.raw_payload).length;
 
   return NextResponse.json({
     range: {
@@ -242,13 +207,12 @@ export async function GET(req: NextRequest) {
     meta: {
       dataSource: "database" as const,
       completedInRange: callRows.length,
-      missingRawPayload,
+      missingRawPayload: 0,
+      lean: true as const,
       hint:
         callRows.length === 0 && workspaces.length > 0
           ? "No completed calls in this range across your workspaces."
-          : missingRawPayload > 0
-            ? `${missingRawPayload} completed call(s) lack raw_payload — KPIs may be incomplete.`
-            : null,
+          : null,
     },
   });
 }
