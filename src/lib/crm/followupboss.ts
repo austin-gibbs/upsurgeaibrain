@@ -4,7 +4,7 @@
 // Auth: HTTP Basic, username = API key, password empty.
 // Notes from the production n8n build that are baked in here:
 //   - Tasks: use `assignedUserId` (numeric). `assignedTo` (name) is REJECTED.
-//   - Tags: PUT /people/{id} with the FULL tags array replaces them.
+//   - Tags: use mergeTags=true so FUB adds tags instead of replacing the person tag list.
 // Docs: https://docs.followupboss.com/reference
 // =====================================================================
 import type {
@@ -70,6 +70,18 @@ export function mapFubCallOutcome(
     default:
       return inVoicemail ? "Left Message" : undefined;
   }
+}
+
+function dedupeTags(tags: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of tags) {
+    const tag = raw.trim();
+    if (!tag || seen.has(tag)) continue;
+    seen.add(tag);
+    out.push(tag);
+  }
+  return out;
 }
 
 export class FollowUpBossAdapter implements CrmAdapter {
@@ -210,9 +222,15 @@ export class FollowUpBossAdapter implements CrmAdapter {
   }
 
   async setTags(contactId: string, tags: string[]): Promise<void> {
-    await this.request(`/people/${contactId}`, {
+    await this.addTags(contactId, tags);
+  }
+
+  async addTags(contactId: string, tags: string[]): Promise<void> {
+    const uniqueTags = dedupeTags(tags);
+    if (!uniqueTags.length) return;
+    await this.request(`/people/${contactId}?mergeTags=true`, {
       method: "PUT",
-      body: JSON.stringify({ tags }),
+      body: JSON.stringify({ tags: uniqueTags }),
     });
   }
 
@@ -264,6 +282,73 @@ export class FollowUpBossAdapter implements CrmAdapter {
       name: u.name ?? [u.firstName, u.lastName].filter(Boolean).join(" "),
       email: u.email,
     }));
+  }
+
+  /**
+   * Fetch a contact's field values (standard fields + primary address) as a flat
+   * slug→string map for Retell dynamic-variable injection. Mirrors the HighLevel
+   * adapter's method so the engine's caller can expose `{{property_address}}`,
+   * `{{first_name}}`, `{{city}}`, etc. in the prompt. Best-effort: returns {} on
+   * any failure so a dial never breaks, and only emits non-empty values so the
+   * prompt's "if present" guards work (an empty address stays undefined).
+   *
+   * FUB `/people/{id}` returns `addresses[]` of `{ type, street, city, state, code }`.
+   * We prefer a home/property-typed address, else the first one, and assemble a
+   * natural single-line `property_address` the agent can read aloud. `addresses`
+   * is requested explicitly because FUB's default person payload omits it.
+   */
+  async getContactFieldValues(contactId: string): Promise<Record<string, string>> {
+    const out: Record<string, string> = {};
+    let p: any;
+    try {
+      const fields = encodeURIComponent(
+        "id,name,firstName,lastName,emails,phones,addresses"
+      );
+      p = await this.request<any>(`/people/${contactId}?fields=${fields}`);
+    } catch {
+      return out;
+    }
+    if (!p || typeof p !== "object") return out;
+
+    const set = (k: string, v: unknown) => {
+      if (v == null) return;
+      const s = String(v).trim();
+      if (s) out[k] = s;
+    };
+
+    const firstName =
+      p.firstName ?? (p.name ? String(p.name).trim().split(/\s+/)[0] : "");
+    const lastName = p.lastName ?? "";
+    set("first_name", firstName);
+    set("last_name", lastName);
+    set("full_name", p.name ?? [firstName, lastName].filter(Boolean).join(" "));
+
+    const addresses: any[] = Array.isArray(p.addresses) ? p.addresses : [];
+    if (addresses.length) {
+      const preferred =
+        addresses.find((a) =>
+          /home|property|primary/i.test(String(a?.type ?? ""))
+        ) ?? addresses[0];
+      if (preferred && typeof preferred === "object") {
+        const street = String(preferred.street ?? "").trim();
+        const city = String(preferred.city ?? "").trim();
+        const state = String(preferred.state ?? "").trim();
+        const code = String(
+          preferred.code ?? preferred.postalCode ?? preferred.zip ?? ""
+        ).trim();
+        set("street", street);
+        set("city", city);
+        set("state", state);
+        set("postal_code", code);
+        // Natural, speakable single line, e.g. "123 Main St, Austin, TX 78704".
+        const cityState = [city, state].filter(Boolean).join(", ");
+        const full = [street, [cityState, code].filter(Boolean).join(" ").trim()]
+          .filter(Boolean)
+          .join(", ");
+        set("property_address", full || street);
+      }
+    }
+    return out;
   }
 
   async verifyCredentials(): Promise<boolean> {
