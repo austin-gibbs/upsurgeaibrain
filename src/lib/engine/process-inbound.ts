@@ -22,6 +22,7 @@ import { getCrmAdapterForAgent } from "@/lib/crm";
 import { extractFromRetellPayload } from "./outcome";
 import { todayInTz } from "./cadence";
 import { addTagsToCrm } from "./crm-writeback";
+import { pickAssigneeForLine, resolveLineRep } from "./inbound-routing";
 import type { Agent, Workspace } from "@/types";
 import type { Database } from "@/types/database";
 
@@ -29,9 +30,12 @@ type CallInsert = Database["public"]["Tables"]["calls"]["Insert"];
 type CallUpdate = Database["public"]["Tables"]["calls"]["Update"];
 
 /**
- * CRM users (by name, case-insensitive substring) who should be assigned the
- * lead and tasked to follow up after every inbound call. The first match is
- * set as the lead's assigned owner; all matches get a follow-up task.
+ * Fallback CRM users (by name, case-insensitive substring) assigned the lead
+ * and tasked to follow up when the dialed line ISN'T mapped to a specific rep
+ * in inbound-routing.ts. When the dialed number IS mapped (the normal Nil
+ * Patel Realty case), the single owning rep is used instead — see
+ * `pickAssigneeForLine`. The first match is set as the lead's assigned owner;
+ * all matches get a follow-up task.
  */
 const FOLLOW_UP_USER_NAMES = ["Nil", "Jori"];
 
@@ -150,12 +154,29 @@ export async function processInboundCall(
     /* non-fatal */
   }
 
-  // Assign the lead + create a follow-up task for Nil and Jori.
+  // Assign the lead + create a follow-up task. Route by the DIALED line:
+  // each rep owns a dedicated inbound number, so the number the caller dialed
+  // (`toNumber`) determines who owns the lead. When that line is mapped, we
+  // assign + task ONLY that rep. When it isn't (an unmapped line / other
+  // workspace), fall back to the default follow-up users.
   try {
     const users = await crm.listUsers();
-    const matched = FOLLOW_UP_USER_NAMES.map((n) =>
-      users.find((u) => u.name?.toLowerCase().includes(n.toLowerCase()))
-    ).filter((u): u is NonNullable<typeof u> => Boolean(u));
+    const lineAssignee = pickAssigneeForLine(toNumber, users);
+    const matched = lineAssignee
+      ? [lineAssignee]
+      : FOLLOW_UP_USER_NAMES.map((n) =>
+          users.find((u) => u.name?.toLowerCase().includes(n.toLowerCase()))
+        ).filter((u): u is NonNullable<typeof u> => Boolean(u));
+
+    // Surface an operational signal when a rep's line was dialed but their CRM
+    // user couldn't be resolved — the task would otherwise silently fall back.
+    const expectedRep = resolveLineRep(toNumber);
+    if (expectedRep && !lineAssignee) {
+      console.error(
+        `[process-inbound] dialed line ${toNumber} maps to "${expectedRep.repName}" ` +
+          `but no matching CRM user was found — falling back to ${FOLLOW_UP_USER_NAMES.join("/")}.`
+      );
+    }
 
     if (matched[0] && crm.assignContact) {
       try {
