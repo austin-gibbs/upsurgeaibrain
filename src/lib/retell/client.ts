@@ -12,6 +12,18 @@ import { fetchWithTimeout, parseJsonResponse } from "@/lib/http";
 const RETELL_BASE = "https://api.retellai.com";
 // Placing a call can take a little longer than a metadata read.
 const CREATE_CALL_TIMEOUT_MS = 30_000;
+
+/** Turn Retell create-phone-call failures into actionable operator messages. */
+export function formatCreatePhoneCallError(status: number, body: string): string {
+  if (status === 404 && body.includes("not found from phone-number")) {
+    const match = body.match(/Item (\+\d+)/);
+    const fromNumber = match?.[1];
+    return fromNumber
+      ? `Outbound caller ID ${fromNumber} was not found in the Retell account used for this agent. Add the correct Retell API key on the agent settings page (required when the agent uses a dedicated Retell account). Original: Retell create-phone-call ${status}: ${body}`
+      : `Retell create-phone-call ${status}: ${body}`;
+  }
+  return `Retell create-phone-call ${status}: ${body}`;
+}
 const READ_TIMEOUT_MS = 15_000;
 
 export interface CreatePhoneCallInput {
@@ -176,7 +188,8 @@ export class RetellClient {
       timeoutMs: CREATE_CALL_TIMEOUT_MS,
     });
     if (!res.ok) {
-      throw new Error(`Retell create-phone-call ${res.status}: ${await res.text()}`);
+      const body = await res.text();
+      throw new Error(formatCreatePhoneCallError(res.status, body));
     }
     const data = await parseJsonResponse<{ call_id: string }>(res, "Retell create-phone-call");
     return { callId: data.call_id };

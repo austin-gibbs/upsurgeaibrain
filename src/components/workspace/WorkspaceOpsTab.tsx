@@ -84,6 +84,8 @@ type OpsData = {
     objective: string | null;
     enroll_tag: string | null;
     retell_agent_id: string | null;
+    retell_from_number: string | null;
+    has_retell_credentials?: boolean;
     agent_call_configs: AgentCallConfigRow | AgentCallConfigRow[];
     agent_task_configs: { enabled: boolean } | { enabled: boolean }[];
   }[];
@@ -517,12 +519,21 @@ function WorkspaceOpsTabInner({
     return () => clearInterval(timer);
   }, [fetchQueue]);
 
-  // Outbound agents that are wired up to Retell can place a manual test call.
+  // Outbound agents wired to Retell with a from-number can place manual calls.
   const callableAgents = agents.filter(
-    (a) => a.direction === "outbound" && a.retell_agent_id
+    (a) =>
+      a.direction === "outbound" &&
+      a.retell_agent_id &&
+      a.retell_from_number
   );
   const activeTestAgentId =
     testAgentId || opsAgentId || callableAgents[0]?.id || "";
+  const activeTestAgent = callableAgents.find((a) => a.id === activeTestAgentId);
+  const activeTestAgentMissingCreds = Boolean(
+    activeTestAgent &&
+      activeTestAgent.retell_from_number &&
+      !activeTestAgent.has_retell_credentials
+  );
 
   function setOpsAgent(nextId: string) {
     setOpsAgentId(nextId);
@@ -613,7 +624,14 @@ function WorkspaceOpsTabInner({
     if (!agentId) {
       setTestMessage({
         type: "error",
-        text: "No outbound agent with a Retell ID is available.",
+        text: "No outbound agent with a Retell ID and from-number is available.",
+      });
+      return;
+    }
+    if (activeTestAgentMissingCreds) {
+      setTestMessage({
+        type: "error",
+        text: `Agent "${activeTestAgent?.name ?? "selected"}" is missing its Retell API key. Open the agent settings and save the API key for the Retell account that owns ${activeTestAgent?.retell_from_number ?? "the from-number"}.`,
       });
       return;
     }
@@ -716,7 +734,14 @@ function WorkspaceOpsTabInner({
     if (!agentId) {
       setRunMessage({
         type: "error",
-        text: "No outbound agent with a Retell ID is available to place a test call.",
+        text: "No outbound agent with a Retell ID and from-number is available to place a test call.",
+      });
+      return;
+    }
+    if (activeTestAgentMissingCreds) {
+      setRunMessage({
+        type: "error",
+        text: `Agent "${activeTestAgent?.name ?? "selected"}" is missing its Retell API key. Open the agent settings and save the API key for the Retell account that owns ${activeTestAgent?.retell_from_number ?? "the from-number"}.`,
       });
       return;
     }
@@ -1238,13 +1263,30 @@ function WorkspaceOpsTabInner({
                 </div>
                 <Button
                   onClick={placeAdHocTestCall}
-                  disabled={placingTest || testNumber.trim().length === 0}
+                  disabled={
+                    placingTest ||
+                    testNumber.trim().length === 0 ||
+                    activeTestAgentMissingCreds
+                  }
                   className="gap-1.5"
                 >
                   <Phone className="h-4 w-4" />
                   {placingTest ? "Calling…" : "Place test call"}
                 </Button>
               </div>
+              {activeTestAgentMissingCreds && (
+                <div className="mt-4 rounded-xl bg-accent-amber-bg px-4 py-3 text-sm text-accent-amber-fg">
+                  Agent &ldquo;{activeTestAgent?.name}&rdquo; is missing its Retell API key. Open{" "}
+                  <Link
+                    href={`/agents/${activeTestAgent?.id}`}
+                    className="font-medium underline underline-offset-2"
+                  >
+                    agent settings
+                  </Link>{" "}
+                  and save the API key for the Retell account that owns{" "}
+                  {activeTestAgent?.retell_from_number}.
+                </div>
+              )}
               {testMessage && (
                 <div
                   className={`mt-4 rounded-xl px-4 py-3 text-sm ${
@@ -1653,16 +1695,19 @@ function WorkspaceOpsTabInner({
                               c.is_terminal ||
                               !c.phones[0] ||
                               callableAgents.length === 0 ||
+                              activeTestAgentMissingCreds ||
                               callingId !== null
                             }
                             title={
                               callableAgents.length === 0
-                                ? "No outbound agent with a Retell ID"
-                                : c.is_terminal
-                                  ? "Contact has completed the flow"
-                                  : !c.phones[0]
-                                    ? "Contact has no phone number"
-                                    : "Dial this contact now (ignores call windows)"
+                                ? "No outbound agent with a Retell ID and from-number"
+                                : activeTestAgentMissingCreds
+                                  ? `Add the Retell API key for ${activeTestAgent?.retell_from_number ?? "this agent's from-number"} on the agent settings page`
+                                  : c.is_terminal
+                                    ? "Contact has completed the flow"
+                                    : !c.phones[0]
+                                      ? "Contact has no phone number"
+                                      : "Dial this contact now (ignores call windows)"
                             }
                             onClick={() => callNow(c.id)}
                           >

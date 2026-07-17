@@ -1084,7 +1084,7 @@ function AgentDetail({
           )}
         </Card>
 
-      {isInbound && (
+      {isInbound ? (
         <Card className="space-y-5 p-6">
           <SectionHeader
             title="Retell credentials"
@@ -1092,6 +1092,44 @@ function AgentDetail({
           />
           {agent.has_retell_credentials && (
             <p className="text-xs text-accent-mint-fg">Credentials stored (encrypted)</p>
+          )}
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label>Retell API key</Label>
+              <Input
+                type="password"
+                value={retellApiKey}
+                onChange={(e) => setRetellApiKey(e.target.value)}
+                placeholder="key_…"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label hint="optional">Webhook secret</Label>
+              <Input
+                type="password"
+                value={retellWebhookSecret}
+                onChange={(e) => setRetellWebhookSecret(e.target.value)}
+                placeholder="whsec_…"
+              />
+            </div>
+          </div>
+          <Button variant="secondary" disabled={saving} onClick={saveRetellCreds}>
+            Save Retell credentials
+          </Button>
+        </Card>
+      ) : (
+        <Card className="space-y-5 p-6">
+          <SectionHeader
+            title="Retell credentials"
+            description="Required when this agent uses a dedicated Retell account (separate from the platform default). Stored encrypted."
+          />
+          {agent.has_retell_credentials ? (
+            <p className="text-xs text-accent-mint-fg">Credentials stored (encrypted)</p>
+          ) : (
+            <p className="text-xs text-accent-amber-fg">
+              No Retell API key saved — outbound calls will use the platform default account and
+              fail if the from-number belongs to a different Retell account.
+            </p>
           )}
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-1.5">

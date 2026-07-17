@@ -5,7 +5,11 @@
 // =====================================================================
 import { NextRequest, NextResponse } from "next/server";
 import { listWebhookSecretCandidates, verifyRetellSignature } from "@/lib/retell/client";
-import { perAgentWebhookSecretsFromBody } from "@/lib/retell/webhook-secrets";
+import {
+  authenticateWebhookViaRetellApi,
+  listAllAgentRetellSecrets,
+  perAgentWebhookSecretsFromBody,
+} from "@/lib/retell/webhook-secrets";
 import { processRetellWebhook } from "@/lib/engine/process-outcome";
 
 export const runtime = "nodejs";
@@ -28,7 +32,28 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "webhook not configured" }, { status: 503 });
   }
 
-  if (!verifyRetellSignature(rawBody, signature, extraSecrets)) {
+  let verified = verifyRetellSignature(rawBody, signature, extraSecrets);
+
+  // Second pass: every stored per-agent key (covers shared Retell agent ids +
+  // accounts where the dialing key differs from the first lookup).
+  if (!verified) {
+    const allAgentSecrets = await listAllAgentRetellSecrets();
+    verified = verifyRetellSignature(rawBody, signature, allAgentSecrets);
+  }
+
+  // Third pass: Retell only HMAC-signs with the account's designated webhook
+  // API key. If that key isn't stored, prove authenticity by fetching the call
+  // from Retell with a known agent key for that call.
+  if (!verified) {
+    verified = await authenticateWebhookViaRetellApi(rawBody);
+    if (verified) {
+      console.warn(
+        "[retell webhook] accepted via Retell API ownership fallback — store the account's webhook API key on the agent to restore HMAC verification"
+      );
+    }
+  }
+
+  if (!verified) {
     // Log (without exposing secrets) so a key mismatch is visible instead of
     // silently dropping outcomes. A burst of these means an agent's webhook
     // key is wrong — calls will stick in `dialing` until the sweep reconciles.

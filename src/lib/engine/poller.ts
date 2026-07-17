@@ -40,6 +40,7 @@ import { sendOpsAlert } from "@/lib/alerts";
 import { shouldGuardCrmScan } from "./zero-crm-scan-guard";
 import {
   applyAgentContactState,
+  chunkIds,
   ensureAgentContactStates,
 } from "./agent-contact-state";
 
@@ -170,14 +171,18 @@ export async function pollAgent(
   const existingByCrmId = new Map<string, Contact>();
 
   if (crmIds.length > 0) {
-    const { data: existingRows } = await supabase
-      .from("contacts")
-      .select("*")
-      .eq("workspace_id", workspace.id)
-      .in("crm_contact_id", crmIds)
-      .returns<Contact[]>();
-    for (const row of existingRows ?? []) {
-      existingByCrmId.set(row.crm_contact_id, row);
+    // Chunk `.in(...)` filters — PostgREST encodes them in the URL and large
+    // enroll lists (700+) return HTTP 400 Bad Request otherwise.
+    for (const chunk of chunkIds(crmIds)) {
+      const { data: existingRows } = await supabase
+        .from("contacts")
+        .select("*")
+        .eq("workspace_id", workspace.id)
+        .in("crm_contact_id", chunk)
+        .returns<Contact[]>();
+      for (const row of existingRows ?? []) {
+        existingByCrmId.set(row.crm_contact_id, row);
+      }
     }
   }
 
@@ -455,20 +460,24 @@ export async function enqueueContactsNow(
     config.call_window_days
   );
 
-  const { data: rows } = await supabase
-    .from("contacts")
-    .select("*")
-    .eq("workspace_id", workspace.id)
-    .in("id", contactIds)
-    .returns<Contact[]>();
+  const rows: Contact[] = [];
+  for (const chunk of chunkIds(contactIds)) {
+    const { data: chunkRows } = await supabase
+      .from("contacts")
+      .select("*")
+      .eq("workspace_id", workspace.id)
+      .in("id", chunk)
+      .returns<Contact[]>();
+    if (chunkRows) rows.push(...chunkRows);
+  }
 
   // Preserve the operator's selection order.
   const stateByContactId = await ensureAgentContactStates(
     supabase,
     agentId,
-    (rows ?? []).map((c) => c.id)
+    rows.map((c) => c.id)
   );
-  const contactsForAgent = (rows ?? []).map((contact) =>
+  const contactsForAgent = rows.map((contact) =>
     applyAgentContactState(contact, stateByContactId.get(contact.id))
   );
   const byId = new Map(contactsForAgent.map((c) => [c.id, c]));

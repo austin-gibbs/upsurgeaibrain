@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   applyAgentContactState,
+  chunkIds,
   defaultAgentContactState,
   type AgentContactState,
 } from "./agent-contact-state";
@@ -21,6 +22,17 @@ const sharedContact: Contact = {
   is_terminal: false,
   terminal_outcome: null,
 };
+
+describe("chunkIds", () => {
+  it("splits large id lists into PostgREST-safe chunks", () => {
+    const ids = Array.from({ length: 250 }, (_, i) => `id-${i}`);
+    const chunks = chunkIds(ids, 100);
+    assert.equal(chunks.length, 3);
+    assert.equal(chunks[0].length, 100);
+    assert.equal(chunks[1].length, 100);
+    assert.equal(chunks[2].length, 50);
+  });
+});
 
 describe("applyAgentContactState", () => {
   it("uses fresh state for a newly tagged agent even when the shared contact has old cadence", () => {

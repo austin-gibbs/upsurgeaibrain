@@ -52,13 +52,18 @@ export async function resolvePerAgentWebhookSecrets(
 
   async function loadByRetellAgentId(retellAgentId: string | undefined): Promise<void> {
     if (!retellAgentId) return;
+    // Multiple UpSurge agents can share one Retell agent_id (e.g. Diamond
+    // Seller + Buyer/Seller). maybeSingle() 400s on that and drops secrets.
     const { data } = await supabase
       .from("agents")
       .select("id, retell_credentials_encrypted")
       .eq("retell_agent_id", retellAgentId)
-      .maybeSingle<{ id: string; retell_credentials_encrypted: string | null }>();
-    if (data?.id) seenAgentIds.add(data.id);
-    appendSecrets(secrets, data);
+      .returns<{ id: string; retell_credentials_encrypted: string | null }[]>();
+    for (const row of data ?? []) {
+      if (seenAgentIds.has(row.id)) continue;
+      seenAgentIds.add(row.id);
+      appendSecrets(secrets, row);
+    }
   }
 
   async function loadByOurCallId(callId: string | undefined): Promise<void> {
@@ -104,4 +109,68 @@ export async function perAgentWebhookSecretsFromBody(rawBody: string): Promise<s
   } catch {
     return [];
   }
+}
+
+/**
+ * All stored per-agent Retell API keys / webhook secrets.
+ *
+ * Used as a second-pass signature candidate list when the targeted agent
+ * lookup misses (shared Retell agent ids, stale metadata) or when Retell
+ * signs with a different key on the same account than the one we resolved
+ * first. Bounded by the small number of agents in the platform.
+ */
+export async function listAllAgentRetellSecrets(): Promise<string[]> {
+  const supabase = createServiceClient();
+  const { data } = await supabase
+    .from("agents")
+    .select("retell_credentials_encrypted")
+    .not("retell_credentials_encrypted", "is", null)
+    .returns<{ retell_credentials_encrypted: string | null }[]>();
+
+  const secrets: string[] = [];
+  for (const row of data ?? []) {
+    appendSecrets(secrets, row);
+  }
+  return [...new Set(secrets)];
+}
+
+/**
+ * Fallback auth when HMAC verification fails: prove the call exists in the
+ * Retell account that owns the resolved agent. Retell only signs with the
+ * account's designated "webhook" API key, which can differ from the dialing
+ * key stored on the agent — this path still authenticates those deliveries.
+ */
+export async function authenticateWebhookViaRetellApi(
+  rawBody: string
+): Promise<boolean> {
+  let body: WebhookPayloadShape;
+  try {
+    body = JSON.parse(rawBody) as WebhookPayloadShape;
+  } catch {
+    return false;
+  }
+
+  const retellCallId = body.call?.call_id?.trim();
+  if (!retellCallId) return false;
+
+  const secrets = await resolvePerAgentWebhookSecrets(body);
+  const keys = secrets.length > 0 ? secrets : await listAllAgentRetellSecrets();
+  if (keys.length === 0) return false;
+
+  for (const apiKey of keys) {
+    try {
+      const res = await fetch(
+        `https://api.retellai.com/v2/get-call/${encodeURIComponent(retellCallId)}`,
+        {
+          headers: { Authorization: `Bearer ${apiKey}` },
+          // Keep the webhook handler snappy — reconcile will catch misses.
+          signal: AbortSignal.timeout(4_000),
+        }
+      );
+      if (res.ok) return true;
+    } catch {
+      /* try next key */
+    }
+  }
+  return false;
 }

@@ -49,7 +49,7 @@ export async function GET(
     .from("agents")
     .select(
       "id, name, status, direction, objective, enroll_tag, retell_agent_id, retell_from_number, " +
-        "agent_call_configs(*), agent_task_configs(*)"
+        "retell_credentials_encrypted, agent_call_configs(*), agent_task_configs(*)"
     )
     .eq("workspace_id", params.id)
     .order("created_at", { ascending: true })
@@ -60,19 +60,26 @@ export async function GET(
         status: string;
         direction: string;
         objective: string | null;
-        enroll_tag: string | null;
-        retell_agent_id: string | null;
-        retell_from_number: string | null;
-        agent_call_configs: unknown;
+    enroll_tag: string | null;
+    retell_agent_id: string | null;
+    retell_from_number: string | null;
+    retell_credentials_encrypted: string | null;
+    agent_call_configs: unknown;
         agent_task_configs: unknown;
       }[]
     >();
 
-  const agents = (agentsRaw ?? []).map((agent) => ({
-    ...agent,
-    agent_call_configs: normalizeCallConfigList(agent.agent_call_configs),
-    agent_task_configs: normalizeEmbedList(agent.agent_task_configs),
-  }));
+  const agents = (agentsRaw ?? []).map((agent) => {
+    const { retell_credentials_encrypted, ...rest } = agent as typeof agent & {
+      retell_credentials_encrypted?: string | null;
+    };
+    return {
+      ...rest,
+      has_retell_credentials: Boolean(retell_credentials_encrypted),
+      agent_call_configs: normalizeCallConfigList(agent.agent_call_configs),
+      agent_task_configs: normalizeEmbedList(agent.agent_task_configs),
+    };
+  });
 
   const { count: contactCount } = await db
     .from("contacts")

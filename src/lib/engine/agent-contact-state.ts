@@ -62,6 +62,20 @@ export async function getAgentContactState(
   return data ?? defaultAgentContactState(agentId, contactId);
 }
 
+/**
+ * PostgREST encodes `.in(...)` filters in the URL. Hundreds of UUIDs exceed
+ * typical URL limits and return HTTP 400 "Bad Request", which silently kills
+ * polling for large agents (e.g. Diamond Seller with 700+ contacts).
+ */
+export const CONTACT_ID_IN_CHUNK = 100;
+
+/** Split IDs into PostgREST-safe `.in(...)` chunks. */
+export function chunkIds(ids: string[], size = CONTACT_ID_IN_CHUNK): string[][] {
+  const out: string[][] = [];
+  for (let i = 0; i < ids.length; i += size) out.push(ids.slice(i, i + size));
+  return out;
+}
+
 export async function ensureAgentContactStates(
   supabase: DbClient,
   agentId: string,
@@ -71,30 +85,33 @@ export async function ensureAgentContactStates(
   const states = new Map<string, AgentContactState>();
   if (uniqueIds.length === 0) return states;
 
-  const { data: existing, error } = await supabase
-    .from("agent_contact_states")
-    .select(
-      "agent_id, contact_id, attempt_count, last_called_on, next_eligible_on, is_terminal, terminal_outcome"
-    )
-    .eq("agent_id", agentId)
-    .in("contact_id", uniqueIds)
-    .returns<AgentContactState[]>();
-  if (error) throw new Error(error.message);
-
-  for (const row of existing ?? []) states.set(row.contact_id, row);
+  for (const chunk of chunkIds(uniqueIds)) {
+    const { data: existing, error } = await supabase
+      .from("agent_contact_states")
+      .select(
+        "agent_id, contact_id, attempt_count, last_called_on, next_eligible_on, is_terminal, terminal_outcome"
+      )
+      .eq("agent_id", agentId)
+      .in("contact_id", chunk)
+      .returns<AgentContactState[]>();
+    if (error) throw new Error(error.message);
+    for (const row of existing ?? []) states.set(row.contact_id, row);
+  }
 
   const missing = uniqueIds.filter((id) => !states.has(id));
   if (missing.length > 0) {
-    const { error: upsertError } = await supabase
-      .from("agent_contact_states")
-      .upsert(
-        missing.map((contactId) => ({
-          agent_id: agentId,
-          contact_id: contactId,
-        })),
-        { onConflict: "agent_id,contact_id", ignoreDuplicates: true }
-      );
-    if (upsertError) throw new Error(upsertError.message);
+    for (const chunk of chunkIds(missing)) {
+      const { error: upsertError } = await supabase
+        .from("agent_contact_states")
+        .upsert(
+          chunk.map((contactId) => ({
+            agent_id: agentId,
+            contact_id: contactId,
+          })),
+          { onConflict: "agent_id,contact_id", ignoreDuplicates: true }
+        );
+      if (upsertError) throw new Error(upsertError.message);
+    }
 
     for (const contactId of missing) {
       states.set(contactId, defaultAgentContactState(agentId, contactId));
