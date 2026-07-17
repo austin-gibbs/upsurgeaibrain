@@ -60,9 +60,12 @@ of the URLs registered here (scheme, host, path — no trailing slash). A mismat
 
 ## 3. Add the Scopes
 
-In the **Scopes** section, add these ten scopes (minimum needed for pipeline
-routing, contact/opportunity moves, and playable call-log writeback). Request no
-more than these:
+In the **Scopes** section, add these eleven scopes (minimum needed for pipeline
+routing, contact/opportunity moves, custom-field variables, and playable call-log
+writeback). This list must match `src/lib/crm/highlevel-oauth.ts` exactly —
+requesting a scope here that the app is NOT registered for makes HighLevel reject
+the connect at the "choose a location" screen with a scope error. Request no more
+than these:
 
 ```
 contacts.readonly
@@ -70,6 +73,7 @@ contacts.write
 opportunities.readonly
 opportunities.write
 locations.readonly
+locations/customFields.readonly
 users.readonly
 conversations.readonly
 conversations.write
@@ -82,6 +86,10 @@ What each is for:
   opportunity to the mapped pipeline stage (the core feature).
 - `contacts.readonly` / `contacts.write` — read the contact and write tags/notes.
 - `locations.readonly` — read pipeline + stage lists for the connected sub-account.
+- `locations/customFields.readonly` — read the location's custom-field definitions
+  so contact custom fields resolve to readable `{{...}}` dynamic-variable names
+  (used by `getContactFieldValues`). **Added after the first release — if your
+  Marketplace app predates it, add it here and reconnect, or connect fails.**
 - `users.readonly` — resolve assignable users (task assignment).
 - `conversations.readonly` / `conversations.write` — find or create the contact's
   conversation thread.
@@ -212,6 +220,13 @@ for an existing message with the same recording attachment, so it is safe to rer
   missing, or set in the wrong environment (remember: the **app** does the token
   exchange, so Vercel needs them; the **worker** refreshes tokens, so Railway needs
   them too).
+- **Scope error on the "choose a location" screen (e.g. a `locations/...readonly`
+  scope shown as unauthorized)** — UpSurge requested a scope the Marketplace app
+  isn't registered for. Add the exact scope from Step 3 (most commonly
+  `locations/customFields.readonly`, which was added to the code after the app was
+  first registered) to the app's Scopes, save, then retry Connect. Alternatively,
+  set `HIGHLEVEL_OAUTH_SCOPES` on Vercel to the scopes your app actually has so the
+  request matches (see `.env.example`).
 - **`insufficient scope` / 403 on opportunities** — a scope from Step 3 is missing;
   add it, then re-connect the location so a new token is issued with the scope.
 - **Token works then 401s after ~a day** — expected; the adapter auto-refreshes. If it
@@ -228,5 +243,5 @@ for an existing message with the same recording attachment, so it is safe to rer
 | Access level | Sub-Account (Location) |
 | Redirect (prod) | `https://upsurgeprosai.com/api/oauth/crm/callback` |
 | Redirect (local) | `http://localhost:3000/api/oauth/crm/callback` |
-| Scopes | `contacts.readonly contacts.write opportunities.readonly opportunities.write locations.readonly users.readonly conversations.readonly conversations.write conversations/message.readonly conversations/message.write` |
+| Scopes | `contacts.readonly contacts.write opportunities.readonly opportunities.write locations.readonly locations/customFields.readonly users.readonly conversations.readonly conversations.write conversations/message.readonly conversations/message.write` |
 | Env vars | `HIGHLEVEL_CLIENT_ID`, `HIGHLEVEL_CLIENT_SECRET`, `HIGHLEVEL_CALL_PROVIDER_IDS` or fallback `HIGHLEVEL_CALL_PROVIDER_ID` (Vercel + Railway + `.env.local`) |

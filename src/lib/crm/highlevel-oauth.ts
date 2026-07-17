@@ -135,6 +135,46 @@ export async function exchangeHighLevelCode(
   return toTokens(json, {});
 }
 
+/**
+ * Scopes UpSurge requests at connect time. Every scope here MUST also be
+ * registered on the HighLevel Marketplace app — HighLevel rejects the connect at
+ * the "choose a location" screen if you request a scope the app isn't registered
+ * for. Keep this in sync with `docs/HIGHLEVEL_APP_SETUP.md`.
+ */
+export const DEFAULT_HIGHLEVEL_OAUTH_SCOPES: readonly string[] = [
+  "contacts.readonly",
+  "contacts.write",
+  "opportunities.readonly",
+  "opportunities.write",
+  "locations.readonly",
+  // Read the location's custom-field definitions (id -> key/name) so contact
+  // custom fields (interested campus/program) resolve to readable dynamic-
+  // variable names instead of raw field ids. Required by getContactFieldValues.
+  // NOTE: added after the app's first release — an older Marketplace app that
+  // lacks this scope will fail the connect. Add it to the app (or trim it via
+  // HIGHLEVEL_OAUTH_SCOPES) so the requested scopes match the registered ones.
+  "locations/customFields.readonly",
+  "users.readonly",
+  // Conversations scopes — required to log a playable external call entry
+  // (search/create conversation + add outbound call log with recording).
+  "conversations.readonly",
+  "conversations.write",
+  "conversations/message.readonly",
+  "conversations/message.write",
+];
+
+/**
+ * The scopes to actually request: an optional env override (space- or
+ * comma-separated) falling back to the defaults. The override lets you align the
+ * requested scopes to what a given Marketplace app has registered — fixing a
+ * "scope not authorized" connect failure without a code deploy.
+ */
+export function highLevelOAuthScopes(): string[] {
+  const raw = (process.env.HIGHLEVEL_OAUTH_SCOPES || "").trim();
+  if (!raw) return [...DEFAULT_HIGHLEVEL_OAUTH_SCOPES];
+  return raw.split(/[\s,]+/).filter(Boolean);
+}
+
 /** Build the HighLevel authorize URL the user is redirected to to connect. */
 export function highLevelAuthorizeUrl(opts: {
   redirectUri: string;
@@ -142,24 +182,7 @@ export function highLevelAuthorizeUrl(opts: {
   scopes?: string[];
 }): string {
   const { clientId } = clientCreds();
-  const scopes = opts.scopes ?? [
-    "contacts.readonly",
-    "contacts.write",
-    "opportunities.readonly",
-    "opportunities.write",
-    "locations.readonly",
-    // Read the location's custom-field definitions (id -> key/name) so contact
-    // custom fields (interested campus/program) resolve to readable dynamic-
-    // variable names instead of raw field ids. Required by getContactFieldValues.
-    "locations/customFields.readonly",
-    "users.readonly",
-    // Conversations scopes — required to log a playable external call entry
-    // (search/create conversation + add outbound call log with recording).
-    "conversations.readonly",
-    "conversations.write",
-    "conversations/message.readonly",
-    "conversations/message.write",
-  ];
+  const scopes = opts.scopes ?? highLevelOAuthScopes();
   const params = new URLSearchParams({
     response_type: "code",
     client_id: clientId,
