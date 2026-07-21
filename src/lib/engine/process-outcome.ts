@@ -20,6 +20,7 @@ import { updateMemoryAfterCall } from "./memory";
 import { applyPipelineRouting } from "./pipeline-routing";
 import { processInboundCall } from "./process-inbound";
 import { dispatchPostCallWebhook } from "@/lib/webhooks/post-call";
+import { dispatchCustomReport } from "@/lib/integrations/custom/report";
 import {
   createTasksToCrm,
   logCallToCrm,
@@ -285,6 +286,23 @@ export async function processRetellWebhook(
         callDate: today,
       });
     } catch { /* non-fatal */ }
+  }
+
+  // 4b-custom. Custom-integration report back to the external app (e.g.
+  // SellMyFISBO). Fires only for the 'custom' provider; posts outcome + the
+  // agent-defined Retell fields to the workspace's reportWebhookUrl. Best-effort.
+  if (effectiveProvider === "custom") {
+    try {
+      await dispatchCustomReport({
+        workspace,
+        agent,
+        contact,
+        call,
+        outcome,
+        parsed,
+        callDate: today,
+      });
+    } catch { /* non-fatal: never block cadence on report delivery */ }
   }
 
   // 4c. HighLevel pipeline routing (best-effort, app-driven). Move the

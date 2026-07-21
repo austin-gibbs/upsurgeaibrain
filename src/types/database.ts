@@ -645,6 +645,7 @@ export type Database = {
           attempt_count: number
           created_at: string
           crm_contact_id: string
+          dynamic_var_overrides: Json | null
           email: string | null
           full_name: string | null
           id: string
@@ -661,6 +662,7 @@ export type Database = {
           attempt_count?: number
           created_at?: string
           crm_contact_id: string
+          dynamic_var_overrides?: Json | null
           email?: string | null
           full_name?: string | null
           id?: string
@@ -677,6 +679,7 @@ export type Database = {
           attempt_count?: number
           created_at?: string
           crm_contact_id?: string
+          dynamic_var_overrides?: Json | null
           email?: string | null
           full_name?: string | null
           id?: string
@@ -692,6 +695,57 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "contacts_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      integration_api_keys: {
+        Row: {
+          active: boolean
+          agent_id: string | null
+          created_at: string
+          id: string
+          label: string | null
+          last_used_at: string | null
+          token_hash: string
+          token_prefix: string
+          workspace_id: string
+        }
+        Insert: {
+          active?: boolean
+          agent_id?: string | null
+          created_at?: string
+          id?: string
+          label?: string | null
+          last_used_at?: string | null
+          token_hash: string
+          token_prefix: string
+          workspace_id: string
+        }
+        Update: {
+          active?: boolean
+          agent_id?: string | null
+          created_at?: string
+          id?: string
+          label?: string | null
+          last_used_at?: string | null
+          token_hash?: string
+          token_prefix?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "integration_api_keys_agent_id_fkey"
+            columns: ["agent_id"]
+            isOneToOne: false
+            referencedRelation: "agents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "integration_api_keys_workspace_id_fkey"
             columns: ["workspace_id"]
             isOneToOne: false
             referencedRelation: "workspaces"
@@ -1001,7 +1055,7 @@ export type Database = {
         | "follow_up"
         | "error"
       call_status: "queued" | "dialing" | "completed" | "failed"
-      crm_provider: "followupboss" | "highlevel"
+      crm_provider: "followupboss" | "highlevel" | "custom"
       member_role: "owner" | "admin" | "member"
     }
     CompositeTypes: {
@@ -1146,7 +1200,7 @@ export const Constants = {
         "error",
       ],
       call_status: ["queued", "dialing", "completed", "failed"],
-      crm_provider: ["followupboss", "highlevel"],
+      crm_provider: ["followupboss", "highlevel", "custom"],
       member_role: ["owner", "admin", "member"],
     },
   },

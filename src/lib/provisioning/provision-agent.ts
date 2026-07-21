@@ -21,6 +21,7 @@ import {
   createRetellAgent,
   createRetellLlm,
   createRetellPhoneNumber,
+  DEFAULT_POST_CALL_ANALYSIS_DATA,
   type RetellResponseEngine,
 } from "@/lib/retell/authoring";
 import {
@@ -28,6 +29,7 @@ import {
   taskConfigSchema,
   pipelineStageMapSchema,
   crmCredentialsSchema,
+  customCredentialsSchema,
   crmAccountUrlSchema,
 } from "@/lib/validation";
 import {
@@ -51,6 +53,17 @@ const retellPhoneSchema = z.discriminatedUnion("mode", [
   z.object({ mode: z.literal("none") }),
 ]);
 
+// Extra post-call analysis fields APPENDED to the always-present defaults
+// (call_outcome + appointment_time). Used by the custom SellMyFISBO integration
+// to surface report fields (seller_timeline, asking_price, etc.) back to the
+// external app. Omit for FUB/HighLevel agents — they use the defaults.
+const postCallFieldSchema = z.object({
+  type: z.enum(["string", "enum", "boolean", "number"]).default("string"),
+  name: z.string().min(1),
+  description: z.string().default(""),
+  choices: z.array(z.string()).optional(),
+});
+
 const responseEngineSchema = z
   .discriminatedUnion("type", [
     z.object({ type: z.literal("retell-llm") }),
@@ -71,6 +84,8 @@ const retellSpecSchema = z.object({
   /** Required when responseEngine is a Retell LLM. */
   generalPrompt: z.string().optional(),
   beginMessage: z.string().optional(),
+  /** Optional extra post-call analysis fields, appended to the defaults. */
+  extraPostCallFields: z.array(postCallFieldSchema).optional(),
   phone: retellPhoneSchema,
 });
 
@@ -84,13 +99,16 @@ const newWorkspaceSchema = z.object({
   timezone: z.string().default("America/New_York"),
   // The DB column crm_provider is NOT NULL, so a provider is always chosen.
   // Credentials, however, may be deferred (see crmCredentials below).
-  crmProvider: z.enum(["followupboss", "highlevel"]).default("followupboss"),
+  // "custom" is the external-app integration (e.g. SellMyFISBO): its
+  // credentials carry a report webhook URL, not a CRM API key.
+  crmProvider: z.enum(["followupboss", "highlevel", "custom"]).default("followupboss"),
   enrollTag: z.string().default("upsurgecallflowai"),
   crmAccountUrl: crmAccountUrlSchema.default(null),
   // OPTIONAL. Omit to stand up the workspace WITHOUT a CRM connection yet — the
   // agent then lands as `draft` until CRM is connected in the app. Supply to
-  // wire CRM at provision time (required for immediate activation).
-  crmCredentials: crmCredentialsSchema.optional(),
+  // wire CRM at provision time (required for immediate activation). Accepts a
+  // FUB/HighLevel credential OR a custom-integration report-webhook credential.
+  crmCredentials: z.union([crmCredentialsSchema, customCredentialsSchema]).optional(),
 });
 
 const existingWorkspaceSchema = z.object({
@@ -191,7 +209,7 @@ export interface ProvisionResult {
 type WorkspaceRow = {
   id: string;
   enroll_tag: string;
-  crm_provider: "followupboss" | "highlevel" | null;
+  crm_provider: "followupboss" | "highlevel" | "custom" | null;
   crm_credentials_encrypted: string | null;
 };
 
@@ -254,6 +272,14 @@ export async function provisionRetellAgent(
     voiceId: retell.voiceId,
     language: retell.language,
     webhookUrl,
+    ...(retell.extraPostCallFields && retell.extraPostCallFields.length > 0
+      ? {
+          postCallAnalysisData: [
+            ...DEFAULT_POST_CALL_ANALYSIS_DATA,
+            ...retell.extraPostCallFields,
+          ],
+        }
+      : {}),
   });
 
   // ---- 3. Phone number ----------------------------------------------------

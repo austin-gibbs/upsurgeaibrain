@@ -19,6 +19,16 @@ export const crmCredentialsSchema = z.union([
   }),
 ]);
 
+/**
+ * Custom-integration workspace credentials (e.g. SellMyFISBO). Stores where
+ * post-call reports are delivered. Kept separate from crmCredentialsSchema so
+ * the FUB/HighLevel union is never widened for those providers.
+ */
+export const customCredentialsSchema = z.object({
+  reportWebhookUrl: z.string().url(),
+  reportWebhookSecret: z.string().min(1).optional(),
+});
+
 /** Base URL for CRM contact pages (e.g. https://nilpatel.followupboss.com). */
 export const crmAccountUrlSchema = z
   .string()
@@ -311,3 +321,40 @@ export const testCallSchema = z
   .refine((v) => Boolean(v.contactId) !== Boolean(v.toNumber), {
     message: "Provide either a contact or a phone number, not both.",
   });
+
+/**
+ * Payload for the on-demand custom-integration "trigger a call" endpoint
+ * (e.g. SellMyFISBO's "Add to AI Campaign" button). The external app sends the
+ * full lead AND the triggering real-estate agent, both of which are injected
+ * into the Retell prompt as dynamic variables.
+ *
+ * `lead.id` is the external app's stable id for this lead; it becomes the
+ * contact's `crm_contact_id`, so re-triggering the same lead reuses one row.
+ * Any extra key/value pairs in `variables` are merged verbatim as additional
+ * dynamic variables (forward-compatible without an UpSurge deploy).
+ */
+export const customTriggerCallSchema = z.object({
+  lead: z.object({
+    id: z.string().trim().min(1, "lead.id is required"),
+    name: z.string().trim().min(1).optional(),
+    phone: z
+      .string()
+      .trim()
+      .regex(/^\+[1-9]\d{7,14}$/, "lead.phone must be E.164, e.g. +15551234567"),
+    email: z.string().trim().email().optional(),
+    property_address: z.string().trim().optional(),
+    property_city: z.string().trim().optional(),
+    listing_price: z.union([z.string(), z.number()]).optional(),
+    days_on_market: z.union([z.string(), z.number()]).optional(),
+  }),
+  agent: z.object({
+    name: z.string().trim().min(1, "agent.name is required"),
+    company: z.string().trim().optional(),
+    phone: z.string().trim().optional(),
+    email: z.string().trim().email().optional(),
+  }),
+  /** Optional extra dynamic variables merged verbatim into the Retell prompt. */
+  variables: z.record(z.string(), z.union([z.string(), z.number()])).optional(),
+});
+
+export type CustomTriggerCallInput = z.infer<typeof customTriggerCallSchema>;

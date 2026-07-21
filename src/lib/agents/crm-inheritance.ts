@@ -3,8 +3,10 @@
 // share one token store — duplicate OAuth copies rotate each other out and
 // de-auth sibling agents.
 
+import type { CrmProvider } from "@/types";
+
 export type CrmCarrier = {
-  crm_provider: "followupboss" | "highlevel" | null;
+  crm_provider: CrmProvider | null;
   crm_credentials_encrypted: string | null;
 };
 
@@ -41,7 +43,7 @@ export function hasEffectiveCrmCredentials(
 export function effectiveCrmProvider(
   agent: CrmCarrier,
   workspace: CrmCarrier
-): "followupboss" | "highlevel" | null {
+): CrmProvider | null {
   if (workspace.crm_provider && workspace.crm_credentials_encrypted) {
     return workspace.crm_provider;
   }
@@ -57,7 +59,7 @@ export type CrmInheritanceAudit = {
   inheritsWorkspaceCrm: boolean;
   hasOwnCrmCredentials: boolean;
   workspaceHasCrmCredentials: boolean;
-  effectiveProvider: "followupboss" | "highlevel" | null;
+  effectiveProvider: CrmProvider | null;
   recommendation: string | null;
 };
 

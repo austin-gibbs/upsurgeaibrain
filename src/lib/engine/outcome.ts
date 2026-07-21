@@ -83,6 +83,8 @@ export function extractFromRetellPayload(body: any): {
   durationSeconds: number;
   fromNumber: string | null;
   metadata: Record<string, string>;
+  /** Full Retell custom_analysis_data object (agent-defined post-call fields). */
+  customFields: Record<string, unknown>;
 } {
   const call = body?.call ?? body ?? {};
   const analysis = call.call_analysis ?? {};
@@ -97,5 +99,6 @@ export function extractFromRetellPayload(body: any): {
     durationSeconds: Math.round((call.duration_ms ?? 0) / 1000),
     fromNumber: call.from_number ?? null,
     metadata: call.metadata ?? {},
+    customFields: custom && typeof custom === "object" ? custom : {},
   };
 }

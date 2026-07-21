@@ -8,6 +8,7 @@ import type { Agent, Workspace } from "@/types";
 import { workspaceHasCrmCredentials } from "@/lib/agents/crm-inheritance";
 import type {
   CrmAdapter,
+  CustomCredentials,
   FubCredentials,
   HighLevelCredentials,
   HighLevelReauthFlagger,
@@ -15,6 +16,7 @@ import type {
 } from "./types";
 import { FollowUpBossAdapter } from "./followupboss";
 import { HighLevelAdapter } from "./highlevel";
+import { CustomAdapter } from "./custom";
 
 export * from "./types";
 
@@ -87,7 +89,7 @@ export function getCrmAdapter(workspace: Workspace): CrmAdapter {
   if (!workspace.crm_credentials_encrypted) {
     throw new Error(`Workspace ${workspace.id} has no CRM credentials configured`);
   }
-  const creds = decryptJson<FubCredentials | HighLevelCredentials>(
+  const creds = decryptJson<FubCredentials | HighLevelCredentials | CustomCredentials>(
     workspace.crm_credentials_encrypted
   );
 
@@ -100,6 +102,8 @@ export function getCrmAdapter(workspace: Workspace): CrmAdapter {
         persistHighLevelTokens("workspaces", workspace.id),
         flagHighLevelReauth("workspaces", workspace.id)
       );
+    case "custom":
+      return new CustomAdapter(creds as CustomCredentials, { workspaceId: workspace.id });
     default:
       throw new Error(`Unsupported CRM provider: ${workspace.crm_provider}`);
   }

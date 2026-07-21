@@ -197,6 +197,20 @@ export interface HighLevelCredentials {
   expiresAt?: number;
 }
 
+/**
+ * Custom integration (e.g. SellMyFISBO). An EXTERNAL app is the source of truth
+ * for contacts; UpSurge only places the call and posts a report back. Per-lead
+ * + per-agent dynamic variables ride on `contacts.dynamic_var_overrides`, so no
+ * live CRM fetch is needed. Booking/tags/notes are no-ops — the external app
+ * owns that state and receives the outcome via `reportWebhookUrl`.
+ */
+export interface CustomCredentials {
+  /** Where post-call reports are POSTed back to the external app. */
+  reportWebhookUrl: string;
+  /** Optional shared secret; sent as `X-UpSurge-Signature` HMAC over the body. */
+  reportWebhookSecret?: string;
+}
+
 /** Called by the adapter after it rotates its tokens, so the caller can
  *  persist the new encrypted credentials back to the agent/workspace row. */
 export type HighLevelTokenPersistor = (

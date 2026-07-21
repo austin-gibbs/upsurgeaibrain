@@ -26,8 +26,17 @@ export function buildDynamicVariables(params: {
   attemptNumber: number;
 }): Record<string, string> {
   const { agent, contact, memory, attemptNumber } = params;
+  const fullName = contact.full_name?.trim() ?? "";
+  // First token of the stored full name; used for natural first-name greetings
+  // (e.g. voicemails). Falls back to "there" when we have no name at all.
+  const firstName = fullName.split(/\s+/)[0] || "there";
   return {
-    contact_name: contact.full_name ?? "there",
+    contact_name: fullName || "there",
+    // Diamond (and other HighLevel-origin) agents author their prompts and
+    // voicemails with {{customer_name}} / {{first_name}} tokens. Inject both so
+    // those tokens resolve instead of rendering an unfilled placeholder.
+    customer_name: fullName || "there",
+    first_name: firstName,
     objective: agent.objective ?? "",
     // Direction signal the prompt can branch on. Engine-placed calls are always
     // outbound; inbound handling (if bound) should pass "inbound" instead.

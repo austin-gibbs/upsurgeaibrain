@@ -2,7 +2,7 @@
 // Shared domain types. These mirror the DB schema (supabase/migrations).
 // =====================================================================
 
-export type CrmProvider = "followupboss" | "highlevel";
+export type CrmProvider = "followupboss" | "highlevel" | "custom";
 
 export type MemberRole = "owner" | "admin" | "member";
 
@@ -186,6 +186,12 @@ export interface Contact {
   next_eligible_on: string | null;
   is_terminal: boolean;
   terminal_outcome: CallOutcome | null;
+  /**
+   * Custom-integration only: per-lead dynamic-variable overrides injected into
+   * the Retell prompt (e.g. homeowner_name, agent_name, property_address). Null
+   * for Follow Up Boss / HighLevel contacts.
+   */
+  dynamic_var_overrides?: Record<string, string> | null;
 }
 
 export interface AgentContactState {
