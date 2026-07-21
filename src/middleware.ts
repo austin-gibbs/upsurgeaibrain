@@ -6,10 +6,8 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  // Run on page navigations only. All /api/* routes self-authenticate and
-  // must never be blocked by a middleware hang (Vercel MIDDLEWARE_INVOCATION_TIMEOUT
-  // returns a plain-text 504 that clients then fail to parse as JSON).
+  // Run on everything except static assets and the auth-callback route.
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|api|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+    "/((?!_next/static|_next/image|favicon.ico|api/webhooks|api/cron|api/admin|api/integrations|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
   ],
 };
