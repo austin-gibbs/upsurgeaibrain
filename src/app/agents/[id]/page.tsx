@@ -27,6 +27,7 @@ import {
   type StageMapEntry,
   type TaskConfig,
 } from "@/components/agent-form/types";
+import { readJson } from "@/lib/api/fetch-json";
 import { normalizeHHMM, normalizeTaskConfigList } from "@/lib/hhmm";
 import {
   prepareStageMapForSave,
@@ -255,7 +256,7 @@ function AgentDetail({
 
   function load() {
     fetch(`/api/agents/${params.id}`)
-      .then((r) => r.json())
+      .then((r) => readJson<any>(r))
       .then((d) => {
         if (d.error) return setError(d.error);
         setAgent(d.agent);
@@ -344,7 +345,7 @@ function AgentDetail({
     setPipelinesLoading(true);
     setPipelinesError(null);
     fetch(`/api/agents/${params.id}/pipelines`)
-      .then((r) => r.json())
+      .then((r) => readJson<any>(r))
       .then((d) => {
         if (d.error && !d.pipelines) setPipelinesError(d.error);
         setPipelines(d.pipelines ?? []);
@@ -365,7 +366,7 @@ function AgentDetail({
     setOpportunityFieldsLoading(true);
     setOpportunityFieldsError(null);
     fetch(`/api/agents/${params.id}/opportunity-fields`)
-      .then((r) => r.json())
+      .then((r) => readJson<any>(r))
       .then((d) => {
         if (d.error && !d.fields) setOpportunityFieldsError(d.error);
         setOpportunityFields(d.fields ?? []);
@@ -385,7 +386,7 @@ function AgentDetail({
     }
     setCrmUsersLoading(true);
     fetch(`/api/agents/${params.id}/users`)
-      .then((r) => r.json())
+      .then((r) => readJson<any>(r))
       .then((d) => setCrmUsers(d.users ?? []))
       .catch(() => setCrmUsers([]))
       .finally(() => setCrmUsersLoading(false));
@@ -454,7 +455,7 @@ function AgentDetail({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      const data = await res.json();
+      const data = await readJson<any>(res);
       if (!res.ok || data.error) {
         const detail =
           Array.isArray(data.issues) && data.issues.length > 0

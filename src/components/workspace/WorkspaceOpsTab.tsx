@@ -42,6 +42,7 @@ import {
   pickDefaultOpsAgentId,
   savePersistedOpsAgent,
 } from "@/lib/workspaces/ops-agent-scope";
+import { readJson } from "@/lib/api/fetch-json";
 
 type ContactRow = {
   id: string;
@@ -430,7 +431,7 @@ function WorkspaceOpsTabInner({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      const d = await res.json();
+      const d = await readJson<any>(res);
       if (!res.ok) throw new Error(d.error ?? "Failed to update workspace");
       onRefresh();
       setControlMsg("Workspace settings saved.");
@@ -496,11 +497,11 @@ function WorkspaceOpsTabInner({
       const qs = opsAgentId ? `?agentId=${opsAgentId}` : "";
       const res = await fetch(`/api/workspaces/${workspaceId}/queue-calls${qs}`);
       if (!res.ok) return;
-      const data = (await res.json()) as {
+      const data = await readJson<{
         entries: QueueEntry[];
         summary: QueueSummary;
         byAgent?: Record<string, number>;
-      };
+      }>(res);
       setQueueEntries(data.entries ?? []);
       setQueueSummary(
         data.summary ?? { total: 0, pending: 0, dialing: 0 }
@@ -598,10 +599,12 @@ function WorkspaceOpsTabInner({
             duplicateSource.direction === "outbound" ? duplicateEnrollTag.trim() : null,
         }),
       });
-      const payload = (await res.json().catch(() => ({}))) as {
-        error?: string;
-        agentId?: string;
-      };
+      let payload: { error?: string; agentId?: string } = {};
+      try {
+        payload = await readJson<{ error?: string; agentId?: string }>(res);
+      } catch {
+        payload = {};
+      }
       if (!res.ok) {
         setDuplicateError(payload.error ?? "Failed to duplicate agent.");
         return;
@@ -643,7 +646,7 @@ function WorkspaceOpsTabInner({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ agentId, toNumber: testNumber.trim() }),
       });
-      const d = await res.json();
+      const d = await readJson<any>(res);
       if (!res.ok) {
         setTestMessage({
           type: "error",
@@ -686,7 +689,7 @@ function WorkspaceOpsTabInner({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ agentId, contactIds: ids }),
       });
-      const d = await res.json();
+      const d = await readJson<any>(res);
       if (!res.ok) {
         setRunMessage({ type: "error", text: d.error ?? "Failed to queue calls" });
         return;
@@ -753,7 +756,7 @@ function WorkspaceOpsTabInner({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ agentId, contactId }),
       });
-      const d = await res.json();
+      const d = await readJson<any>(res);
       if (!res.ok) {
         setRunMessage({ type: "error", text: d.error ?? "Test call failed" });
         return;
@@ -881,7 +884,7 @@ function WorkspaceOpsTabInner({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ confirmName: deleteConfirmName.trim() }),
       });
-      const d = await res.json();
+      const d = await readJson<any>(res);
       if (!res.ok) {
         setDeleteError(d.error ?? "Failed to delete workspace");
         return;

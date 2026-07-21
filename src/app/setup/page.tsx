@@ -14,6 +14,7 @@ import {
   PageGreeting,
   cn,
 } from "@/components/ui";
+import { readJson } from "@/lib/api/fetch-json";
 import { CallSettings } from "@/components/agent-form/CallSettings";
 import { TaskSettings } from "@/components/agent-form/TaskSettings";
 import { PostCallWebhookSettings } from "@/components/agent-form/PostCallWebhookSettings";
@@ -140,7 +141,7 @@ export default function SetupWizard() {
           includeUsers: true,
         }),
       });
-      const data = await res.json();
+      const data = await readJson<any>(res);
       if (data.ok) {
         setVerified(true);
         setCrmUsers(data.users ?? []);
@@ -199,7 +200,7 @@ export default function SetupWizard() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      const data = await res.json();
+      const data = await readJson<any>(res);
       if (!res.ok || data.error) {
         const issues =
           Array.isArray(data.issues) && data.issues.length

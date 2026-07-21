@@ -37,6 +37,7 @@ import {
   type OverviewTotals,
   type OverviewWorkspaceRow,
 } from "@/lib/reporting/overview";
+import { readJson } from "@/lib/api/fetch-json";
 
 type OverviewResponse = {
   range: {
@@ -163,8 +164,8 @@ export default function DashboardPage() {
   useEffect(() => {
     let cancelled = false;
     fetch("/api/workspaces")
-      .then((r) => r.json())
-      .then((d: { workspaces?: WorkspaceShell[]; error?: string }) => {
+      .then((r) => readJson<{ workspaces?: WorkspaceShell[]; error?: string }>(r))
+      .then((d) => {
         if (cancelled || d.error || !d.workspaces) return;
         setWorkspaceShell(shellToOverviewRows(d.workspaces));
       })
@@ -185,8 +186,8 @@ export default function DashboardPage() {
         interval: "daily",
       });
       return fetch(`/api/reporting/overview?${qs}`, { signal: opts?.signal })
-        .then((r) => r.json())
-        .then((d: OverviewResponse) => {
+        .then((r) => readJson<OverviewResponse>(r))
+        .then((d) => {
           if (opts?.signal?.aborted) return;
           if (d.error) {
             setError(d.error);
