@@ -11,6 +11,7 @@ import {
   PageGreeting,
   SectionHeader,
 } from "@/components/ui";
+import { readJson } from "@/lib/api/fetch-json";
 import { createClient } from "@/lib/supabase/client";
 
 type Profile = {
@@ -57,7 +58,7 @@ export default function SettingsPage() {
     let cancelled = false;
     fetch("/api/profile")
       .then(async (res) => {
-        const data = await res.json();
+        const data = await readJson<any>(res);
         if (!res.ok) throw new Error(data.error ?? "Failed to load profile");
         return data as Profile;
       })
@@ -92,7 +93,7 @@ export default function SettingsPage() {
           full_name: fullName.trim() || null,
         }),
       });
-      const data = await res.json();
+      const data = await readJson<any>(res);
       if (!res.ok) throw new Error(data.error ?? "Failed to update profile");
       setProfile(data as Profile);
       setFullName(data.full_name ?? "");

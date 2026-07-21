@@ -25,6 +25,7 @@ import type {
   OverviewWorkspaceRow,
 } from "@/lib/reporting/overview";
 import type { ReportingAggregates } from "@/lib/reporting/aggregate";
+import { readJson } from "@/lib/api/fetch-json";
 
 type OverviewResponse = {
   range: { days: OverviewRangeDays };
@@ -103,7 +104,7 @@ export default function WorkspacesListPage() {
     try {
       // Shell first (fast), then enrich with lean overview KPIs.
       const shellRes = await fetch("/api/workspaces", { signal });
-      const shellJson = await shellRes.json();
+      const shellJson = await readJson<any>(shellRes);
       if (signal?.aborted) return;
       if (shellJson.error) throw new Error(shellJson.error);
       const shell = shellRows((shellJson.workspaces ?? []) as WorkspaceApiRow[]);
@@ -112,7 +113,7 @@ export default function WorkspacesListPage() {
 
       const qs = new URLSearchParams({ range: "30", interval: "daily" });
       const overviewRes = await fetch(`/api/reporting/overview?${qs}`, { signal });
-      const overviewJson = (await overviewRes.json()) as OverviewResponse;
+      const overviewJson = await readJson<OverviewResponse>(overviewRes);
       if (signal?.aborted) return;
       if (overviewJson.error) {
         // Keep shell table; KPIs just stay at zero.
@@ -197,7 +198,7 @@ export default function WorkspacesListPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ confirmName: deleteConfirmName.trim() }),
       });
-      const d = await res.json();
+      const d = await readJson<{ error?: string }>(res);
       if (!res.ok) {
         setDeleteError(d.error ?? "Failed to delete workspace");
         return;
