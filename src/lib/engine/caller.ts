@@ -250,6 +250,22 @@ export async function placeCall(job: CallJob): Promise<{ callId: string; retellC
     attemptNumber: job.attemptNumber,
   });
 
+  // Inject per-lead dynamic variables the caller stored on the contact row
+  // (the custom integration's trigger endpoint writes lead+agent fields to
+  // contacts.dynamic_var_overrides, e.g. {{homeowner_name}}, {{property_address}}
+  // {{agent_name}}…). Read directly here so injection does NOT depend on the CRM
+  // adapter resolving — a custom workspace has no pollable CRM, so the adapter
+  // round-trip below can throw and get swallowed, dropping these variables.
+  // Strictly additive: base identity/memory variables win on any key collision.
+  if (contactForAgent.dynamic_var_overrides && typeof contactForAgent.dynamic_var_overrides === "object") {
+    const overrideVars: Record<string, string> = {};
+    for (const [k, v] of Object.entries(contactForAgent.dynamic_var_overrides)) {
+      if (v === null || v === undefined || v === "") continue;
+      overrideVars[k] = String(v);
+    }
+    dynamicVariables = { ...overrideVars, ...dynamicVariables };
+  }
+
   // Best-effort: enrich with the contact's CRM field values (e.g. HighLevel
   // custom fields like interested campus/program) so the prompt can reference
   // them as {{...}} dynamic variables. Strictly additive — base identity/memory
