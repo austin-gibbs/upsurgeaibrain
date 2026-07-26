@@ -14,6 +14,7 @@
 import { useState } from "react";
 import { PageShell } from "@/components/TopNav";
 import { Button, Card, Input, Label, SectionHeader } from "@/components/ui";
+import { readJson } from "@/lib/api/fetch-json";
 
 const SPEC_TEMPLATE = `{
   "direction": "outbound",
@@ -146,7 +147,7 @@ export default function AdminConsolePage() {
     setDiagResult(null);
     try {
       const res = await fetch("/api/console/diagnostics");
-      const data = await res.json();
+      const data = await readJson<any>(res);
       setDiagResult(data);
     } catch (e) {
       setDiagResult(e instanceof Error ? e.message : String(e));
@@ -164,7 +165,7 @@ export default function AdminConsolePage() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ dryRun, limit: 200, olderThanMinutes: 5 }),
       });
-      const data = await res.json();
+      const data = await readJson<any>(res);
       setReconcileResult(data);
       if (res.ok && !dryRun) await loadDiagnostics();
     } catch (e) {
@@ -178,7 +179,7 @@ export default function AdminConsolePage() {
     setTmBusy("list");
     try {
       const res = await fetch("/api/console/team-members");
-      const data = await res.json();
+      const data = await readJson<any>(res);
       if (res.ok) setAdmins(data.admins ?? []);
       else setTmResult(data);
     } catch (e) {
@@ -202,7 +203,7 @@ export default function AdminConsolePage() {
           password: tmPassword,
         }),
       });
-      const data = await res.json();
+      const data = await readJson<any>(res);
       setTmResult(data);
       if (res.ok) {
         setTmName("");
@@ -236,7 +237,7 @@ export default function AdminConsolePage() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ spec: parsed, dryRun }),
       });
-      setProvResult(await res.json());
+      setProvResult(await readJson<any>(res));
     } catch (e) {
       setProvResult(e instanceof Error ? e.message : String(e));
     } finally {
@@ -252,7 +253,7 @@ export default function AdminConsolePage() {
       const res = await fetch(
         `/api/console/status?workspace=${encodeURIComponent(workspace.trim())}`
       );
-      setMgmtResult(await res.json());
+      setMgmtResult(await readJson<any>(res));
     } catch (e) {
       setMgmtResult(e instanceof Error ? e.message : String(e));
     } finally {
@@ -270,7 +271,7 @@ export default function AdminConsolePage() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ workspace: workspace.trim(), dryRun }),
       });
-      setMgmtResult(await res.json());
+      setMgmtResult(await readJson<any>(res));
     } catch (e) {
       setMgmtResult(e instanceof Error ? e.message : String(e));
     } finally {
@@ -295,7 +296,7 @@ export default function AdminConsolePage() {
           attempts: Number(attempts),
         }),
       });
-      setMgmtResult(await res.json());
+      setMgmtResult(await readJson<any>(res));
     } catch (e) {
       setMgmtResult(e instanceof Error ? e.message : String(e));
     } finally {
@@ -311,7 +312,7 @@ export default function AdminConsolePage() {
       const params = new URLSearchParams({ workspace: workspace.trim() });
       if (agentName.trim()) params.set("agent", agentName.trim());
       const res = await fetch(`/api/console/highlevel?${params.toString()}`);
-      setHlResult(await res.json());
+      setHlResult(await readJson<any>(res));
     } catch (e) {
       setHlResult(e instanceof Error ? e.message : String(e));
     } finally {
@@ -327,7 +328,7 @@ export default function AdminConsolePage() {
       const params = new URLSearchParams({ workspace: workspace.trim() });
       if (agentName.trim()) params.set("agent", agentName.trim());
       const res = await fetch(`/api/console/agent-config?${params.toString()}`);
-      const data = await res.json();
+      const data = await readJson<any>(res);
       if (res.ok) {
         setCfgText(
           JSON.stringify(
@@ -379,7 +380,7 @@ export default function AdminConsolePage() {
           ...parsed,
         }),
       });
-      setCfgResult(await res.json());
+      setCfgResult(await readJson<any>(res));
     } catch (e) {
       setCfgResult(e instanceof Error ? e.message : String(e));
     } finally {
@@ -401,7 +402,7 @@ export default function AdminConsolePage() {
           dryRun,
         }),
       });
-      const data = await res.json();
+      const data = await readJson<any>(res);
       setMgmtResult(data);
       if (res.ok && !dryRun && data.deleted) {
         setWorkspace("");

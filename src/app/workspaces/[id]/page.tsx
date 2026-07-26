@@ -24,6 +24,7 @@ import {
   type ReportingResponse,
 } from "@/components/reporting/types";
 import { WorkspaceOpsTab, CRM_LABEL } from "@/components/workspace/WorkspaceOpsTab";
+import { readJson } from "@/lib/api/fetch-json";
 
 type OpsDetail = {
   workspace: {
@@ -109,7 +110,7 @@ function WorkspaceDetail({ params }: { params: { id: string } }) {
 
   const refreshSummary = useCallback(() => {
     fetch(`/api/workspaces/${params.id}/summary`)
-      .then((r) => r.json())
+      .then((r) => readJson<any>(r))
       .then((d) => {
         if (d.error) setError(d.error);
         else {
@@ -123,7 +124,7 @@ function WorkspaceDetail({ params }: { params: { id: string } }) {
   const refreshOps = useCallback(() => {
     setLoadingOps(true);
     fetch(`/api/workspaces/${params.id}`)
-      .then((r) => r.json())
+      .then((r) => readJson<any>(r))
       .then((d) => {
         if (d.error) setError(d.error);
         else {
@@ -162,7 +163,7 @@ function WorkspaceDetail({ params }: { params: { id: string } }) {
       to: toDate,
     });
     fetch(`/api/workspaces/${params.id}/reporting?${qs}`)
-      .then((r) => r.json())
+      .then((r) => readJson<any>(r))
       .then((d) => {
         if (d.error) setError(d.error);
         else setReporting(d);
@@ -209,7 +210,7 @@ function WorkspaceDetail({ params }: { params: { id: string } }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ crm_account_url: crmAccountUrl.trim() || null }),
       });
-      const d = await res.json();
+      const d = await readJson<{ error?: string }>(res);
       if (!res.ok) throw new Error(d.error ?? "Failed to save");
       refreshSummary();
       if (opsData) refreshOps();

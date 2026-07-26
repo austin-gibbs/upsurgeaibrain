@@ -15,6 +15,7 @@ import {
   Segmented,
   Select,
 } from "@/components/ui";
+import { readJson } from "@/lib/api/fetch-json";
 import { CallSettings } from "@/components/agent-form/CallSettings";
 import { TaskSettings } from "@/components/agent-form/TaskSettings";
 import { PostCallWebhookSettings } from "@/components/agent-form/PostCallWebhookSettings";
@@ -74,7 +75,7 @@ export default function NewAgentPage({
 
   useEffect(() => {
     fetch(`/api/workspaces/${params.id}`)
-      .then((r) => r.json())
+      .then((r) => readJson<any>(r))
       .then((d) => {
         if (d.error) {
           setError(d.error);
@@ -145,7 +146,7 @@ export default function NewAgentPage({
           taskConfig,
         }),
       });
-      const data = await res.json();
+      const data = await readJson<any>(res);
       if (!res.ok || data.error) {
         throw new Error(data.error ?? "Failed to create agent");
       }

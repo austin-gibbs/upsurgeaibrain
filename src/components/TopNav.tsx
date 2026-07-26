@@ -21,6 +21,7 @@ import {
   Shield,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import { readJson } from "@/lib/api/fetch-json";
 import { cn } from "@/components/ui";
 
 /* ----------------------------- Nav context ----------------------------- */
@@ -109,7 +110,7 @@ function useUserProfile() {
     fetch("/api/profile")
       .then(async (res) => {
         if (!res.ok) return null;
-        return (await res.json()) as UserProfile;
+        return await readJson<UserProfile>(res);
       })
       .then((data) => {
         if (!cancelled) setProfile(data);
@@ -224,7 +225,7 @@ function WorkspaceSwitcher({
   useEffect(() => {
     let cancelled = false;
     fetch("/api/workspaces")
-      .then((r) => r.json())
+      .then((r) => readJson<any>(r))
       .then((d) => {
         if (cancelled) return;
         if (d.error) {
@@ -419,7 +420,7 @@ function useResolvedNav(nav?: PageNav): PageNav | undefined {
     if (!workspaceId || !needsFetch) return;
     let cancelled = false;
     fetch(`/api/workspaces/${workspaceId}`)
-      .then((r) => r.json())
+      .then((r) => readJson<any>(r))
       .then((d) => {
         if (cancelled || d.error || !d.workspace) return;
         const ws = d.workspace;
