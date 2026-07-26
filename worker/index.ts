@@ -20,6 +20,7 @@ import {
   shouldRunInternalScheduler,
 } from "@/lib/engine/worker-scheduler";
 import { reconcileStuckCalls } from "@/lib/engine/reconcile";
+import { backfillCallPayloads } from "@/lib/engine/backfill-payloads";
 import { resyncCallQueue } from "@/lib/queue/sweeper";
 import { probeRedisQueueHealth, waitForRedisQueueHealth } from "@/lib/queue/redis-health";
 import { writeHeartbeat, writeRedisLiveness } from "@/lib/engine/heartbeat";
@@ -206,6 +207,25 @@ async function main() {
     }
   }, 3 * 60_000);
 
+  // Payload-backfill sweep: every 15 minutes, re-fetch and patch `raw_payload`
+  // for completed calls whose call_analyzed webhook never persisted its body.
+  // Those calls otherwise contribute zero minutes/spend to the fulfillment
+  // report, pulling app MTD totals below Retell's usage dashboard. Distinct
+  // from the stuck-`dialing` reconciler above (that finalizes in-flight rows;
+  // this repairs already-terminal rows without re-running CRM/cadence). Bounded
+  // and idempotent — patched rows leave the null-payload set and aren't re-picked,
+  // so steady-state cost is ~0 when the webhook path is healthy.
+  let payloadBackfillTimer: NodeJS.Timeout | null = setInterval(async () => {
+    try {
+      const summary = await backfillCallPayloads({ limit: 250 });
+      if (summary.patched || summary.failed) {
+        console.log("[backfill] payload sweep:", summary);
+      }
+    } catch (e) {
+      console.error("[backfill] sweep error:", e);
+    }
+  }, 15 * 60_000);
+
   const shutdown = async () => {
     console.log("[worker] shutting down…");
     if (heartbeatTimer) clearTimeout(heartbeatTimer);
@@ -216,6 +236,8 @@ async function main() {
     reconcileTimer = null;
     if (sweepTimer) clearInterval(sweepTimer);
     sweepTimer = null;
+    if (payloadBackfillTimer) clearInterval(payloadBackfillTimer);
+    payloadBackfillTimer = null;
     healthServer.close();
     await Promise.all([pollWorker.close(), callWorker.close()]);
     process.exit(0);
