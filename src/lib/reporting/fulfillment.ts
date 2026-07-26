@@ -161,6 +161,41 @@ function toNumber(v: unknown): number {
 }
 
 /**
+ * Fetch every `calls` row matching the workspace + completed_at window.
+ *
+ * PostgREST caps a single response at a fixed page size (1000 rows by
+ * default), and silently returns only the first page. A month-wide query can
+ * easily exceed that, which previously dropped whole workspaces from the MTD
+ * minutes/spend totals (Diamond, LaSalle) and under-counted the rest. Page
+ * with .range() until a short page comes back so ALL rows are aggregated.
+ */
+async function fetchAllCalls<T>(
+  db: SupabaseClient,
+  select: string,
+  wsIds: string[],
+  fromIso: string,
+  toIso: string
+): Promise<T[]> {
+  const PAGE = 1000;
+  const out: T[] = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await db
+      .from("calls")
+      .select(select)
+      .in("workspace_id", wsIds)
+      .gte("completed_at", fromIso)
+      .lte("completed_at", toIso)
+      .order("completed_at", { ascending: true })
+      .range(from, from + PAGE - 1);
+    if (error) throw new Error(`calls query failed: ${error.message}`);
+    const page = (data ?? []) as unknown as T[];
+    out.push(...page);
+    if (page.length < PAGE) break;
+  }
+  return out;
+}
+
+/**
  * Build the fulfillment report from the application database only.
  * Pass a SERVICE-ROLE Supabase client so cross-tenant reads bypass RLS.
  */
@@ -206,8 +241,6 @@ export async function buildFulfillmentReport(
   const [
     { data: agents, error: aErr },
     { data: tags, error: tErr },
-    { data: calls, error: cErr },
-    { data: monthCalls, error: mErr },
   ] = await Promise.all([
     db
       .from("agents")
@@ -218,45 +251,55 @@ export async function buildFulfillmentReport(
       .from("workspace_outcome_tags")
       .select("workspace_id, outcome")
       .in("workspace_id", wsIds),
-    db
-      .from("calls")
-      .select("agent_id, outcome")
-      .in("workspace_id", wsIds)
-      .gte("completed_at", windowStart)
-      .lte("completed_at", windowEnd),
-    // Month-to-date calls — for per-workspace Retell minutes + spend.
-    //
-    // raw_payload is the Retell webhook body. Live webhook AND the reconciler
-    // store the enveloped shape { event, call: {...} }, but the app's own
-    // parser (normalizeStoredCall) defensively falls back to the bare-call
-    // shape, so we pull both nesting levels and coalesce in TS.
-    //
-    // Duration: use call.duration_ms (what the app uses everywhere) as the
-    // primary source, falling back to call_cost.total_duration_seconds. Reading
-    // only the billed seconds under-counts — Retell leaves it empty on some
-    // accounts even when combined_cost is present (e.g. Diamond, LaSalle).
-    // Spend: combined_cost (cents) lives only under call_cost.
-    db
-      .from("calls")
-      .select(
-        [
-          "workspace_id",
-          "cost_env:raw_payload->call->call_cost->>combined_cost",
-          "cost_bare:raw_payload->call_cost->>combined_cost",
-          "durms_env:raw_payload->call->>duration_ms",
-          "durms_bare:raw_payload->>duration_ms",
-          "billed_env:raw_payload->call->call_cost->>total_duration_seconds",
-          "billed_bare:raw_payload->call_cost->>total_duration_seconds",
-        ].join(", ")
-      )
-      .in("workspace_id", wsIds)
-      .gte("completed_at", monthStartIso)
-      .lte("completed_at", windowEnd),
   ]);
   if (aErr) throw new Error(`agents query failed: ${aErr.message}`);
   if (tErr) throw new Error(`outcome tags query failed: ${tErr.message}`);
-  if (cErr) throw new Error(`calls query failed: ${cErr.message}`);
-  if (mErr) throw new Error(`month calls query failed: ${mErr.message}`);
+
+  // Both call queries are paginated (see fetchAllCalls) so neither the daily
+  // outcome counts nor the MTD minutes/spend are truncated at the 1000-row cap.
+  //
+  // Month-to-date raw_payload is the Retell webhook body. Live webhook AND the
+  // reconciler store the enveloped shape { event, call: {...} }, but the app's
+  // own parser (normalizeStoredCall) defensively falls back to the bare-call
+  // shape, so we pull both nesting levels and coalesce in TS.
+  //
+  // Duration: use call.duration_ms (what the app uses everywhere) as the
+  // primary source, falling back to call_cost.total_duration_seconds. Reading
+  // only the billed seconds under-counts — Retell leaves it empty on some
+  // accounts even when combined_cost is present.
+  // Spend: combined_cost (cents) lives only under call_cost.
+  const [callRows, monthRows] = await Promise.all([
+    fetchAllCalls<{ agent_id: string; outcome: string | null }>(
+      db,
+      "agent_id, outcome",
+      wsIds,
+      windowStart,
+      windowEnd
+    ),
+    fetchAllCalls<{
+      workspace_id: string;
+      cost_env: string | number | null;
+      cost_bare: string | number | null;
+      durms_env: string | number | null;
+      durms_bare: string | number | null;
+      billed_env: string | number | null;
+      billed_bare: string | number | null;
+    }>(
+      db,
+      [
+        "workspace_id",
+        "cost_env:raw_payload->call->call_cost->>combined_cost",
+        "cost_bare:raw_payload->call_cost->>combined_cost",
+        "durms_env:raw_payload->call->>duration_ms",
+        "durms_bare:raw_payload->>duration_ms",
+        "billed_env:raw_payload->call->call_cost->>total_duration_seconds",
+        "billed_bare:raw_payload->call_cost->>total_duration_seconds",
+      ].join(", "),
+      wsIds,
+      monthStartIso,
+      windowEnd
+    ),
+  ]);
 
   const agentRows = (agents ?? []) as Array<{
     id: string;
@@ -265,16 +308,6 @@ export async function buildFulfillmentReport(
     status: string;
   }>;
   const tagRows = (tags ?? []) as Array<{ workspace_id: string; outcome: string }>;
-  const callRows = (calls ?? []) as Array<{ agent_id: string; outcome: string | null }>;
-  const monthRows = (monthCalls ?? []) as unknown as Array<{
-    workspace_id: string;
-    cost_env: string | number | null;
-    cost_bare: string | number | null;
-    durms_env: string | number | null;
-    durms_bare: string | number | null;
-    billed_env: string | number | null;
-    billed_bare: string | number | null;
-  }>;
 
   // First non-null of the enveloped vs bare payload shape.
   const pick = (env: unknown, bare: unknown): number => {
