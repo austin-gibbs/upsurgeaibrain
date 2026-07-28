@@ -22,6 +22,15 @@ import { bearerFromHeader, resolveApiKey } from "@/lib/integrations/custom/api-k
 import type { Agent, Contact } from "@/types";
 
 export const runtime = "nodejs";
+// Fail fast rather than hang: if any downstream (DB / Retell) stalls, abort well
+// before the platform's edge/gateway timeout so the caller gets a clean 5xx it
+// can safely retry, instead of a 524 that leaves call state ambiguous.
+export const maxDuration = 30;
+
+// If a Retell call was already placed for this contact within this window, a
+// re-trigger returns THAT call instead of dialing again. Protects against
+// double-clicks and client retries after a transient timeout.
+const DEDUP_WINDOW_MS = 3 * 60_000;
 
 /** Map the validated lead + agent payload into Retell dynamic variables. */
 function buildOverrides(
@@ -133,6 +142,30 @@ export async function POST(req: NextRequest) {
       { error: upsertErr?.message ?? "failed to upsert contact" },
       { status: 500 }
     );
+  }
+
+  // Idempotency guard: if a Retell call was already placed for this contact
+  // within DEDUP_WINDOW_MS, return that existing call rather than dialing a
+  // second time. This makes the endpoint safe under double-clicks and client
+  // retries (which is exactly what happens after a transient upstream timeout).
+  const { data: recentCall } = await supabase
+    .from("calls")
+    .select("id, retell_call_id")
+    .eq("contact_id", contact.id)
+    .not("retell_call_id", "is", null)
+    .gte("dialed_at", new Date(Date.now() - DEDUP_WINDOW_MS).toISOString())
+    .order("dialed_at", { ascending: false })
+    .limit(1)
+    .maybeSingle<{ id: string; retell_call_id: string | null }>();
+  if (recentCall?.retell_call_id) {
+    return NextResponse.json({
+      ok: true,
+      deduped: true,
+      callId: recentCall.id,
+      retellCallId: recentCall.retell_call_id,
+      contactId: contact.id,
+      leadId: input.lead.id,
+    });
   }
 
   // Place ONE call now, inline (no queue). testMode bypasses enroll-tag + call
