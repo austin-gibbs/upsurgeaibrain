@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { AudioLines } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
@@ -25,6 +25,15 @@ function LoginForm() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  // A half-rotated/corrupted session (e.g. left over from an auth outage) can
+  // wedge the sign-in form. Clear any stale local session on mount so the form
+  // always starts clean. Local scope only — no server round-trip. Middleware
+  // already redirects genuinely signed-in users away from /login.
+  useEffect(() => {
+    supabase.auth.signOut({ scope: "local" }).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
