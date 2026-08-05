@@ -32,15 +32,48 @@ import type { Json } from "@/types/database";
 
 type DbClient = ReturnType<typeof createServiceClient>;
 
-/** True when an equivalent run was already sent inside the dedupe window. */
-async function isDuplicate(
+type DuplicateReason =
+  | { kind: "same_call"; runId: string }
+  | { kind: "phone_window"; runId: string; windowHours: number }
+  | null;
+
+/**
+ * Skip when:
+ * 1. This same call already has a sent/queued run for the trigger (webhook /
+ *    reconciler idempotency — always on, even when phone window is 0), or
+ * 2. An optional phone anti-spam window is set and another call already
+ *    queued/sent for this trigger + contact phone inside that window.
+ */
+async function findDuplicate(
   supabase: DbClient,
   triggerId: string,
   contactPhone: string,
-  windowHours: number
-): Promise<boolean> {
-  if (windowHours <= 0) return false;
-  if (!contactPhone.trim()) return false;
+  windowHours: number,
+  callId: string | null,
+  retellCallId: string | null
+): Promise<DuplicateReason> {
+  if (retellCallId?.trim()) {
+    const { data } = await supabase
+      .from("automation_runs")
+      .select("id")
+      .eq("trigger_id", triggerId)
+      .eq("retell_call_id", retellCallId)
+      .in("status", ["sent", "queued"])
+      .limit(1);
+    if (data?.[0]?.id) return { kind: "same_call", runId: data[0].id };
+  } else if (callId?.trim()) {
+    const { data } = await supabase
+      .from("automation_runs")
+      .select("id")
+      .eq("trigger_id", triggerId)
+      .eq("call_id", callId)
+      .in("status", ["sent", "queued"])
+      .limit(1);
+    if (data?.[0]?.id) return { kind: "same_call", runId: data[0].id };
+  }
+
+  if (windowHours <= 0) return null;
+  if (!contactPhone.trim()) return null;
   const since = new Date(Date.now() - windowHours * 3_600_000).toISOString();
   const { data } = await supabase
     .from("automation_runs")
@@ -50,7 +83,17 @@ async function isDuplicate(
     .in("status", ["sent", "queued"])
     .gte("created_at", since)
     .limit(1);
-  return Boolean(data && data.length > 0);
+  if (data?.[0]?.id) {
+    return { kind: "phone_window", runId: data[0].id, windowHours };
+  }
+  return null;
+}
+
+function duplicateSkipMessage(dup: NonNullable<DuplicateReason>): string {
+  if (dup.kind === "same_call") {
+    return `deduped: already sent/queued for this call (${dup.runId})`;
+  }
+  return `deduped: recent run within ${dup.windowHours}h window (${dup.runId})`;
 }
 
 export interface EvaluateAutomationsInput {
@@ -139,7 +182,15 @@ export async function evaluateAutomations(input: EvaluateAutomationsInput): Prom
     if (!triggerMatches(trigger, ctx)) continue;
     matched++;
 
-    if (await isDuplicate(supabase, trigger.id, input.contactPhone, trigger.dedupe_window_hours)) {
+    const dup = await findDuplicate(
+      supabase,
+      trigger.id,
+      input.contactPhone,
+      trigger.dedupe_window_hours,
+      input.callId,
+      input.retellCallId
+    );
+    if (dup) {
       await supabase.from("automation_runs").insert({
         workspace_id: input.workspace.id,
         trigger_id: trigger.id,
@@ -150,7 +201,7 @@ export async function evaluateAutomations(input: EvaluateAutomationsInput): Prom
         contact_phone: input.contactPhone,
         status: "skipped",
         action_type: trigger.action_type,
-        last_error: "deduped: recent run within dedupe window",
+        last_error: duplicateSkipMessage(dup),
       });
       continue;
     }

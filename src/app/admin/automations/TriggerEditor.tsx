@@ -757,7 +757,7 @@ export function TriggerEditor({
             <div className="grid gap-4 sm:grid-cols-2">
               <Field
                 label="Dedupe window"
-                hint="hours · 0 never dedupes"
+                hint="hours · same contact across calls · 0 = every matching call sends (same call still won't double-send)"
                 htmlFor={id("dedupe")}
               >
                 <Input

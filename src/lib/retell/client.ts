@@ -254,6 +254,11 @@ export class RetellClient {
   /**
    * Bind agent-level webhook delivery (defense when per-call webhook_url is ignored).
    * Idempotent — safe to call before dials for agents on separate Retell accounts.
+   *
+   * Retell `update-agent` writes a draft version. Phone numbers pinned to a
+   * published version (or `latest_published`) keep delivering to the OLD
+   * webhook until that draft is published — so we publish immediately after
+   * the PATCH when the draft is unpublished.
    */
   async ensureAgentWebhookUrl(agentId: string, webhookUrl: string): Promise<void> {
     const res = await fetchWithTimeout(`${RETELL_BASE}/update-agent/${agentId}`, {
@@ -270,6 +275,64 @@ export class RetellClient {
     });
     if (!res.ok) {
       throw new Error(`Retell update-agent ${res.status}: ${await res.text()}`);
+    }
+
+    const updated = (await parseJsonResponse<{
+      version?: number;
+      is_published?: boolean;
+      webhook_url?: string | null;
+    }>(res, "Retell update-agent")) as {
+      version?: number;
+      is_published?: boolean;
+      webhook_url?: string | null;
+    };
+
+    if (updated.is_published) return;
+    if (typeof updated.version !== "number") {
+      // Response shape unexpected — re-fetch so we still publish when needed.
+      const getRes = await fetchWithTimeout(`${RETELL_BASE}/get-agent/${agentId}`, {
+        headers: { Authorization: `Bearer ${this.apiKey}` },
+        timeoutMs: READ_TIMEOUT_MS,
+      });
+      if (!getRes.ok) {
+        throw new Error(
+          `Retell get-agent after webhook bind ${getRes.status}: ${await getRes.text()}`
+        );
+      }
+      const agent = await parseJsonResponse<{
+        version?: number;
+        is_published?: boolean;
+      }>(getRes, "Retell get-agent");
+      if (agent.is_published || typeof agent.version !== "number") return;
+      await this.publishAgentVersion(agentId, agent.version);
+      return;
+    }
+    await this.publishAgentVersion(agentId, updated.version);
+  }
+
+  /** Publish a draft agent version so phone traffic picks up the new config. */
+  async publishAgentVersion(agentId: string, version: number): Promise<void> {
+    const res = await fetchWithTimeout(
+      `${RETELL_BASE}/publish-agent-version/${agentId}`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${this.apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          version,
+          version_title: "UpSurge webhook bind",
+          version_description:
+            "Publish agent-level webhook_url so inbound phone calls deliver call_analyzed to UpSurge",
+        }),
+        timeoutMs: READ_TIMEOUT_MS,
+      }
+    );
+    if (!res.ok) {
+      throw new Error(
+        `Retell publish-agent-version ${res.status}: ${await res.text()}`
+      );
     }
   }
 

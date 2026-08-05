@@ -4,6 +4,11 @@
  * inbound agents. Inbound calls have no per-dial webhook_url, so delivery
  * depends entirely on this binding.
  *
+ * IMPORTANT: Retell `update-agent` writes a draft. Live phone traffic uses the
+ * published version (or a pinned numeric version). This script audits the
+ * *published* webhook_url, not just the latest draft, and --fix publishes
+ * after re-binding.
+ *
  * Requires in .env.local:
  *   NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,
  *   CREDENTIALS_ENCRYPTION_KEY
@@ -133,35 +138,86 @@ async function main() {
       const res = await fetch(`${RETELL_BASE}/get-agent/${row.retell_agent_id}`, {
         headers: { Authorization: `Bearer ${apiKey}` },
       });
-      let webhookUrl: string | null = null;
+      let draftWebhookUrl: string | null = null;
+      let publishedWebhookUrl: string | null = null;
+      let draftVersion: number | null = null;
+      let publishedVersion: number | null = null;
+      let draftPublished = false;
       let analysisFields: string[] = [];
       if (res.ok) {
         const agentJson = (await res.json()) as {
+          version?: number;
+          is_published?: boolean;
           webhook_url?: string | null;
           post_call_analysis_data?: Array<{ name?: string }>;
         };
-        webhookUrl = agentJson.webhook_url?.trim() || null;
+        draftWebhookUrl = agentJson.webhook_url?.trim() || null;
+        draftVersion =
+          typeof agentJson.version === "number" ? agentJson.version : null;
+        draftPublished = Boolean(agentJson.is_published);
         analysisFields = (agentJson.post_call_analysis_data ?? [])
           .map((f) => f.name)
           .filter((n): n is string => Boolean(n));
+
+        if (draftPublished) {
+          publishedWebhookUrl = draftWebhookUrl;
+          publishedVersion = draftVersion;
+        } else if (draftVersion != null) {
+          for (let v = draftVersion; v >= 0; v--) {
+            const vRes = await fetch(
+              `${RETELL_BASE}/get-agent/${row.retell_agent_id}?version=${v}`,
+              { headers: { Authorization: `Bearer ${apiKey}` } }
+            );
+            if (!vRes.ok) continue;
+            const ver = (await vRes.json()) as {
+              version?: number;
+              is_published?: boolean;
+              webhook_url?: string | null;
+            };
+            if (ver.is_published) {
+              publishedWebhookUrl = ver.webhook_url?.trim() || null;
+              publishedVersion =
+                typeof ver.version === "number" ? ver.version : v;
+              break;
+            }
+          }
+        }
       } else {
         console.warn(`  ! could not GET agent (${res.status}) for ${label}`);
       }
 
+      // Phone traffic uses the published version — that is the binding that matters.
+      const webhookUrl = publishedWebhookUrl ?? draftWebhookUrl;
       const bound = webhookUrl === expectedUrl;
       if (bound) {
         ok++;
         console.log(`✓ ${label}`);
-        console.log(`    webhook_url: ${webhookUrl}`);
+        console.log(
+          `    published webhook_url: ${webhookUrl}` +
+            (publishedVersion != null ? ` (v${publishedVersion})` : "")
+        );
       } else if (!webhookUrl) {
         missing++;
         console.log(`✗ ${label}`);
-        console.log(`    webhook_url: (null)`);
+        console.log(`    published webhook_url: (null)`);
       } else {
         mismatched++;
         console.log(`✗ ${label}`);
-        console.log(`    webhook_url: ${webhookUrl}`);
-        console.log(`    expected:    ${expectedUrl}`);
+        console.log(
+          `    published webhook_url: ${webhookUrl}` +
+            (publishedVersion != null ? ` (v${publishedVersion})` : "")
+        );
+        console.log(`    expected:              ${expectedUrl}`);
+      }
+      if (
+        draftWebhookUrl &&
+        draftWebhookUrl !== publishedWebhookUrl &&
+        !draftPublished
+      ) {
+        console.log(
+          `    draft webhook_url:     ${draftWebhookUrl}` +
+            (draftVersion != null ? ` (v${draftVersion}, unpublished)` : "")
+        );
       }
       if (analysisFields.length) {
         console.log(`    analysis fields: ${analysisFields.join(", ")}`);
@@ -171,7 +227,7 @@ async function main() {
 
       if (fix && !bound) {
         await bindRetellWebhookForAgent(row);
-        console.log(`    → re-bound to ${expectedUrl}`);
+        console.log(`    → re-bound + published to ${expectedUrl}`);
       }
     } catch (e) {
       failed++;
