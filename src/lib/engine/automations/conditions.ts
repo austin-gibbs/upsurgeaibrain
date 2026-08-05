@@ -3,8 +3,10 @@
 // context snapshot and returns whether the trigger matches. Kept side-effect
 // free so it is fully unit-testable (see conditions.test.ts).
 // =====================================================================
+import { outcomeMatchesGate } from "../inbound-outcome";
 import type {
   AutomationCondition,
+  AutomationDirectionScope,
   AutomationEvalContext,
   AutomationTrigger,
   ConditionOperator,
@@ -21,6 +23,8 @@ function resolveFieldValue(field: string, ctx: AutomationEvalContext): unknown {
       return ctx.summary;
     case "transcript":
       return ctx.transcript;
+    case "direction":
+      return ctx.direction ?? "outbound";
     default:
       return ctx.customFields?.[field];
   }
@@ -80,19 +84,31 @@ function evalOne(cond: AutomationCondition, ctx: AutomationEvalContext): boolean
 
 /**
  * Does this trigger match the call context?
- *   - only_outcomes gate first (empty/null = any outcome).
+ *   - direction_scope gate first (all / inbound / outbound).
+ *   - only_outcomes gate next (empty/null = any outcome).
+ *     On inbound calls, outcomes are canonicalized so outbound enum values
+ *     still match (appointment ↔ appointment_booked). Outbound stays exact.
  *   - then match_type: 'all' = every condition, 'any' = at least one.
  *   - an empty conditions array with a passing outcome gate MATCHES (lets an
  *     operator fire purely on outcome, e.g. "on every appointment").
  */
 export function triggerMatches(
-  trigger: Pick<AutomationTrigger, "match_type" | "conditions" | "only_outcomes">,
+  trigger: Pick<
+    AutomationTrigger,
+    "match_type" | "conditions" | "only_outcomes"
+  > & { direction_scope?: AutomationDirectionScope | null },
   ctx: AutomationEvalContext
 ): boolean {
+  const scope: AutomationDirectionScope = trigger.direction_scope ?? "all";
+  const direction = ctx.direction ?? "outbound";
+  if (scope !== "all" && scope !== direction) {
+    return false;
+  }
+
   if (
     trigger.only_outcomes &&
     trigger.only_outcomes.length > 0 &&
-    !trigger.only_outcomes.includes(ctx.outcome)
+    !outcomeMatchesGate(String(ctx.outcome), trigger.only_outcomes, direction)
   ) {
     return false;
   }

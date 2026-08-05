@@ -764,8 +764,13 @@ export class HighLevelAdapter implements CrmAdapter {
     recording: string | undefined
   ): Promise<void> {
     const conversationId = await this.getOrCreateConversationId(input.contactId);
+    // Inbound AI calls must render as inbound conversation cards. Outbound
+    // keeps the exact endpoint it has always used (isIncoming defaults false).
+    const endpoint = input.isIncoming
+      ? `/conversations/messages/inbound`
+      : `/conversations/messages/outbound`;
     await this.request(
-      `/conversations/messages/outbound`,
+      endpoint,
       {
         method: "POST",
         headers: { Version: CONVERSATIONS_API_VERSION },

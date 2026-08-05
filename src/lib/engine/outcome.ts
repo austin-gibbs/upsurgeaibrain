@@ -89,9 +89,16 @@ export function extractFromRetellPayload(body: any): {
   const call = body?.call ?? body ?? {};
   const analysis = call.call_analysis ?? {};
   const custom = analysis.custom_analysis_data ?? {};
+  // Agents vary on the analysis field name — prefer the canonical snake_case
+  // key, then the common Retell dashboard label.
+  const rawOutcome =
+    custom.call_outcome ??
+    custom["Call Outcome"] ??
+    analysis.call_outcome ??
+    null;
   return {
     callId: String(call.call_id ?? ""),
-    rawOutcome: custom.call_outcome ?? analysis.call_outcome ?? null,
+    rawOutcome: rawOutcome != null ? String(rawOutcome) : null,
     inVoicemail: analysis.in_voicemail === true || custom.in_voicemail === true,
     summary: analysis.call_summary ?? null,
     transcript: call.transcript ?? null,

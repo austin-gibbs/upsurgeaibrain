@@ -3,10 +3,16 @@
 //
 // Triggered by Retell `call_analyzed` when direction === "inbound".
 //
-// When the agent has an enabled `agent_inbound_configs` row, run the
-// config-driven HighLevel automation (tag + opportunity + assign/task).
-// Otherwise delegate to the legacy Nil Patel / FUB handler so live
-// concierge behavior is unchanged.
+// Routing:
+//   - effective CRM provider === followupboss → legacy Nil Patel concierge
+//   - otherwise → productized path (config optional; missing config = safe
+//     defaults: always log note+recording, no tag/pipeline/task)
+//
+// Guarantees on every inbound call (both paths):
+//   1. calls row is persisted FIRST (before any CRM work)
+//   2. note + recording are always written when a contact can be resolved
+//   3. post-call automations are always evaluated
+//   4. short-call suppression only skips tags/pipeline/tasks — never the note
 // =====================================================================
 import { createServiceClient } from "@/lib/supabase/server";
 import { getCrmAdapterForAgent } from "@/lib/crm";
@@ -43,6 +49,34 @@ import type { CrmContact } from "@/lib/crm/types";
 
 const CLAIM_LEASE_MS = 5 * 60_000;
 
+/** Safe defaults when no agent_inbound_configs row exists (or enabled=false). */
+function defaultInboundConfig(agentId: string): AgentInboundConfig {
+  return {
+    agent_id: agentId,
+    enabled: true,
+    create_contact_if_missing: true,
+    always_tag: null,
+    pipeline_automation_enabled: false,
+    default_pipeline_id: null,
+    default_pipeline_stage_id: null,
+    default_pipeline_name: null,
+    default_stage_name: null,
+    opportunity_name_template: "{contact_name}",
+    opportunity_custom_field_enabled: false,
+    opportunity_custom_field_id: null,
+    opportunity_custom_field_key: null,
+    opportunity_custom_field_value: null,
+    assignee_mode: "none",
+    assignee_crm_id: null,
+    task_enabled: false,
+    task_name_template: "Follow up with {contact_name}",
+    task_type: "Follow Up",
+    task_due_offset_minutes: 30,
+    min_duration_seconds: 0,
+    new_contact_source: "AI Inbound Call",
+  };
+}
+
 export interface ProcessInboundOptions {
   finalizedBy?: FinalizedBy;
 }
@@ -71,17 +105,6 @@ export async function processInboundCall(
     return { ok: false, reason: `no agent for retell_agent_id ${retellAgentId}` };
   }
 
-  const { data: inboundConfig } = await supabase
-    .from("agent_inbound_configs")
-    .select("*")
-    .eq("agent_id", agent.id)
-    .maybeSingle<AgentInboundConfig>();
-
-  // Feature gate: absent or disabled config → legacy FUB concierge path.
-  if (!inboundConfig?.enabled) {
-    return processInboundCallLegacy(body);
-  }
-
   const { data: workspace } = await supabase
     .from("workspaces")
     .select("*")
@@ -90,13 +113,23 @@ export async function processInboundCall(
   if (!workspace) return { ok: false, reason: "workspace not found" };
 
   const provider = effectiveCrmProvider(agent, workspace);
-  if (provider !== "highlevel") {
-    // Config enabled but CRM isn't HighLevel — fall back rather than fail hard.
-    console.warn(
-      `[process-inbound] agent ${agent.id} has inbound automation enabled but CRM is ${provider}; using legacy handler`
-    );
-    return processInboundCallLegacy(body);
+
+  // FUB keeps the legacy concierge byte-for-byte (Nil Patel). Everything else
+  // uses the productized path with optional config.
+  if (provider === "followupboss") {
+    return processInboundCallLegacy(body, { finalizedBy });
   }
+
+  const { data: storedConfig } = await supabase
+    .from("agent_inbound_configs")
+    .select("*")
+    .eq("agent_id", agent.id)
+    .maybeSingle<AgentInboundConfig>();
+
+  // Missing or disabled config → safe defaults (always log note+recording;
+  // no tag/pipeline/task). Automations still fire.
+  const inboundConfig =
+    storedConfig?.enabled ? storedConfig : defaultInboundConfig(agent.id);
 
   const parsed = extractFromRetellPayload(body);
   const fromNumber: string | null = call.from_number ?? parsed.fromNumber ?? null;
@@ -222,26 +255,10 @@ async function claimAndProcess(args: {
   const today = todayInTz(workspace.timezone);
   const inboundOutcome = classifyInboundOutcome({ rawOutcome: parsed.rawOutcome });
 
-  // Short-call suppression: persist transcript only.
-  if (
+  // Short-call flag: still write note+recording; skip tags/pipeline/tasks only.
+  const shortCall =
     inboundConfig.min_duration_seconds > 0 &&
-    parsed.durationSeconds < inboundConfig.min_duration_seconds
-  ) {
-    await supabase
-      .from("calls")
-      .update({
-        status: "completed",
-        inbound_outcome: inboundOutcome,
-        summary: parsed.summary,
-        transcript: parsed.transcript,
-        raw_payload: body,
-        completed_at: new Date().toISOString(),
-        finalized_by: finalizedBy,
-        crm_error: `suppressed: duration ${parsed.durationSeconds}s < min ${inboundConfig.min_duration_seconds}s`,
-      })
-      .eq("id", callRowId);
-    return { ok: true, reason: "short call suppressed" };
-  }
+    parsed.durationSeconds < inboundConfig.min_duration_seconds;
 
   const { data: routes } = await supabase
     .from("agent_inbound_routes")
@@ -264,6 +281,18 @@ async function claimAndProcess(args: {
       crm_error: "CRM adapter lacks inbound contact resolution",
     });
     await alertInboundCrmError(agent, callId, "CRM adapter lacks inbound contact resolution");
+    // Still evaluate automations — webhook delivery does not depend on CRM.
+    await runInboundAutomations({
+      supabase,
+      workspace,
+      agent,
+      callRowId,
+      callId,
+      contactPhone: fromNumber ?? "",
+      contact: null,
+      outcome: inboundOutcome,
+      parsed,
+    });
     return { ok: false, reason: "CRM adapter lacks inbound contact resolution" };
   }
 
@@ -293,6 +322,17 @@ async function claimAndProcess(args: {
         crm_error: summarizeCrmErrors([...crmErrors, err]),
       });
       await alertInboundCrmError(agent, callId, err);
+      await runInboundAutomations({
+        supabase,
+        workspace,
+        agent,
+        callRowId,
+        callId,
+        contactPhone: callbackPhone ?? fromNumber ?? "",
+        contact: null,
+        outcome: inboundOutcome,
+        parsed,
+      });
       return { ok: true, reason: err };
     }
     try {
@@ -320,11 +360,22 @@ async function claimAndProcess(args: {
         crm_error: summarizeCrmErrors([...crmErrors, err]),
       });
       await alertInboundCrmError(agent, callId, err);
+      await runInboundAutomations({
+        supabase,
+        workspace,
+        agent,
+        callRowId,
+        callId,
+        contactPhone: callbackPhone ?? fromNumber ?? "",
+        contact: null,
+        outcome: inboundOutcome,
+        parsed,
+      });
       return { ok: false, reason: err };
     }
   }
 
-  // 3. Log call (incoming) with note.
+  // 3. ALWAYS log call (incoming) with note + recording — before tags/pipeline.
   const note = [
     `AI Inbound Agent: ${agent.name}`,
     `Outcome: ${inboundOutcomeLabel(inboundOutcome)}`,
@@ -347,141 +398,136 @@ async function claimAndProcess(args: {
   });
   crmErrors.push(...crmFlags.crmErrors);
 
-  // 4. Tags — baseline always_tag + outcome tag; then remove stale tags.
-  const tagsToAdd = [
-    inboundConfig.always_tag,
-    resolved.tag,
-  ].filter((t): t is string => Boolean(t?.trim()));
-  let appliedTag: string | null = resolved.tag ?? inboundConfig.always_tag ?? null;
-  try {
-    await addTagsToCrm(crm, contact.id, tagsToAdd, contact.tags ?? []);
-    crmFlags.tagsSynced = true;
-  } catch (e) {
-    crmErrors.push(`addTags: ${formatCrmError(e)}`);
-  }
-  if (resolved.removeTags.length) {
-    try {
-      await removeTagsFromCrm(crm, contact.id, resolved.removeTags, contact.tags ?? []);
-    } catch (e) {
-      crmErrors.push(`removeTags: ${formatCrmError(e)}`);
-    }
+  if (!crmFlags.noteLogged) {
+    await alertInboundCrmError(
+      agent,
+      callId,
+      `note writeback failed: ${summarizeCrmErrors(crmFlags.crmErrors) ?? "unknown"}`
+    );
   }
 
-  // 5. Opportunity create/update via moveContactToStage.
+  let appliedTag: string | null = null;
   let opportunityId: string | null = null;
-  if (
-    inboundConfig.pipeline_automation_enabled &&
-    crm.moveContactToStage &&
-    resolved.pipelineId &&
-    resolved.stageId
-  ) {
+  let taskCreated = false;
+
+  // 4–6. Tags / pipeline / tasks — skipped on short calls.
+  if (!shortCall) {
+    const tagsToAdd = [
+      inboundConfig.always_tag,
+      resolved.tag,
+    ].filter((t): t is string => Boolean(t?.trim()));
+    appliedTag = resolved.tag ?? inboundConfig.always_tag ?? null;
     try {
-      const contactName =
-        contact.fullName ||
-        callerName ||
-        inboundConfig.opportunity_name_template.replace(
-          "{contact_name}",
-          callerName || "Inbound Lead"
-        );
-      const nameFromTemplate = inboundConfig.opportunity_name_template
-        .replace("{contact_name}", contact.fullName || callerName || "Inbound Lead")
+      await addTagsToCrm(crm, contact.id, tagsToAdd, contact.tags ?? []);
+      crmFlags.tagsSynced = true;
+    } catch (e) {
+      crmErrors.push(`addTags: ${formatCrmError(e)}`);
+    }
+    if (resolved.removeTags.length) {
+      try {
+        await removeTagsFromCrm(crm, contact.id, resolved.removeTags, contact.tags ?? []);
+      } catch (e) {
+        crmErrors.push(`removeTags: ${formatCrmError(e)}`);
+      }
+    }
+
+    if (
+      inboundConfig.pipeline_automation_enabled &&
+      crm.moveContactToStage &&
+      resolved.pipelineId &&
+      resolved.stageId
+    ) {
+      try {
+        const contactName =
+          contact.fullName ||
+          callerName ||
+          inboundConfig.opportunity_name_template.replace(
+            "{contact_name}",
+            callerName || "Inbound Lead"
+          );
+        const nameFromTemplate = inboundConfig.opportunity_name_template
+          .replace("{contact_name}", contact.fullName || callerName || "Inbound Lead")
+          .replace("{outcome}", inboundOutcomeLabel(inboundOutcome))
+          .replace("{date}", today);
+        const customFields = buildCustomFieldsFromTaskConfig({
+          opportunity_custom_field_enabled: inboundConfig.opportunity_custom_field_enabled,
+          opportunity_custom_field_id: inboundConfig.opportunity_custom_field_id,
+          opportunity_custom_field_key: inboundConfig.opportunity_custom_field_key,
+          opportunity_custom_field_value: inboundConfig.opportunity_custom_field_value,
+        });
+        const result = await crm.moveContactToStage({
+          contactId: contact.id,
+          pipelineId: resolved.pipelineId,
+          stageId: resolved.stageId,
+          contactName: nameFromTemplate || contactName,
+          status: resolved.opportunityStatus ?? undefined,
+          customFields,
+        });
+        if (typeof result === "string") opportunityId = result;
+      } catch (e) {
+        crmErrors.push(`moveContactToStage: ${formatCrmError(e)}`);
+      }
+    }
+
+    const assigneeIds = await resolveInboundAssignees({
+      mode: inboundConfig.assignee_mode,
+      fixedAssigneeCrmId: inboundConfig.assignee_crm_id,
+      toNumber,
+      crm,
+    });
+
+    if (assigneeIds.length && crm.assignContact) {
+      try {
+        await crm.assignContact(contact.id, assigneeIds[0]);
+      } catch (e) {
+        crmErrors.push(`assignContact: ${formatCrmError(e)}`);
+      }
+    }
+
+    if (inboundConfig.task_enabled) {
+      const leadName = contact.fullName || callerName || "Inbound Caller";
+      const taskName = inboundConfig.task_name_template
+        .replace("{contact_name}", leadName)
         .replace("{outcome}", inboundOutcomeLabel(inboundOutcome))
         .replace("{date}", today);
-      const customFields = buildCustomFieldsFromTaskConfig({
-        opportunity_custom_field_enabled: inboundConfig.opportunity_custom_field_enabled,
-        opportunity_custom_field_id: inboundConfig.opportunity_custom_field_id,
-        opportunity_custom_field_key: inboundConfig.opportunity_custom_field_key,
-        opportunity_custom_field_value: inboundConfig.opportunity_custom_field_value,
-      });
-      const result = await crm.moveContactToStage({
-        contactId: contact.id,
-        pipelineId: resolved.pipelineId,
-        stageId: resolved.stageId,
-        contactName: nameFromTemplate || contactName,
-        status: resolved.opportunityStatus ?? undefined,
-        customFields,
-      });
-      if (typeof result === "string") opportunityId = result;
-    } catch (e) {
-      crmErrors.push(`moveContactToStage: ${formatCrmError(e)}`);
+      const dueAt = new Date(
+        Date.now() + inboundConfig.task_due_offset_minutes * 60_000
+      ).toISOString();
+      const targets = assigneeIds.length ? assigneeIds : [null];
+      taskCreated = await createTasksToCrm(
+        crm,
+        contact.id,
+        targets.map((assigneeId) => ({
+          name: taskName,
+          type: inboundConfig.task_type || "Follow Up",
+          dueAt,
+          assigneeId,
+        })),
+        crmFlags
+      );
+      crmErrors.push(...crmFlags.crmErrors.filter((e) => e.startsWith("createTask")));
     }
-  }
-
-  // 6. Assign + tasks.
-  let taskCreated = false;
-  const assigneeIds = await resolveInboundAssignees({
-    mode: inboundConfig.assignee_mode,
-    fixedAssigneeCrmId: inboundConfig.assignee_crm_id,
-    toNumber,
-    crm,
-  });
-
-  if (assigneeIds.length && crm.assignContact) {
-    try {
-      await crm.assignContact(contact.id, assigneeIds[0]);
-    } catch (e) {
-      crmErrors.push(`assignContact: ${formatCrmError(e)}`);
-    }
-  }
-
-  if (inboundConfig.task_enabled) {
-    const leadName = contact.fullName || callerName || "Inbound Caller";
-    const taskName = inboundConfig.task_name_template
-      .replace("{contact_name}", leadName)
-      .replace("{outcome}", inboundOutcomeLabel(inboundOutcome))
-      .replace("{date}", today);
-    const dueAt = new Date(
-      Date.now() + inboundConfig.task_due_offset_minutes * 60_000
-    ).toISOString();
-    const targets = assigneeIds.length ? assigneeIds : [null];
-    taskCreated = await createTasksToCrm(
-      crm,
-      contact.id,
-      targets.map((assigneeId) => ({
-        name: taskName,
-        type: inboundConfig.task_type || "Follow Up",
-        dueAt,
-        assigneeId,
-      })),
-      crmFlags
+  } else {
+    crmErrors.push(
+      `suppressed tags/pipeline/tasks: duration ${parsed.durationSeconds}s < min ${inboundConfig.min_duration_seconds}s`
     );
-    crmErrors.push(...crmFlags.crmErrors.filter((e) => e.startsWith("createTask")));
   }
 
-  // 7. Config-driven post-call automations (best-effort).
-  // Outcome is cast — inbound taxonomy is text; automations match on
-  // custom_analysis_data conditions more often than the enum outcome.
-  try {
-    await evaluateAutomations({
-      supabase,
-      workspace,
-      agent,
-      contact: {
-        id: "",
-        workspace_id: workspace.id,
-        crm_contact_id: contact.id,
-        full_name: contact.fullName,
-        email: contact.email,
-        phones: contact.phones,
-        tags: contact.tags,
-        attempt_count: 0,
-        last_called_on: null,
-        next_eligible_on: null,
-        is_terminal: false,
-        terminal_outcome: null,
-      },
-      callId: callRowId,
-      retellCallId: callId,
-      contactPhone: callbackPhone ?? fromNumber ?? "",
-      outcome: inboundOutcome as any,
-      summary: parsed.summary,
-      transcript: parsed.transcript,
-      recordingUrl: parsed.recordingUrl,
-      customFields: parsed.customFields,
-    });
-  } catch {
-    /* non-fatal */
-  }
+  // 7. Config-driven post-call automations (best-effort). Always runs.
+  await runInboundAutomations({
+    supabase,
+    workspace,
+    agent,
+    callRowId,
+    callId,
+    contactPhone: callbackPhone ?? fromNumber ?? "",
+    contact: {
+      full_name: contact.fullName,
+      email: contact.email,
+    },
+    outcome: inboundOutcome,
+    parsed,
+  });
 
   const crmError = summarizeCrmErrors(crmErrors);
   await finalizeInboundCall(supabase, callRowId, {
@@ -505,11 +551,52 @@ async function claimAndProcess(args: {
     crm_error: crmError,
   });
 
-  if (crmError) {
+  if (crmError && !shortCall) {
     await alertInboundCrmError(agent, callId, crmError);
   }
 
-  return { ok: true };
+  return {
+    ok: true,
+    reason: shortCall ? "short call: note logged, tags/pipeline/tasks suppressed" : undefined,
+  };
+}
+
+async function runInboundAutomations(args: {
+  supabase: ReturnType<typeof createServiceClient>;
+  workspace: Workspace;
+  agent: Agent;
+  callRowId: string;
+  callId: string;
+  contactPhone: string;
+  contact: { full_name: string | null; email: string | null } | null;
+  outcome: string;
+  parsed: ReturnType<typeof extractFromRetellPayload>;
+}): Promise<void> {
+  try {
+    await evaluateAutomations({
+      supabase: args.supabase,
+      workspace: args.workspace,
+      agent: args.agent,
+      contact: args.contact
+        ? {
+            id: "", // evaluate treats empty/blank as null
+            full_name: args.contact.full_name,
+            email: args.contact.email,
+          }
+        : null,
+      callId: args.callRowId,
+      retellCallId: args.callId,
+      contactPhone: args.contactPhone,
+      outcome: args.outcome,
+      direction: "inbound",
+      summary: args.parsed.summary,
+      transcript: args.parsed.transcript,
+      recordingUrl: args.parsed.recordingUrl,
+      customFields: args.parsed.customFields,
+    });
+  } catch {
+    /* non-fatal */
+  }
 }
 
 async function finalizeInboundCall(

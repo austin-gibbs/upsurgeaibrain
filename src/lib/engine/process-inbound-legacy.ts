@@ -3,20 +3,19 @@
 //
 // LEGACY PATH: hardcoded for one Follow Up Boss client (Nil Patel Realty).
 // Kept intact so live concierge behavior does not change. The productized
-// HighLevel path in process-inbound.ts delegates here when no
-// agent_inbound_configs row exists (or enabled=false).
+// HighLevel path in process-inbound.ts delegates here when the effective
+// CRM provider is followupboss.
 //
 // Triggered by the Retell `call_analyzed` webhook for an INBOUND call to
 // the business line. Unlike the outbound path (process-outcome.ts), there
 // is no pre-created `calls` row and the caller is usually not in our DB.
 // For one answered call we:
 //   1. resolve the agent + workspace from the inbound Retell agent id
-//   2. resolve or create the caller in Follow Up Boss (matched by phone)
-//   3. log the call (recording + duration) and write a note in the exact
-//      Email Summary format the concierge prompt defines
-//   4. tag priority/type, assign the lead, and create a "Follow up with
-//      {caller}" task for each of the configured follow-up users
-//   5. store an idempotent inbound `calls` row (keyed on retell_call_id)
+//   2. persist a calls row FIRST (so webhook/CRM failures leave a trail)
+//   3. resolve or create the caller in Follow Up Boss (matched by phone)
+//   4. ALWAYS log the call (recording + duration) and write a note
+//   5. tag priority/type, assign the lead, and create follow-up tasks
+//   6. evaluate post-call automations
 //
 // Email delivery is intentionally handled by Follow Up Boss's own
 // assignment notifications — assigning + tasking Nil and Jori is what
@@ -24,9 +23,16 @@
 // =====================================================================
 import { createServiceClient } from "@/lib/supabase/server";
 import { getCrmAdapterForAgent } from "@/lib/crm";
+import { evaluateAutomations } from "@/lib/engine/automations/evaluate";
 import { extractFromRetellPayload } from "./outcome";
 import { todayInTz } from "./cadence";
-import { addTagsToCrm } from "./crm-writeback";
+import {
+  addTagsToCrm,
+  formatCrmError,
+  logCallToCrm,
+  summarizeCrmErrors,
+  type FinalizedBy,
+} from "./crm-writeback";
 import { pickAssigneeForLine, resolveLineRep } from "./inbound-routing";
 import type { Agent, Workspace } from "@/types";
 import type { Database } from "@/types/database";
@@ -47,9 +53,15 @@ const FOLLOW_UP_USER_NAMES = ["Nil", "Jori"];
 /** Minutes from now for the auto-created follow-up task due time. */
 const FOLLOW_UP_DUE_MINUTES = 30;
 
+export interface ProcessInboundLegacyOptions {
+  finalizedBy?: FinalizedBy;
+}
+
 export async function processInboundCallLegacy(
-  body: any
+  body: any,
+  opts: ProcessInboundLegacyOptions = {}
 ): Promise<{ ok: boolean; reason?: string }> {
+  const finalizedBy = opts.finalizedBy ?? "webhook";
   const supabase = createServiceClient();
   const call = body?.call ?? body ?? {};
   const callId = String(call.call_id ?? "");
@@ -87,8 +99,37 @@ export async function processInboundCallLegacy(
     .single<Workspace>();
   if (!workspace) return { ok: false, reason: "workspace not found" };
 
+  // Persist the calls row FIRST so a CRM failure still leaves a trail.
+  const callRowId = await ensureInboundCallRow({
+    supabase,
+    existingId: existing?.id ?? null,
+    workspaceId: workspace.id,
+    agentId: agent.id,
+    callId,
+    toNumber,
+    fromNumber,
+    body,
+    summary: base.summary,
+    transcript: base.transcript,
+  });
+
   const crm = getCrmAdapterForAgent(agent, workspace);
   if (!crm.findContactByPhone || !crm.createContact) {
+    await finalizeLegacyCall(supabase, callRowId, {
+      status: "completed",
+      finalized_by: finalizedBy,
+      crm_error: "CRM adapter lacks inbound contact resolution",
+    });
+    await runLegacyAutomations({
+      supabase,
+      workspace,
+      agent,
+      callRowId,
+      callId,
+      contactPhone: fromNumber ?? "",
+      contact: null,
+      parsed: base,
+    });
     return { ok: false, reason: "CRM adapter lacks inbound contact resolution" };
   }
 
@@ -98,20 +139,51 @@ export async function processInboundCallLegacy(
   const priority = (str(custom.priority_level) || "NORMAL").toUpperCase();
   const callType = str(custom.call_type) || "General";
   const today = todayInTz(workspace.timezone);
+  const crmErrors: string[] = [];
 
   // 2. Resolve or create the caller in the CRM, matched by phone.
-  let contact = fromNumber ? await crm.findContactByPhone(fromNumber) : null;
-  if (!contact) {
-    contact = await crm.createContact({
-      fullName: callerName,
-      phone: callbackPhone,
-      email: callerEmail,
-      tags: ["AI Inbound Call"],
-      source: "AI Inbound Call (Mia)",
-    });
+  let contact = null as Awaited<ReturnType<NonNullable<typeof crm.findContactByPhone>>> | null;
+  try {
+    contact = fromNumber ? await crm.findContactByPhone(fromNumber) : null;
+  } catch (e) {
+    crmErrors.push(`findContactByPhone: ${formatCrmError(e)}`);
   }
 
-  // 3. Build the note in the concierge's Email Summary format and log the call.
+  if (!contact) {
+    try {
+      contact = await crm.createContact({
+        fullName: callerName,
+        phone: callbackPhone,
+        email: callerEmail,
+        tags: ["AI Inbound Call"],
+        source: "AI Inbound Call (Mia)",
+      });
+    } catch (e) {
+      const err = `createContact: ${formatCrmError(e)}`;
+      crmErrors.push(err);
+      await finalizeLegacyCall(supabase, callRowId, {
+        status: "completed",
+        summary: base.summary,
+        transcript: base.transcript,
+        raw_payload: body,
+        finalized_by: finalizedBy,
+        crm_error: summarizeCrmErrors(crmErrors),
+      });
+      await runLegacyAutomations({
+        supabase,
+        workspace,
+        agent,
+        callRowId,
+        callId,
+        contactPhone: callbackPhone ?? fromNumber ?? "",
+        contact: null,
+        parsed: base,
+      });
+      return { ok: false, reason: err };
+    }
+  }
+
+  // 3. ALWAYS log the call (note + recording) before tags/assign/tasks.
   const noteBody = formatInboundNote({
     custom,
     callerName,
@@ -124,25 +196,19 @@ export async function processInboundCallLegacy(
     callType,
   });
 
-  try {
-    await crm.logCall({
-      contactId: contact.id,
-      phone: callbackPhone ?? fromNumber ?? "",
-      isIncoming: true,
-      note: noteBody,
-      durationSeconds: base.durationSeconds || undefined,
-      fromNumber: fromNumber ?? undefined,
-      toNumber: toNumber ?? undefined,
-      recordingUrl: base.recordingUrl ?? undefined,
-    });
-  } catch {
-    // If the call-log endpoint rejects, at least preserve the summary as a note.
-    try {
-      await crm.addNote(contact.id, noteBody);
-    } catch {
-      /* non-fatal */
-    }
-  }
+  const crmFlags = await logCallToCrm({
+    crm,
+    contactId: contact.id,
+    phone: callbackPhone ?? fromNumber ?? "",
+    note: noteBody,
+    recordingUrl: base.recordingUrl,
+    durationSeconds: base.durationSeconds || undefined,
+    fromNumber,
+    toNumber: toNumber ?? "",
+    outcome: callType,
+    isIncoming: true,
+  });
+  crmErrors.push(...crmFlags.crmErrors);
 
   // 4. Tag priority + type (preserve existing tags).
   try {
@@ -155,8 +221,8 @@ export async function processInboundCallLegacy(
       ])
     );
     await addTagsToCrm(crm, contact.id, tags, contact.tags ?? []);
-  } catch {
-    /* non-fatal */
+  } catch (e) {
+    crmErrors.push(`addTags: ${formatCrmError(e)}`);
   }
 
   // Assign the lead + create a follow-up task. Route by the DIALED line:
@@ -186,8 +252,8 @@ export async function processInboundCallLegacy(
     if (matched[0] && crm.assignContact) {
       try {
         await crm.assignContact(contact.id, matched[0].id);
-      } catch {
-        /* non-fatal */
+      } catch (e) {
+        crmErrors.push(`assignContact: ${formatCrmError(e)}`);
       }
     }
 
@@ -204,40 +270,158 @@ export async function processInboundCallLegacy(
           dueAt,
           assigneeId: u.id,
         });
-      } catch {
-        /* non-fatal */
+      } catch (e) {
+        crmErrors.push(`createTask: ${formatCrmError(e)}`);
       }
     }
-  } catch {
-    /* non-fatal */
+  } catch (e) {
+    crmErrors.push(`assign/task: ${formatCrmError(e)}`);
   }
 
-  // 5. Persist an idempotent inbound call record (contact-less is allowed).
-  const row: CallInsert = {
-    workspace_id: workspace.id,
-    agent_id: agent.id,
-    contact_id: null,
-    direction: "inbound",
-    attempt_number: 0,
-    to_number: toNumber ?? "",
-    retell_call_id: callId,
-    status: "completed" as const,
+  // 5. Post-call automations (best-effort).
+  await runLegacyAutomations({
+    supabase,
+    workspace,
+    agent,
+    callRowId,
+    callId,
+    contactPhone: callbackPhone ?? fromNumber ?? "",
+    contact: {
+      full_name: contact.fullName ?? callerName,
+      email: contact.email ?? callerEmail,
+    },
+    parsed: base,
+  });
+
+  // 6. Finalize the inbound call record with observability flags.
+  await finalizeLegacyCall(supabase, callRowId, {
+    status: "completed",
     summary: base.summary,
     transcript: base.transcript,
     raw_payload: body,
-    completed_at: new Date().toISOString(),
     crm_contact_id: contact.id,
     contact_name: contact.fullName ?? callerName,
     contact_email: contact.email ?? callerEmail,
-  };
-  if (existing) {
-    const update: CallUpdate = row;
-    await supabase.from("calls").update(update).eq("id", existing.id);
-  } else {
-    await supabase.from("calls").insert(row);
-  }
+    note_logged: crmFlags.noteLogged,
+    recording_logged: crmFlags.recordingLogged,
+    tags_synced: true,
+    finalized_by: finalizedBy,
+    crm_error: summarizeCrmErrors(crmErrors),
+  });
 
   return { ok: true };
+}
+
+async function ensureInboundCallRow(args: {
+  supabase: ReturnType<typeof createServiceClient>;
+  existingId: string | null;
+  workspaceId: string;
+  agentId: string;
+  callId: string;
+  toNumber: string | null;
+  fromNumber: string | null;
+  body: unknown;
+  summary: string | null;
+  transcript: string | null;
+}): Promise<string> {
+  const {
+    supabase,
+    existingId,
+    workspaceId,
+    agentId,
+    callId,
+    toNumber,
+    fromNumber,
+    body,
+    summary,
+    transcript,
+  } = args;
+
+  if (existingId) return existingId;
+
+  const row: CallInsert = {
+    workspace_id: workspaceId,
+    agent_id: agentId,
+    contact_id: null,
+    direction: "inbound",
+    attempt_number: 0,
+    to_number: toNumber ?? fromNumber ?? "",
+    retell_call_id: callId,
+    status: "dialing",
+    summary,
+    transcript,
+    raw_payload: body as CallInsert["raw_payload"],
+    dialed_at: new Date().toISOString(),
+  };
+
+  const { data: inserted, error } = await supabase
+    .from("calls")
+    .insert(row)
+    .select("id")
+    .maybeSingle<{ id: string }>();
+
+  if (inserted?.id) return inserted.id;
+
+  // Race: another writer won — re-read.
+  const { data: raced } = await supabase
+    .from("calls")
+    .select("id")
+    .eq("retell_call_id", callId)
+    .maybeSingle<{ id: string }>();
+  if (raced?.id) return raced.id;
+
+  throw new Error(`failed to insert inbound call: ${error?.message ?? "unknown"}`);
+}
+
+async function finalizeLegacyCall(
+  supabase: ReturnType<typeof createServiceClient>,
+  callRowId: string,
+  patch: CallUpdate
+): Promise<void> {
+  await supabase
+    .from("calls")
+    .update({
+      completed_at: new Date().toISOString(),
+      ...patch,
+    })
+    .eq("id", callRowId);
+}
+
+async function runLegacyAutomations(args: {
+  supabase: ReturnType<typeof createServiceClient>;
+  workspace: Workspace;
+  agent: Agent;
+  callRowId: string;
+  callId: string;
+  contactPhone: string;
+  contact: { full_name: string | null; email: string | null } | null;
+  parsed: ReturnType<typeof extractFromRetellPayload>;
+}): Promise<void> {
+  try {
+    await evaluateAutomations({
+      supabase: args.supabase,
+      workspace: args.workspace,
+      agent: args.agent,
+      contact: args.contact
+        ? {
+            id: "",
+            full_name: args.contact.full_name,
+            email: args.contact.email,
+          }
+        : null,
+      callId: args.callRowId,
+      retellCallId: args.callId,
+      contactPhone: args.contactPhone,
+      outcome: "unknown",
+      direction: "inbound",
+      summary: args.parsed.summary,
+      transcript: args.parsed.transcript,
+      recordingUrl: args.parsed.recordingUrl,
+      customFields: args.parsed.customFields,
+    });
+  } catch {
+    /* non-fatal */
+  }
 }
 
 function str(v: unknown): string {

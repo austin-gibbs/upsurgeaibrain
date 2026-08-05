@@ -67,11 +67,14 @@ export type SampleTrigger = Pick<
   // Optional so a freshly-validated create payload (where the outcome gate may
   // be omitted entirely) can be tested without being reshaped first.
   only_outcomes?: string[] | null;
+  direction_scope?: AutomationTrigger["direction_scope"] | null;
 };
 
 export interface SampleContextOptions {
   /** link_types mapped for the workspace, so a "from the call" link resolves. */
   linkTypes?: string[];
+  /** Override call direction for the sample (defaults from direction_scope). */
+  direction?: "inbound" | "outbound";
 }
 
 export interface SampleContextResult {
@@ -195,6 +198,13 @@ export function buildSampleContext(
 ): SampleContextResult {
   const conditions = trigger.conditions ?? [];
   const outcome = pickOutcome(trigger);
+  const direction: "inbound" | "outbound" =
+    opts.direction ??
+    (trigger.direction_scope === "inbound"
+      ? "inbound"
+      : trigger.direction_scope === "outbound"
+        ? "outbound"
+        : "outbound");
 
   let summary: string | null = SAMPLE_SUMMARY;
   let transcript: string | null = SAMPLE_TRANSCRIPT;
@@ -244,6 +254,7 @@ export function buildSampleContext(
 
   const ctx: AutomationEvalContext = {
     outcome,
+    direction,
     summary,
     transcript,
     recordingUrl: SAMPLE_RECORDING_URL,
@@ -258,6 +269,7 @@ export function buildSampleContext(
         match_type: trigger.match_type,
         conditions,
         only_outcomes: trigger.only_outcomes ?? null,
+        direction_scope: trigger.direction_scope ?? "all",
       },
       ctx
     ),

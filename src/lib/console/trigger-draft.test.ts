@@ -65,6 +65,15 @@ describe("draftFromTrigger -> draftToPayload round trip", () => {
     assert.equal(payload.dedupe_window_hours, 24);
     assert.equal(payload.max_attempts, 5);
     assert.equal(payload.only_outcomes, null);
+    assert.equal(payload.direction_scope, "all");
+  });
+
+  it("preserves direction_scope through the round trip", () => {
+    const payload = payloadOf(row({ direction_scope: "inbound" }));
+    assert.equal(payload.direction_scope, "inbound");
+
+    const draft = draftFromTrigger(row({ direction_scope: "outbound" }));
+    assert.equal(draft.directionScope, "outbound");
   });
 
   it("keeps headers and a payload template through the JSON textareas", () => {

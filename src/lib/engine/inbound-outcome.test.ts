@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import {
   classifyInboundOutcome,
   inboundOutcomeLabel,
+  normalizeOutcomeAlias,
+  outcomeMatchesGate,
   resolveInboundRoute,
 } from "./inbound-outcome";
 import type { AgentInboundConfig, AgentInboundRoute } from "@/types";
@@ -19,6 +21,29 @@ describe("classifyInboundOutcome", () => {
     assert.equal(classifyInboundOutcome({ rawOutcome: null }), "unknown");
     assert.equal(classifyInboundOutcome({ rawOutcome: "" }), "unknown");
     assert.equal(classifyInboundOutcome({ rawOutcome: "totally_new_thing" }), "unknown");
+  });
+});
+
+describe("normalizeOutcomeAlias / outcomeMatchesGate", () => {
+  it("maps outbound appointment to inbound appointment_booked", () => {
+    assert.equal(normalizeOutcomeAlias("appointment"), "appointment_booked");
+    assert.equal(normalizeOutcomeAlias("interested_no_appointment"), "interested");
+    assert.equal(normalizeOutcomeAlias("follow_up"), "interested");
+  });
+
+  it("aliases only on inbound direction", () => {
+    assert.equal(
+      outcomeMatchesGate("appointment_booked", ["appointment"], "inbound"),
+      true
+    );
+    assert.equal(
+      outcomeMatchesGate("appointment_booked", ["appointment"], "outbound"),
+      false
+    );
+    assert.equal(
+      outcomeMatchesGate("appointment", ["appointment"], "outbound"),
+      true
+    );
   });
 });
 

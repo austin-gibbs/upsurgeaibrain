@@ -224,7 +224,15 @@ export default function AutomationsConsolePage() {
     [workspaces, workspaceName]
   );
   const agents: EditorAgent[] = useMemo(
-    () => (workspace?.agents ?? []).map((a) => ({ id: a.id, name: a.name })),
+    () =>
+      (workspace?.agents ?? []).map((a) => ({
+        id: a.id,
+        name: a.name,
+        direction:
+          a.direction === "inbound" || a.direction === "outbound"
+            ? a.direction
+            : undefined,
+      })),
     [workspace]
   );
 
@@ -715,6 +723,10 @@ export default function AutomationsConsolePage() {
                     const agentName = t.agent_id
                       ? (agents.find((a) => a.id === t.agent_id)?.name ?? "one agent")
                       : "all agents";
+                    const scope =
+                      t.direction_scope === "inbound" || t.direction_scope === "outbound"
+                        ? t.direction_scope
+                        : "all";
                     return (
                       <Card key={t.id} className="overflow-hidden">
                         <div className="flex flex-wrap items-start gap-4 p-5">
@@ -729,6 +741,13 @@ export default function AutomationsConsolePage() {
                               </Badge>
                               <Badge tone="blue">
                                 {ACTION_LABEL[t.action_type] ?? t.action_type}
+                              </Badge>
+                              <Badge tone="slate">
+                                {scope === "all"
+                                  ? "all calls"
+                                  : scope === "inbound"
+                                    ? "inbound"
+                                    : "outbound"}
                               </Badge>
                               <span className="text-xs text-ink-400">{agentName}</span>
                             </div>

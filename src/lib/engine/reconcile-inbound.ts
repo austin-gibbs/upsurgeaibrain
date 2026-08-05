@@ -5,7 +5,7 @@
 // so the stuck-dialing reconciler never sees them. If the Retell
 // call_analyzed webhook is dropped, the lead never reaches HighLevel.
 //
-// For each active inbound agent with enabled automation config:
+// For each active inbound agent with a retell_agent_id:
 //   1. list recent ended inbound calls from Retell
 //   2. diff against calls.retell_call_id
 //   3. replay missing ones through processInboundCall
@@ -58,28 +58,14 @@ export async function reconcileInboundCalls(
     dryRun,
   };
 
-  // Active inbound agents that have the productized automation enabled.
-  // Two-step lookup avoids brittle nested-filter syntax on the join.
-  let configQuery = supabase
-    .from("agent_inbound_configs")
-    .select("agent_id")
-    .eq("enabled", true);
-  if (opts.agentId) configQuery = configQuery.eq("agent_id", opts.agentId);
-
-  const { data: enabledConfigs, error: configError } = await configQuery;
-  if (configError) {
-    summary.errors.push({ callId: "*", reason: configError.message });
-    return summary;
-  }
-  const enabledAgentIds = (enabledConfigs ?? []).map((r) => r.agent_id);
-  if (enabledAgentIds.length === 0) return summary;
-
+  // Every active inbound agent with a Retell id — no longer gated on
+  // agent_inbound_configs.enabled (that table can be empty while agents
+  // still need missed-webhook failover for notes/recordings/automations).
   let agentQuery = supabase
     .from("agents")
     .select("*")
     .eq("direction", "inbound")
     .eq("status", "active")
-    .in("id", enabledAgentIds)
     .not("retell_agent_id", "is", null);
 
   if (opts.workspaceId) agentQuery = agentQuery.eq("workspace_id", opts.workspaceId);

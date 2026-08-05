@@ -47,7 +47,7 @@ export const ACTION_TYPES = [
 
 export type ActionType = (typeof ACTION_TYPES)[number]["value"];
 
-/** Canonical outcomes the engine classifies a call into (src/types/index.ts). */
+/** Canonical outbound outcomes the engine classifies a call into. */
 export const CALL_OUTCOMES = [
   "appointment",
   "interested_no_appointment",
@@ -58,8 +58,19 @@ export const CALL_OUTCOMES = [
   "error",
 ] as const;
 
+/** Canonical inbound outcomes — single source of truth from inbound-outcome.ts. */
+export { INBOUND_OUTCOMES } from "@/lib/engine/inbound-outcome";
+
+export type DirectionScope = "all" | "inbound" | "outbound";
+
+export const DIRECTION_SCOPES = [
+  { value: "all" as const, label: "All calls" },
+  { value: "inbound" as const, label: "Inbound only" },
+  { value: "outbound" as const, label: "Outbound only" },
+];
+
 /** Pseudo-fields the matcher resolves from call context, not analysis data. */
-export const CONTEXT_FIELDS = ["outcome", "summary", "transcript"] as const;
+export const CONTEXT_FIELDS = ["outcome", "summary", "transcript", "direction"] as const;
 
 export type TriggerRow = {
   id: string;
@@ -75,6 +86,7 @@ export type TriggerRow = {
   dedupe_window_hours: number;
   max_attempts: number;
   only_outcomes: string[] | null;
+  direction_scope?: string | null;
   updated_at?: string | null;
 };
 
@@ -108,6 +120,7 @@ export type TriggerDraft = {
   dedupeWindowHours: string;
   maxAttempts: string;
   onlyOutcomes: string[];
+  directionScope: DirectionScope;
 };
 
 export function emptyDraft(): TriggerDraft {
@@ -131,6 +144,7 @@ export function emptyDraft(): TriggerDraft {
     dedupeWindowHours: "24",
     maxAttempts: "5",
     onlyOutcomes: [],
+    directionScope: "all",
   };
 }
 
@@ -160,6 +174,9 @@ export function draftFromTrigger(trigger: TriggerRow): TriggerDraft {
   const linkMode: LinkMode = staticLinkType ? "static" : linkTypeField ? "field" : "none";
 
   const method = String(config.method ?? "POST");
+  const rawScope = String(trigger.direction_scope ?? "all");
+  const directionScope: DirectionScope =
+    rawScope === "inbound" || rawScope === "outbound" ? rawScope : "all";
 
   return {
     name: trigger.name,
@@ -184,6 +201,7 @@ export function draftFromTrigger(trigger: TriggerRow): TriggerDraft {
     dedupeWindowHours: String(trigger.dedupe_window_hours ?? base.dedupeWindowHours),
     maxAttempts: String(trigger.max_attempts ?? base.maxAttempts),
     onlyOutcomes: trigger.only_outcomes ?? [],
+    directionScope,
   };
 }
 
@@ -198,6 +216,7 @@ export type TriggerPayload = {
   dedupe_window_hours: number;
   max_attempts: number;
   only_outcomes: string[] | null;
+  direction_scope: DirectionScope;
 };
 
 export type BuildResult =
@@ -273,6 +292,7 @@ function buildPayload(draft: TriggerDraft): TriggerPayload {
     dedupe_window_hours: Number(draft.dedupeWindowHours),
     max_attempts: Number(draft.maxAttempts),
     only_outcomes: draft.onlyOutcomes.length > 0 ? draft.onlyOutcomes : null,
+    direction_scope: draft.directionScope,
   };
 }
 
@@ -358,6 +378,10 @@ export function draftFromPayloadJson(
       only_outcomes: Array.isArray(raw.only_outcomes)
         ? raw.only_outcomes.map((o) => String(o))
         : null,
+      direction_scope:
+        raw.direction_scope === "inbound" || raw.direction_scope === "outbound"
+          ? String(raw.direction_scope)
+          : "all",
     }),
   };
 }

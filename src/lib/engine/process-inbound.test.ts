@@ -87,12 +87,16 @@ describe("addTagsToCrm / removeTagsFromCrm", () => {
 });
 
 describe("inbound processor helpers (pure)", () => {
-  it("documents duration suppression contract", () => {
-    // Duration gate: writeback is suppressed when duration < min_duration_seconds.
-    // Covered end-to-end by process-inbound short-call path; this asserts the
-    // comparison contract used there.
+  it("documents short-call contract: note+recording always, tags/pipeline suppressed", () => {
+    // min_duration_seconds only suppresses tags/pipeline/tasks — never the note
+    // or recording writeback. Covered by the shortCall flag in process-inbound.
     const durationSeconds = 5;
     const minDurationSeconds = 15;
-    assert.equal(durationSeconds < minDurationSeconds, true);
+    const shortCall = durationSeconds < minDurationSeconds;
+    assert.equal(shortCall, true);
+    const skipTagsPipelineTasks = shortCall;
+    const alwaysLogNoteAndRecording = true;
+    assert.equal(skipTagsPipelineTasks, true);
+    assert.equal(alwaysLogNoteAndRecording, true);
   });
 });

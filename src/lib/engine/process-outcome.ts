@@ -101,12 +101,17 @@ export async function processRetellWebhook(
 
   // Contact-less outbound rows are manual test calls (placed via placeTestCall).
   // Persist the outcome/transcript for visibility but skip all CRM, cadence, and
-  // memory side effects — there is no contact to advance.
+  // memory side effects — there is no contact to advance. Automations still
+  // evaluate so the UI Test Call exercises the real production webhook path.
   if (!call.contact_id) {
     const outcome = classifyOutcome({
       rawOutcome: parsed.rawOutcome,
       inVoicemail: parsed.inVoicemail,
     });
+    const [{ data: testAgent }, { data: testWorkspace }] = await Promise.all([
+      supabase.from("agents").select("*").eq("id", call.agent_id).single<Agent>(),
+      supabase.from("workspaces").select("*").eq("id", call.workspace_id).single<Workspace>(),
+    ]);
     await supabase
       .from("calls")
       .update({
@@ -119,6 +124,27 @@ export async function processRetellWebhook(
         completed_at: new Date().toISOString(),
       })
       .eq("id", call.id);
+    if (testAgent && testWorkspace) {
+      try {
+        await evaluateAutomations({
+          supabase,
+          workspace: testWorkspace,
+          agent: testAgent,
+          contact: null,
+          callId: call.id,
+          retellCallId: parsed.callId ?? call.retell_call_id,
+          contactPhone: call.to_number ?? "",
+          outcome,
+          direction: "outbound",
+          summary: parsed.summary,
+          transcript: parsed.transcript,
+          recordingUrl: parsed.recordingUrl,
+          customFields: parsed.customFields,
+        });
+      } catch {
+        /* non-fatal */
+      }
+    }
     return { ok: true, reason: "test call (no contact)" };
   }
 
@@ -321,6 +347,7 @@ export async function processRetellWebhook(
       retellCallId: parsed.callId ?? call.retell_call_id,
       contactPhone: call.to_number,
       outcome,
+      direction: "outbound",
       summary: parsed.summary,
       transcript: parsed.transcript,
       recordingUrl: parsed.recordingUrl,

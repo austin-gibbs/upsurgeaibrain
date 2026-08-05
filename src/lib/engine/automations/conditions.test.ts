@@ -15,6 +15,7 @@ import type { AutomationCondition, AutomationEvalContext, MatchType } from "./ty
 function ctx(over: Partial<AutomationEvalContext> = {}): AutomationEvalContext {
   return {
     outcome: "follow_up" as AutomationEvalContext["outcome"],
+    direction: "outbound",
     summary: "Caller wants the buyer guide.",
     transcript: "…please text me the buyer guide…",
     recordingUrl: null,
@@ -32,9 +33,10 @@ function ctx(over: Partial<AutomationEvalContext> = {}): AutomationEvalContext {
 function trigger(
   conditions: AutomationCondition[],
   match_type: MatchType = "all",
-  only_outcomes: string[] | null = null
+  only_outcomes: string[] | null = null,
+  direction_scope: "all" | "inbound" | "outbound" = "all"
 ) {
-  return { conditions, match_type, only_outcomes };
+  return { conditions, match_type, only_outcomes, direction_scope };
 }
 
 describe("triggerMatches — boolean coercion", () => {
@@ -135,6 +137,62 @@ describe("triggerMatches — combination + gating", () => {
 
   it("outcome pseudo-field is usable as a condition", () => {
     assert.equal(triggerMatches(trigger([{ field: "outcome", operator: "eq", value: "follow_up" }]), ctx()), true);
+  });
+
+  it("direction_scope inbound rejects outbound calls", () => {
+    assert.equal(
+      triggerMatches(trigger([], "all", null, "inbound"), ctx({ direction: "outbound" })),
+      false
+    );
+  });
+
+  it("direction_scope outbound rejects inbound calls", () => {
+    assert.equal(
+      triggerMatches(trigger([], "all", null, "outbound"), ctx({ direction: "inbound" })),
+      false
+    );
+  });
+
+  it("direction_scope all matches both directions", () => {
+    assert.equal(triggerMatches(trigger([], "all", null, "all"), ctx({ direction: "inbound" })), true);
+    assert.equal(triggerMatches(trigger([], "all", null, "all"), ctx({ direction: "outbound" })), true);
+  });
+
+  it("inbound only_outcomes aliases outbound appointment → appointment_booked", () => {
+    assert.equal(
+      triggerMatches(
+        trigger([], "all", ["appointment", "follow_up", "interested_no_appointment"], "all"),
+        ctx({ direction: "inbound", outcome: "appointment_booked" })
+      ),
+      true
+    );
+  });
+
+  it("inbound only_outcomes aliases interested_no_appointment → interested", () => {
+    assert.equal(
+      triggerMatches(
+        trigger([], "all", ["interested_no_appointment"], "all"),
+        ctx({ direction: "inbound", outcome: "interested" })
+      ),
+      true
+    );
+  });
+
+  it("outbound only_outcomes stays exact (no aliasing)", () => {
+    assert.equal(
+      triggerMatches(
+        trigger([], "all", ["appointment"], "all"),
+        ctx({ direction: "outbound", outcome: "appointment_booked" as AutomationEvalContext["outcome"] })
+      ),
+      false
+    );
+    assert.equal(
+      triggerMatches(
+        trigger([], "all", ["appointment"], "all"),
+        ctx({ direction: "outbound", outcome: "appointment" as AutomationEvalContext["outcome"] })
+      ),
+      true
+    );
   });
 });
 

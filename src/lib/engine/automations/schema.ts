@@ -34,6 +34,8 @@ export const automationActionTypeSchema = z.enum([
 
 export const matchTypeSchema = z.enum(["all", "any"]);
 
+export const automationDirectionScopeSchema = z.enum(["all", "inbound", "outbound"]);
+
 export const automationActionConfigSchema = z
   .object({
     url: z.string().url().optional(),
@@ -63,6 +65,7 @@ export const automationTriggerCreateSchema = z
     dedupe_window_hours: z.number().int().min(0).max(720).optional().default(24),
     max_attempts: z.number().int().min(1).max(20).optional().default(5),
     only_outcomes: z.array(z.string()).optional().nullable(),
+    direction_scope: automationDirectionScopeSchema.optional().default("all"),
   })
   .superRefine((val, ctx) => {
     // webhook / highlevel_sms need a delivery URL (unless a payload_template is
@@ -94,6 +97,7 @@ export const automationTriggerUpdateSchema = z
     dedupe_window_hours: z.number().int().min(0).max(720).optional(),
     max_attempts: z.number().int().min(1).max(20).optional(),
     only_outcomes: z.array(z.string()).optional().nullable(),
+    direction_scope: automationDirectionScopeSchema.optional(),
   })
   .strict();
 

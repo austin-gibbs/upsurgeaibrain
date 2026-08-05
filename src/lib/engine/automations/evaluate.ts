@@ -20,9 +20,11 @@ import { triggerMatches } from "./conditions";
 import type {
   AutomationActionConfig,
   AutomationCondition,
+  AutomationDirectionScope,
   AutomationEvalContext,
   AutomationLink,
   AutomationTrigger,
+  CallDirection,
   MatchType,
 } from "./types";
 import type { Agent, CallOutcome, Contact, Workspace } from "@/types";
@@ -38,6 +40,7 @@ async function isDuplicate(
   windowHours: number
 ): Promise<boolean> {
   if (windowHours <= 0) return false;
+  if (!contactPhone.trim()) return false;
   const since = new Date(Date.now() - windowHours * 3_600_000).toISOString();
   const { data } = await supabase
     .from("automation_runs")
@@ -54,11 +57,14 @@ export interface EvaluateAutomationsInput {
   supabase: DbClient;
   workspace: Workspace;
   agent: Agent;
-  contact: Contact;
+  /** Local contacts row when present. Inbound callers often have none. */
+  contact: Pick<Contact, "id" | "full_name" | "email"> | null;
   callId: string;
   retellCallId: string | null;
   contactPhone: string;
-  outcome: CallOutcome;
+  outcome: CallOutcome | string;
+  /** Call direction for direction_scope gating. Defaults to outbound. */
+  direction?: CallDirection;
   summary: string | null;
   transcript: string | null;
   recordingUrl: string | null;
@@ -70,6 +76,7 @@ export async function evaluateAutomations(input: EvaluateAutomationsInput): Prom
   enqueued: number;
 }> {
   const { supabase } = input;
+  const direction: CallDirection = input.direction ?? "outbound";
 
   // Enabled triggers for this workspace that apply to this agent (agent_id NULL
   // = all agents) — one query, filtered in memory for the agent scope.
@@ -87,19 +94,23 @@ export async function evaluateAutomations(input: EvaluateAutomationsInput): Prom
       conditions: (r.conditions ?? []) as unknown as AutomationCondition[],
       action_config: (r.action_config ?? {}) as unknown as AutomationActionConfig,
       match_type: (r.match_type as MatchType) ?? "all",
+      direction_scope:
+        ((r as { direction_scope?: string }).direction_scope as AutomationDirectionScope) ??
+        "all",
     })) as AutomationTrigger[];
   if (triggers.length === 0) return { matched: 0, enqueued: 0 };
 
   const ctx: AutomationEvalContext = {
     outcome: input.outcome,
+    direction,
     summary: input.summary,
     transcript: input.transcript,
     recordingUrl: input.recordingUrl,
     customFields: input.customFields ?? {},
     contact: {
-      first_name: firstNameOf(input.contact.full_name),
-      full_name: input.contact.full_name,
-      email: input.contact.email,
+      first_name: firstNameOf(input.contact?.full_name ?? null),
+      full_name: input.contact?.full_name ?? null,
+      email: input.contact?.email ?? null,
       phone: input.contactPhone,
     },
   };
@@ -119,6 +130,11 @@ export async function evaluateAutomations(input: EvaluateAutomationsInput): Prom
   let matched = 0;
   let enqueued = 0;
 
+  // Never insert an empty string into a uuid column — inbound callers have no
+  // local contacts row, so contact_id must be null.
+  const contactId =
+    input.contact?.id && input.contact.id.trim() ? input.contact.id : null;
+
   for (const trigger of triggers) {
     if (!triggerMatches(trigger, ctx)) continue;
     matched++;
@@ -130,7 +146,7 @@ export async function evaluateAutomations(input: EvaluateAutomationsInput): Prom
         agent_id: input.agent.id,
         call_id: input.callId,
         retell_call_id: input.retellCallId,
-        contact_id: input.contact.id,
+        contact_id: contactId,
         contact_phone: input.contactPhone,
         status: "skipped",
         action_type: trigger.action_type,
@@ -157,7 +173,7 @@ export async function evaluateAutomations(input: EvaluateAutomationsInput): Prom
         agent_id: input.agent.id,
         call_id: input.callId,
         retell_call_id: input.retellCallId,
-        contact_id: input.contact.id,
+        contact_id: contactId,
         contact_phone: input.contactPhone,
         status: "queued",
         attempts: 0,
@@ -169,12 +185,39 @@ export async function evaluateAutomations(input: EvaluateAutomationsInput): Prom
           link_type: link.type,
           link_url: link.url,
           trigger_name: trigger.name,
+          direction,
+          direction_scope: trigger.direction_scope,
           headers: trigger.action_config.headers ?? undefined,
         } as unknown as Json,
       })
       .select("id")
       .single();
-    if (insErr || !run) continue;
+    if (insErr || !run) {
+      console.error(
+        `[automations] failed to insert run for trigger ${trigger.id} ` +
+          `(call ${input.callId}): ${insErr?.message ?? "no row returned"}`
+      );
+      // Persist a failed row so the silent-insert class of bug is never invisible.
+      try {
+        await supabase.from("automation_runs").insert({
+          workspace_id: input.workspace.id,
+          trigger_id: trigger.id,
+          agent_id: input.agent.id,
+          call_id: input.callId,
+          retell_call_id: input.retellCallId,
+          contact_id: contactId,
+          contact_phone: input.contactPhone,
+          status: "failed",
+          action_type: trigger.action_type,
+          request_url: url,
+          request_payload: payload as unknown as Json,
+          last_error: `insert failed: ${insErr?.message ?? "no row returned"}`,
+        });
+      } catch {
+        /* already logged above */
+      }
+      continue;
+    }
 
     // Best-effort kick — if Redis is down the row stays queued and the
     // minute-tick sweeper picks it up.

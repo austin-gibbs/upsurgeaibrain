@@ -28,6 +28,8 @@ import {
   CALL_OUTCOMES,
   CONDITION_OPERATORS,
   CONTEXT_FIELDS,
+  DIRECTION_SCOPES,
+  INBOUND_OUTCOMES,
   draftFromPayloadJson,
   draftToJson,
   draftToPayload,
@@ -35,12 +37,13 @@ import {
   operatorNeedsValue,
   type ActionType,
   type ConditionOperator,
+  type DirectionScope,
   type LinkMode,
   type TriggerDraft,
   type TriggerPayload,
 } from "@/lib/console/trigger-draft";
 
-export type EditorAgent = { id: string; name: string };
+export type EditorAgent = { id: string; name: string; direction?: "inbound" | "outbound" };
 
 /** What a "Test Push" came back with — rendered under the editor's buttons. */
 export type TestPushResult = {
@@ -212,6 +215,31 @@ export function TriggerEditor({
   const id = (suffix: string) => `${idPrefix}-${suffix}`;
   const needsUrl = draft.actionType !== "internal_notify";
 
+  const selectedAgent = agents.find((a) => a.id === draft.agentId);
+  const lockedScope: DirectionScope | null =
+    selectedAgent?.direction === "inbound" || selectedAgent?.direction === "outbound"
+      ? selectedAgent.direction
+      : null;
+  const effectiveScope: DirectionScope = lockedScope ?? draft.directionScope;
+
+  function setAgentId(agentId: string) {
+    const agent = agents.find((a) => a.id === agentId);
+    setDraft((d) => ({
+      ...d,
+      agentId,
+      directionScope:
+        agent?.direction === "inbound" || agent?.direction === "outbound"
+          ? agent.direction
+          : d.directionScope,
+    }));
+    setError(null);
+  }
+
+  function setDirectionScope(scope: DirectionScope) {
+    if (lockedScope) return;
+    set("directionScope", scope);
+  }
+
   function toJsonMode() {
     // Deliberately lenient: a half-finished draft should still be viewable as
     // JSON, and saving re-validates either way.
@@ -251,13 +279,17 @@ export function TriggerEditor({
 
   function submit() {
     const payload = currentPayload();
-    if (payload) onSubmit(payload, draft.agentId);
+    if (!payload) return;
+    // Locked agent scope wins over a stale draft value.
+    payload.direction_scope = effectiveScope;
+    onSubmit(payload, draft.agentId);
   }
 
   async function testPush() {
     if (!onTestPush) return;
     const payload = currentPayload();
     if (!payload) return;
+    payload.direction_scope = effectiveScope;
     setTesting(true);
     setTestResult(null);
     try {
@@ -343,15 +375,34 @@ export function TriggerEditor({
                 <Select
                   id={id("agent")}
                   value={draft.agentId}
-                  onChange={(e) => set("agentId", e.target.value)}
+                  onChange={(e) => setAgentId(e.target.value)}
                 >
                   <option value="">All agents in this workspace</option>
                   {agents.map((a) => (
                     <option key={a.id} value={a.id}>
                       {a.name}
+                      {a.direction ? ` (${a.direction})` : ""}
                     </option>
                   ))}
                 </Select>
+              </Field>
+              <Field
+                className="sm:col-span-2"
+                label="Runs on"
+                hint={
+                  lockedScope
+                    ? `locked to ${lockedScope} because the selected agent is ${lockedScope}`
+                    : "inbound, outbound, or both"
+                }
+              >
+                <Segmented
+                  options={DIRECTION_SCOPES.map((s) => ({
+                    value: s.value,
+                    label: s.label,
+                  }))}
+                  value={effectiveScope}
+                  onChange={(v) => setDirectionScope(v as DirectionScope)}
+                />
               </Field>
               <Field
                 className="sm:col-span-2"
@@ -486,17 +537,52 @@ export function TriggerEditor({
                   — leave empty for any outcome
                 </span>
               </Label>
-              <div className="mt-2 flex flex-wrap gap-2">
-                {CALL_OUTCOMES.map((o) => (
-                  <Pill
-                    key={o}
-                    selected={draft.onlyOutcomes.includes(o)}
-                    onClick={() => toggleOutcome(o)}
-                  >
-                    {o}
-                  </Pill>
-                ))}
-              </div>
+              {effectiveScope === "all" ? (
+                <div className="mt-2 space-y-3">
+                  <div>
+                    <p className="mb-1.5 text-xs font-medium text-ink-500">Outbound</p>
+                    <div className="flex flex-wrap gap-2">
+                      {CALL_OUTCOMES.map((o) => (
+                        <Pill
+                          key={o}
+                          selected={draft.onlyOutcomes.includes(o)}
+                          onClick={() => toggleOutcome(o)}
+                        >
+                          {o}
+                        </Pill>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <p className="mb-1.5 text-xs font-medium text-ink-500">Inbound</p>
+                    <div className="flex flex-wrap gap-2">
+                      {INBOUND_OUTCOMES.map((o) => (
+                        <Pill
+                          key={o}
+                          selected={draft.onlyOutcomes.includes(o)}
+                          onClick={() => toggleOutcome(o)}
+                        >
+                          {o}
+                        </Pill>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {(effectiveScope === "inbound" ? INBOUND_OUTCOMES : CALL_OUTCOMES).map(
+                    (o) => (
+                      <Pill
+                        key={o}
+                        selected={draft.onlyOutcomes.includes(o)}
+                        onClick={() => toggleOutcome(o)}
+                      >
+                        {o}
+                      </Pill>
+                    )
+                  )}
+                </div>
+              )}
             </div>
           </section>
 

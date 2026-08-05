@@ -579,6 +579,7 @@ export type Database = {
           created_by: string | null
           dedupe_window_hours: number
           description: string | null
+          direction_scope: string
           enabled: boolean
           id: string
           match_type: string
@@ -597,6 +598,7 @@ export type Database = {
           created_by?: string | null
           dedupe_window_hours?: number
           description?: string | null
+          direction_scope?: string
           enabled?: boolean
           id?: string
           match_type?: string
@@ -615,6 +617,7 @@ export type Database = {
           created_by?: string | null
           dedupe_window_hours?: number
           description?: string | null
+          direction_scope?: string
           enabled?: boolean
           id?: string
           match_type?: string

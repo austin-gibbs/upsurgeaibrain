@@ -84,13 +84,30 @@ export async function POST(req: NextRequest) {
 
   // agent omitted -> workspace-wide (agent_id NULL). Named -> scope to it.
   let agentId: string | null = null;
+  let agentDirection: "inbound" | "outbound" | null = null;
   if (agentName) {
     const resolved = await resolveConsoleAgent(db, workspaceName, agentName);
     if (!resolved.ok) return NextResponse.json({ error: resolved.error }, { status: resolved.status });
     agentId = resolved.agent.id;
+    agentDirection = (resolved.agent.direction as "inbound" | "outbound") ?? null;
   }
 
   const t = parsed.data;
+
+  // Reject a direction_scope that contradicts the selected agent's direction.
+  if (
+    agentDirection &&
+    t.direction_scope !== "all" &&
+    t.direction_scope !== agentDirection
+  ) {
+    return NextResponse.json(
+      {
+        error: `direction_scope="${t.direction_scope}" contradicts agent direction="${agentDirection}"`,
+      },
+      { status: 400 }
+    );
+  }
+
   const { data, error } = await db
     .from("automation_triggers")
     .insert({
@@ -106,6 +123,7 @@ export async function POST(req: NextRequest) {
       dedupe_window_hours: t.dedupe_window_hours,
       max_attempts: t.max_attempts,
       only_outcomes: t.only_outcomes ?? null,
+      direction_scope: t.direction_scope ?? "all",
       created_by: guard.userId ?? null,
     })
     .select("*")

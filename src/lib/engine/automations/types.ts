@@ -30,6 +30,9 @@ export interface AutomationCondition {
 
 export type MatchType = "all" | "any";
 export type AutomationActionType = "webhook" | "highlevel_sms" | "internal_notify";
+/** Which call direction a trigger matches. Default 'all' preserves pre-0035 behaviour. */
+export type AutomationDirectionScope = "all" | "inbound" | "outbound";
+export type CallDirection = "inbound" | "outbound";
 
 export interface AutomationActionConfig {
   url?: string;
@@ -59,6 +62,8 @@ export interface AutomationTrigger {
   dedupe_window_hours: number;
   max_attempts: number;
   only_outcomes: string[] | null;
+  /** Which call direction this trigger matches. Defaults to 'all'. */
+  direction_scope: AutomationDirectionScope;
   created_by: string | null;
   created_at: string;
   updated_at: string;
@@ -103,7 +108,9 @@ export interface AutomationRun {
 
 /** The call-context snapshot the evaluator matches conditions against. */
 export interface AutomationEvalContext {
-  outcome: CallOutcome;
+  outcome: CallOutcome | string;
+  /** Call direction — used by direction_scope gating. Defaults treated as outbound. */
+  direction?: CallDirection;
   summary: string | null;
   transcript: string | null;
   /** Retell call.recording_url for this call, when available. */

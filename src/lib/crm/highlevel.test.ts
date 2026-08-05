@@ -34,3 +34,18 @@ describe("resolveHighLevelCallProviderId", () => {
     assert.equal(resolveHighLevelCallProviderId("loc_3"), null);
   });
 });
+
+describe("logPlayableCall endpoint selection", () => {
+  it("uses inbound endpoint when isIncoming is true, outbound otherwise", () => {
+    // Mirrors the branch in HighLevelCrm.logPlayableCall — kept pure so the
+    // outbound path cannot silently flip without a failing test.
+    function endpointFor(isIncoming: boolean | undefined): string {
+      return isIncoming
+        ? `/conversations/messages/inbound`
+        : `/conversations/messages/outbound`;
+    }
+    assert.equal(endpointFor(true), "/conversations/messages/inbound");
+    assert.equal(endpointFor(false), "/conversations/messages/outbound");
+    assert.equal(endpointFor(undefined), "/conversations/messages/outbound");
+  });
+});

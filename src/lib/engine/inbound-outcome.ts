@@ -35,6 +35,7 @@ const ALIAS: Record<string, InboundOutcome> = {
   hotlead: "hot_lead",
   interested: "interested",
   interested_no_appointment: "interested",
+  follow_up: "interested",
   general_inquiry: "general_inquiry",
   inquiry: "general_inquiry",
   general: "general_inquiry",
@@ -56,6 +57,39 @@ const ALIAS: Record<string, InboundOutcome> = {
   robocall: "spam",
   unknown: "unknown",
 };
+
+/**
+ * Normalize a free-text / outbound outcome string to the inbound canonical
+ * taxonomy when possible. Used by post-call automation gating so a trigger
+ * written with outbound outcomes (appointment, interested_no_appointment)
+ * still matches inbound calls (appointment_booked, interested).
+ */
+export function normalizeOutcomeAlias(raw: string | null | undefined): string {
+  const co = String(raw ?? "").toLowerCase().trim();
+  if (!co) return "";
+  const norm = co.split(" ").join("_").split("-").join("_");
+  return ALIAS[norm] ?? norm;
+}
+
+/**
+ * Does an only_outcomes entry match a call outcome?
+ *
+ * Outbound: exact string match (byte-identical to pre-0035 behaviour).
+ * Inbound: both sides are canonicalized through the alias map so
+ * `appointment` matches `appointment_booked`, etc.
+ */
+export function outcomeMatchesGate(
+  callOutcome: string,
+  allowed: string[],
+  direction: "inbound" | "outbound" | undefined
+): boolean {
+  if (!allowed.length) return true;
+  if (direction === "inbound") {
+    const callCanon = normalizeOutcomeAlias(callOutcome);
+    return allowed.some((o) => normalizeOutcomeAlias(o) === callCanon);
+  }
+  return allowed.includes(callOutcome);
+}
 
 export interface ClassifyInboundInput {
   /** Free-text outcome from Retell custom analysis data. */

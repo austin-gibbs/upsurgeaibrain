@@ -66,12 +66,14 @@ export async function POST(req: NextRequest) {
   if (!ws.ok) return NextResponse.json({ error: ws.error }, { status: ws.status });
 
   let agentId: string | null = null;
+  let agentDirection: "inbound" | "outbound" | undefined;
   if (agentName) {
     const resolved = await resolveConsoleAgent(db, workspaceName, agentName);
     if (!resolved.ok) {
       return NextResponse.json({ error: resolved.error }, { status: resolved.status });
     }
     agentId = resolved.agent.id;
+    agentDirection = resolved.agent.direction as "inbound" | "outbound";
   }
 
   // Only attribute the logged run to a trigger that really is this workspace's —
@@ -95,7 +97,22 @@ export async function POST(req: NextRequest) {
     .order("link_type", { ascending: true });
   const links = linkRows ?? [];
 
-  const sample = buildSampleContext(trigger, { linkTypes: links.map((l) => l.link_type) });
+  const sample = buildSampleContext(
+    {
+      ...trigger,
+      direction_scope: trigger.direction_scope ?? "all",
+    },
+    {
+      linkTypes: links.map((l) => l.link_type),
+      direction:
+        agentDirection ??
+        (trigger.direction_scope === "inbound"
+          ? "inbound"
+          : trigger.direction_scope === "outbound"
+            ? "outbound"
+            : undefined),
+    }
+  );
 
   const linkType = resolveLinkType(config, sample.ctx);
   const mapped = linkType ? links.find((l) => l.link_type === linkType) : undefined;

@@ -60,10 +60,11 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
 
   // Re-scoping must stay inside the trigger's own workspace, otherwise a
   // trigger could be pointed at another tenant's agent.
+  let resolvedAgentDirection: "inbound" | "outbound" | null = null;
   if (parsed.data.agent_id) {
     const { data: agent, error: agentErr } = await db
       .from("agents")
-      .select("id, workspace_id")
+      .select("id, workspace_id, direction")
       .eq("id", parsed.data.agent_id)
       .maybeSingle();
     if (agentErr) return NextResponse.json({ error: agentErr.message }, { status: 500 });
@@ -73,6 +74,32 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
         { status: 400 }
       );
     }
+    resolvedAgentDirection = (agent.direction as "inbound" | "outbound") ?? null;
+  } else if (existing.agent_id && parsed.data.agent_id === undefined) {
+    // Agent unchanged — still need its direction if scope is being set.
+    const { data: agent } = await db
+      .from("agents")
+      .select("direction")
+      .eq("id", existing.agent_id)
+      .maybeSingle();
+    resolvedAgentDirection = (agent?.direction as "inbound" | "outbound") ?? null;
+  }
+
+  const effectiveScope =
+    parsed.data.direction_scope ??
+    (existing as { direction_scope?: string }).direction_scope ??
+    "all";
+  if (
+    resolvedAgentDirection &&
+    effectiveScope !== "all" &&
+    effectiveScope !== resolvedAgentDirection
+  ) {
+    return NextResponse.json(
+      {
+        error: `direction_scope="${effectiveScope}" contradicts agent direction="${resolvedAgentDirection}"`,
+      },
+      { status: 400 }
+    );
   }
 
   const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
