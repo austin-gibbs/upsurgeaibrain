@@ -19,6 +19,7 @@ import {
   hasEffectiveCrmCredentials,
   workspaceHasCrmCredentials,
 } from "@/lib/agents/crm-inheritance";
+import { verifyRetellApiKey } from "@/lib/retell/client";
 
 export const runtime = "nodejs";
 
@@ -103,6 +104,15 @@ export async function POST(
         { error: "encryption misconfigured", detail: message },
         { status: 500 }
       );
+    }
+  }
+
+  // Catch a bad key here, while the operator is still looking at the field they
+  // typed it into — a stored-but-dead key otherwise looks fully configured.
+  if (input.retell_credentials) {
+    const keyError = await verifyRetellApiKey(input.retell_credentials.apiKey);
+    if (keyError) {
+      return NextResponse.json({ error: keyError }, { status: 400 });
     }
   }
 

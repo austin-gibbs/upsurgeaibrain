@@ -13,16 +13,58 @@ const RETELL_BASE = "https://api.retellai.com";
 // Placing a call can take a little longer than a metadata read.
 const CREATE_CALL_TIMEOUT_MS = 30_000;
 
+/**
+ * Which key authenticated a request: the agent's own stored key, or the
+ * platform-wide RETELL_API_KEY fallback. Auth failures are only actionable if
+ * the operator knows which of the two Retell rejected.
+ */
+export type RetellKeySource = "agent" | "platform";
+
 /** Turn Retell create-phone-call failures into actionable operator messages. */
-export function formatCreatePhoneCallError(status: number, body: string): string {
+export function formatCreatePhoneCallError(
+  status: number,
+  body: string,
+  keySource: RetellKeySource = "platform"
+): string {
+  const original = `Retell create-phone-call ${status}: ${body}`;
+  if (status === 401 || status === 403) {
+    return keySource === "agent"
+      ? `Retell rejected the API key saved on this agent. Open the agent's settings page and re-save the API key for the Retell account that owns its from-number. Note each agent carries its own key, so fixing one agent does not fix the others. Original: ${original}`
+      : `Retell rejected the platform RETELL_API_KEY, and this agent has no key of its own. Save this agent's Retell API key on its settings page. Original: ${original}`;
+  }
   if (status === 404 && body.includes("not found from phone-number")) {
     const match = body.match(/Item (\+\d+)/);
     const fromNumber = match?.[1];
     return fromNumber
-      ? `Outbound caller ID ${fromNumber} was not found in the Retell account used for this agent. Add the correct Retell API key on the agent settings page (required when the agent uses a dedicated Retell account). Original: Retell create-phone-call ${status}: ${body}`
-      : `Retell create-phone-call ${status}: ${body}`;
+      ? `Outbound caller ID ${fromNumber} was not found in the Retell account used for this agent. Add the correct Retell API key on the agent settings page (required when the agent uses a dedicated Retell account). Original: ${original}`
+      : original;
   }
-  return `Retell create-phone-call ${status}: ${body}`;
+  return original;
+}
+
+/**
+ * Ask Retell whether an API key is usable, so a bad key is caught while the
+ * operator is still looking at the field they typed it into rather than at a
+ * failed call days later.
+ *
+ * Returns an operator-facing message only when Retell *definitively* rejects
+ * the key. A check we could not complete (timeout, Retell outage) returns null:
+ * our own connectivity must never block saving credentials.
+ */
+export async function verifyRetellApiKey(apiKey: string): Promise<string | null> {
+  let res: Response;
+  try {
+    res = await fetchWithTimeout(`${RETELL_BASE}/list-phone-numbers`, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+      timeoutMs: READ_TIMEOUT_MS,
+    });
+  } catch {
+    return null;
+  }
+  if (res.status === 401 || res.status === 403) {
+    return "Retell rejected this API key. Copy it from Retell Dashboard > API Keys for the account that owns this agent's phone numbers, then save again.";
+  }
+  return null;
 }
 const READ_TIMEOUT_MS = 15_000;
 
@@ -164,10 +206,15 @@ export interface RetellCredentials {
 
 export class RetellClient {
   private apiKey: string;
+  private keySource: RetellKeySource;
 
-  constructor(apiKey = process.env.RETELL_API_KEY!) {
+  constructor(
+    apiKey = process.env.RETELL_API_KEY!,
+    keySource: RetellKeySource = "platform"
+  ) {
     if (!apiKey) throw new Error("RETELL_API_KEY is not set");
     this.apiKey = apiKey;
+    this.keySource = keySource;
   }
 
   async createPhoneCall(input: CreatePhoneCallInput): Promise<CreatePhoneCallResult> {
@@ -189,7 +236,7 @@ export class RetellClient {
     });
     if (!res.ok) {
       const body = await res.text();
-      throw new Error(formatCreatePhoneCallError(res.status, body));
+      throw new Error(formatCreatePhoneCallError(res.status, body, this.keySource));
     }
     const data = await parseJsonResponse<{ call_id: string }>(res, "Retell create-phone-call");
     return { callId: data.call_id };
@@ -340,7 +387,7 @@ export function getRetellClientForAgent(
   if (agent.retell_credentials_encrypted) {
     try {
       const creds = decryptJson<RetellCredentials>(agent.retell_credentials_encrypted);
-      if (creds.apiKey?.trim()) return new RetellClient(creds.apiKey.trim());
+      if (creds.apiKey?.trim()) return new RetellClient(creds.apiKey.trim(), "agent");
     } catch {
       /* fall through to env */
     }

@@ -40,6 +40,7 @@ import {
 } from "@/lib/agents/crm-inheritance";
 import { validateAgentActivation } from "@/lib/agents/activation";
 import { bindRetellWebhookForAgentSafe } from "@/lib/retell/webhook-bind";
+import { verifyRetellApiKey } from "@/lib/retell/client";
 import { z } from "zod";
 
 export const runtime = "nodejs";
@@ -316,6 +317,17 @@ export async function PATCH(
     }
   } else if (input.crm_provider !== undefined) {
     nextCrmProvider = input.crm_provider;
+  }
+
+  // Reject a key Retell won't accept rather than storing it. A stored-but-dead
+  // key is indistinguishable from a working one everywhere else in the app
+  // (has_retell_credentials, activation checks), so it would only surface much
+  // later as a failed call.
+  if (input.retell_credentials) {
+    const keyError = await verifyRetellApiKey(input.retell_credentials.apiKey);
+    if (keyError) {
+      return NextResponse.json({ error: keyError }, { status: 400 });
+    }
   }
 
   const nextRetellEncrypted = input.retell_credentials

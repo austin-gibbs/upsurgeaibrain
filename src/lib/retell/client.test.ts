@@ -12,7 +12,11 @@ import { describe, it, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 
-import { listWebhookSecretCandidates, verifyRetellSignature } from "./client";
+import {
+  formatCreatePhoneCallError,
+  listWebhookSecretCandidates,
+  verifyRetellSignature,
+} from "./client";
 
 /** Build a Retell-format signature: v=<ts>,d=<hmac(body+ts, secret)>. */
 function sign(body: string, secret: string, ts = Date.now()): string {
@@ -58,6 +62,44 @@ describe("verifyRetellSignature", () => {
     process.env.RETELL_API_KEY = "key_live_apikey";
     const body = JSON.stringify({ event: "call_analyzed" });
     assert.equal(verifyRetellSignature(body, null), false);
+  });
+});
+
+describe("formatCreatePhoneCallError", () => {
+  const invalidKeyBody = '{"status":"error","message":"Invalid API Key."}';
+
+  it("points a 401 at the agent's own key when that is what was used", () => {
+    const msg = formatCreatePhoneCallError(401, invalidKeyBody, "agent");
+    assert.match(msg, /API key saved on this agent/);
+    // Keys are per-agent, so operators must know fixing one is not enough.
+    assert.match(msg, /does not fix the others/);
+    assert.match(msg, /Invalid API Key/);
+  });
+
+  it("points a 401 at the platform key when the agent has none", () => {
+    const msg = formatCreatePhoneCallError(401, invalidKeyBody, "platform");
+    assert.match(msg, /RETELL_API_KEY/);
+    assert.match(msg, /no key of its own/);
+  });
+
+  it("treats 403 like 401", () => {
+    assert.match(formatCreatePhoneCallError(403, "forbidden", "agent"), /re-save the API key/);
+  });
+
+  it("still explains a from-number missing from the account", () => {
+    const msg = formatCreatePhoneCallError(
+      404,
+      "Item +14232502827 not found from phone-number",
+      "agent"
+    );
+    assert.match(msg, /Outbound caller ID \+14232502827 was not found/);
+  });
+
+  it("passes other failures through unchanged", () => {
+    assert.equal(
+      formatCreatePhoneCallError(500, "boom", "agent"),
+      "Retell create-phone-call 500: boom"
+    );
   });
 });
 
