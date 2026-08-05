@@ -10,8 +10,9 @@
 // so mistakes land next to the field instead of coming back as a 400.
 // =====================================================================
 import { useState } from "react";
-import { Braces, LayoutList, Plus, Trash2 } from "lucide-react";
+import { Braces, FlaskConical, LayoutList, Plus, Trash2 } from "lucide-react";
 import {
+  Badge,
   Banner,
   Button,
   Input,
@@ -40,6 +41,98 @@ import {
 } from "@/lib/console/trigger-draft";
 
 export type EditorAgent = { id: string; name: string };
+
+/** What a "Test Push" came back with — rendered under the editor's buttons. */
+export type TestPushResult = {
+  /** Endpoint returned 2xx. */
+  delivered: boolean;
+  url?: string | null;
+  method?: string | null;
+  /** The exact body that was sent, for mapping fields on the CRM side. */
+  payload?: unknown;
+  response_status?: number | null;
+  response_body?: string | null;
+  duration_ms?: number | null;
+  /** Whether the sample data satisfies this automation's own conditions. */
+  matched?: boolean | null;
+  /** Why nothing was sent (internal notify has no endpoint to call). */
+  reason?: string | null;
+  warnings?: string[] | null;
+  error?: string | null;
+};
+
+/* --------------------------- Test push result --------------------------- */
+function TestPushPanel({ result }: { result: TestPushResult }) {
+  const [copied, setCopied] = useState(false);
+  const payloadJson =
+    result.payload === undefined ? "" : JSON.stringify(result.payload, null, 2);
+
+  const headline = result.delivered
+    ? `Delivered — HTTP ${result.response_status}${
+        result.duration_ms ? ` in ${result.duration_ms}ms` : ""
+      }`
+    : (result.reason ?? result.error ?? "The test push was not delivered.");
+
+  async function copyPayload() {
+    try {
+      await navigator.clipboard.writeText(payloadJson);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      /* clipboard blocked — the JSON is on screen to copy by hand */
+    }
+  }
+
+  return (
+    <div className="space-y-3 rounded-xl border border-ink-200/70 bg-surface-2 p-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge tone={result.delivered ? "green" : result.reason ? "blue" : "red"}>
+          {result.delivered ? "test push sent" : result.reason ? "nothing to send" : "not delivered"}
+        </Badge>
+        <span className="text-sm text-ink-700">{headline}</span>
+      </div>
+
+      {result.url && (
+        <p className="truncate text-xs text-ink-500">
+          {result.method ?? "POST"} {result.url}
+        </p>
+      )}
+
+      {result.warnings?.map((w) => (
+        <Banner key={w} tone="info">
+          {w}
+        </Banner>
+      ))}
+
+      {payloadJson && (
+        <div>
+          <div className="mb-1.5 flex items-center justify-between gap-2">
+            <Label>Payload sent</Label>
+            <Button variant="ghost" size="sm" onClick={copyPayload}>
+              {copied ? "Copied" : "Copy JSON"}
+            </Button>
+          </div>
+          <pre className="max-h-72 overflow-auto rounded-xl bg-ink-900/95 p-3 font-mono text-xs leading-relaxed text-ink-50">
+            {payloadJson}
+          </pre>
+          <p className="mt-2 text-xs text-ink-400">
+            Fake values — map these field names in your CRM. A real call sends the same shape
+            with the caller&apos;s data (and no <code>test</code> flag).
+          </p>
+        </div>
+      )}
+
+      {result.response_body && (
+        <div>
+          <Label>Endpoint response</Label>
+          <pre className="mt-1.5 max-h-40 overflow-auto rounded-xl border border-ink-200/70 bg-surface p-3 font-mono text-xs leading-relaxed text-ink-600">
+            {result.response_body}
+          </pre>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function Field({
   label,
@@ -84,6 +177,7 @@ export function TriggerEditor({
   submitLabel,
   busy = false,
   onSubmit,
+  onTestPush,
   onCancel,
   idPrefix,
 }: {
@@ -93,6 +187,12 @@ export function TriggerEditor({
   busy?: boolean;
   /** Receives the validated payload plus the chosen agent scope ("" = all). */
   onSubmit: (payload: TriggerPayload, agentId: string) => void;
+  /**
+   * Fire a test push at the configured endpoint with sample data. Takes the
+   * draft as it stands, so an automation can be proven before it is saved.
+   * Must resolve (never reject) so the failure is rendered like any result.
+   */
+  onTestPush?: (payload: TriggerPayload, agentId: string) => Promise<TestPushResult>;
   onCancel?: () => void;
   /** Keeps input ids unique when several editors are open at once. */
   idPrefix: string;
@@ -101,6 +201,8 @@ export function TriggerEditor({
   const [jsonMode, setJsonMode] = useState(false);
   const [jsonText, setJsonText] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<TestPushResult | null>(null);
 
   const set = <K extends keyof TriggerDraft>(key: K, value: TriggerDraft[K]) => {
     setDraft((d) => ({ ...d, [key]: value }));
@@ -129,21 +231,40 @@ export function TriggerEditor({
     setJsonMode(false);
   }
 
-  function submit() {
+  /** Validate whichever pane is active into an API payload, or surface why not. */
+  function currentPayload(): TriggerPayload | null {
     // In JSON mode the textarea is the source of truth — fold it back into the
     // draft first so both modes go through the same validation.
     const source = jsonMode ? draftFromPayloadJson(jsonText, draft.agentId) : null;
     if (source && !source.ok) {
       setError(source.error);
-      return;
+      return null;
     }
     const built = draftToPayload(source ? source.draft : draft);
     if (!built.ok) {
       setError(built.error);
-      return;
+      return null;
     }
     setError(null);
-    onSubmit(built.payload, draft.agentId);
+    return built.payload;
+  }
+
+  function submit() {
+    const payload = currentPayload();
+    if (payload) onSubmit(payload, draft.agentId);
+  }
+
+  async function testPush() {
+    if (!onTestPush) return;
+    const payload = currentPayload();
+    if (!payload) return;
+    setTesting(true);
+    setTestResult(null);
+    try {
+      setTestResult(await onTestPush(payload, draft.agentId));
+    } finally {
+      setTesting(false);
+    }
   }
 
   function updateCondition(index: number, patch: Partial<TriggerDraft["conditions"][number]>) {
@@ -576,15 +697,30 @@ export function TriggerEditor({
         </>
       )}
 
-      <div className="flex flex-wrap items-center gap-2 border-t border-ink-100 pt-5">
-        <Button onClick={submit} disabled={busy}>
-          {busy ? "Saving…" : submitLabel}
-        </Button>
-        {onCancel && (
-          <Button variant="ghost" onClick={onCancel} disabled={busy}>
-            Cancel
+      <div className="space-y-4 border-t border-ink-100 pt-5">
+        <div className="flex flex-wrap items-center gap-2">
+          <Button onClick={submit} disabled={busy || testing}>
+            {busy ? "Saving…" : submitLabel}
           </Button>
+          {onTestPush && (
+            <Button variant="secondary" onClick={testPush} disabled={busy || testing}>
+              <FlaskConical className="h-4 w-4" strokeWidth={1.75} />
+              {testing ? "Pushing…" : "Test Push"}
+            </Button>
+          )}
+          {onCancel && (
+            <Button variant="ghost" onClick={onCancel} disabled={busy || testing}>
+              Cancel
+            </Button>
+          )}
+        </div>
+        {onTestPush && !testResult && (
+          <p className="text-xs text-ink-400">
+            Test Push sends this automation&apos;s payload to the delivery URL with fake sample
+            data — no call and no save required — so the CRM side can be mapped first.
+          </p>
         )}
+        {testResult && <TestPushPanel result={testResult} />}
       </div>
     </div>
   );

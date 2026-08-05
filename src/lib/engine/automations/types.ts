@@ -33,7 +33,7 @@ export type AutomationActionType = "webhook" | "highlevel_sms" | "internal_notif
 
 export interface AutomationActionConfig {
   url?: string;
-  method?: "POST" | "PUT";
+  method?: "POST" | "PUT" | "PATCH";
   headers?: Record<string, string>;
   /** Message body template. Supports {{...}} placeholders (see render.ts). */
   message_template?: string;

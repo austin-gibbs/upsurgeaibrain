@@ -50,7 +50,7 @@ import {
   Switch,
 } from "@/components/ui";
 import { readJson } from "@/lib/api/fetch-json";
-import { TriggerEditor, type EditorAgent } from "./TriggerEditor";
+import { TriggerEditor, type EditorAgent, type TestPushResult } from "./TriggerEditor";
 import {
   draftFromTrigger,
   summarizeConditions,
@@ -393,6 +393,39 @@ export default function AutomationsConsolePage() {
     }
   }
 
+  /**
+   * Fire a test push for the automation as currently drafted — saved or not —
+   * so the endpoint can be wired up (and field-mapped) before any real call.
+   * The run is logged, so it also shows up in the run log.
+   */
+  async function testPush(
+    payload: TriggerPayload,
+    agentId: string,
+    triggerId?: string
+  ): Promise<TestPushResult> {
+    setFeedback(null);
+    try {
+      const body: Record<string, unknown> = { ...payload, workspace: workspaceName };
+      const agentName = agents.find((a) => a.id === agentId)?.name;
+      if (agentName) body.agent = agentName;
+      if (triggerId) body.trigger_id = triggerId;
+      const res = await fetch("/api/console/automations/test", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await readJson<TestPushResult & { error?: string }>(res);
+      if (!res.ok) {
+        return { delivered: false, error: apiError(data, "The test push could not be sent.") };
+      }
+      // A logged test is worth refreshing the run log for.
+      void refresh(workspaceName, runStatus);
+      return data;
+    } catch (e) {
+      return { delivered: false, error: e instanceof Error ? e.message : String(e) };
+    }
+  }
+
   async function toggleTrigger(trigger: TriggerRow) {
     setBusy(`toggle-${trigger.id}`);
     setFeedback(null);
@@ -649,6 +682,7 @@ export default function AutomationsConsolePage() {
                         submitLabel="Create automation"
                         busy={busy === "create"}
                         onSubmit={createTrigger}
+                        onTestPush={(payload, agentId) => testPush(payload, agentId)}
                         onCancel={() => setCreating(false)}
                       />
                     </Card>
@@ -747,6 +781,7 @@ export default function AutomationsConsolePage() {
                               submitLabel="Save changes"
                               busy={busy === `save-${t.id}`}
                               onSubmit={(payload, agentId) => saveTrigger(t.id, payload, agentId)}
+                              onTestPush={(payload, agentId) => testPush(payload, agentId, t.id)}
                               onCancel={() => setEditingId(null)}
                             />
                           </div>
@@ -891,6 +926,7 @@ export default function AutomationsConsolePage() {
                       >
                         <div className="flex flex-wrap items-center gap-2">
                           <Badge tone={runTone(r.status)}>{r.status}</Badge>
+                          {r.meta?.test ? <Badge tone="blue">test push</Badge> : null}
                           <span className="text-ink-700">
                             {ACTION_LABEL[r.action_type ?? ""] ?? r.action_type ?? "—"}
                           </span>

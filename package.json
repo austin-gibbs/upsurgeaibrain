@@ -12,7 +12,7 @@
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test src/lib/**/*.test.ts",
+    "test": "tsx --test \"src/**/*.test.ts\"",
     "db:apply-pending": "node scripts/apply-migrations-api.mjs",
     "db:apply-0007": "node scripts/apply-0007.mjs",
     "db:apply-0009": "node scripts/apply-0009.mjs",

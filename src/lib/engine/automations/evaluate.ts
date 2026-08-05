@@ -15,8 +15,8 @@
 // =====================================================================
 import { createServiceClient } from "@/lib/supabase/server";
 import { enqueueAutomation } from "@/lib/queue/queues";
+import { buildRequest, firstNameOf, resolveLinkType } from "./build-request";
 import { triggerMatches } from "./conditions";
-import { renderTemplate, renderPayload, type RenderScope } from "./render";
 import type {
   AutomationActionConfig,
   AutomationCondition,
@@ -29,70 +29,6 @@ import type { Agent, CallOutcome, Contact, Workspace } from "@/types";
 import type { Json } from "@/types/database";
 
 type DbClient = ReturnType<typeof createServiceClient>;
-
-function firstNameOf(fullName: string | null): string | null {
-  if (!fullName) return null;
-  const t = fullName.trim();
-  return t ? t.split(/\s+/)[0] : null;
-}
-
-/** Resolve which link_type this trigger wants, from config or the call fields. */
-function resolveLinkType(cfg: AutomationActionConfig, ctx: AutomationEvalContext): string | null {
-  if (cfg.static_link_type) return cfg.static_link_type;
-  if (cfg.link_type_field) {
-    const v = ctx.customFields?.[cfg.link_type_field];
-    if (v !== null && v !== undefined && String(v).trim() !== "") return String(v).trim();
-  }
-  return null;
-}
-
-function buildRequest(
-  trigger: AutomationTrigger,
-  ctx: AutomationEvalContext,
-  link: { type: string | null; url: string | null; label: string | null }
-): { url: string | null; payload: Record<string, unknown> } {
-  const cfg = trigger.action_config ?? {};
-  const scope: RenderScope = { ctx, link };
-
-  if (trigger.action_type === "internal_notify") {
-    return {
-      url: null,
-      payload: {
-        event: "automation_internal_notify",
-        trigger: trigger.name,
-        message: cfg.message_template ? renderTemplate(cfg.message_template, scope) : null,
-        outcome: ctx.outcome,
-        contact: ctx.contact,
-      },
-    };
-  }
-
-  // webhook / highlevel_sms: default payload matches the existing post-call
-  // webhook shape so a HighLevel Inbound Webhook can map fields the same way,
-  // plus the resolved message + link the automation is meant to deliver.
-  const defaultPayload: Record<string, unknown> = {
-    event: "post_call_automation",
-    trigger_name: trigger.name,
-    outcome: ctx.outcome,
-    contact: {
-      name: ctx.contact.full_name,
-      first_name: ctx.contact.first_name,
-      email: ctx.contact.email,
-      phone: ctx.contact.phone,
-    },
-    link_type: link.type,
-    link_url: link.url,
-    message: cfg.message_template ? renderTemplate(cfg.message_template, scope) : null,
-    summary: ctx.summary,
-    custom_analysis_data: ctx.customFields,
-  };
-
-  const payload = cfg.payload_template
-    ? renderPayload(cfg.payload_template, scope)
-    : defaultPayload;
-
-  return { url: cfg.url ?? null, payload };
-}
 
 /** True when an equivalent run was already sent inside the dedupe window. */
 async function isDuplicate(
