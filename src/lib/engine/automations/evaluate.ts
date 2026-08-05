@@ -179,8 +179,13 @@ export async function evaluateAutomations(input: EvaluateAutomationsInput): Prom
     try {
       await enqueueAutomation({ runId: run.id });
       enqueued++;
-    } catch {
-      /* queued row is durable; sweeper/drain will retry */
+    } catch (err) {
+      // The queued row is durable and the drain sweep retries it, but a
+      // persistent enqueue fault stalls every automation silently — log it.
+      console.warn(
+        `[automations] enqueue failed for run ${run.id}:`,
+        err instanceof Error ? err.message : String(err)
+      );
     }
   }
 

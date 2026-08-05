@@ -40,6 +40,19 @@ export function getRedis(): Redis {
   return connection;
 }
 
+/**
+ * Open the shared connection only while it is still lazy.
+ *
+ * BullMQ starts connecting the ioredis instance it is handed, so calling
+ * connect() unconditionally after constructing a Queue races that and throws
+ * "Redis is already connecting/connected" — which silently loses the enqueue.
+ */
+export async function ensureRedisConnected(): Promise<Redis> {
+  const redis = getRedis();
+  if (redis.status === "wait") await redis.connect();
+  return redis;
+}
+
 /** Tear down the singleton connection (call after one-off API enqueues). */
 export function closeRedis(): void {
   if (connection) {

@@ -7,7 +7,7 @@
 //          so dials for an agent are spaced `drip_seconds` apart.
 // =====================================================================
 import { Queue } from "bullmq";
-import { closeRedis, getRedis } from "./connection";
+import { closeRedis, ensureRedisConnected, getRedis } from "./connection";
 import { sanitizeBullmqJobId } from "./job-id";
 
 export const POLL_QUEUE = "agent-poll";
@@ -94,7 +94,7 @@ export function getSmsQueue(): Queue<SmsJob> {
 /** Enqueue one outbound SMS send. Optional delay for drip spacing. */
 export async function enqueueSms(job: SmsJob, delayMs = 0): Promise<void> {
   const queue = getSmsQueue();
-  await getRedis().connect();
+  await ensureRedisConnected();
   await queue.add("send-sms", job, { delay: delayMs });
 }
 
@@ -118,7 +118,7 @@ export function getAutomationQueue(): Queue<AutomationJob> {
 /** Enqueue one automation run for the executor worker. */
 export async function enqueueAutomation(job: AutomationJob, delayMs = 0): Promise<void> {
   const queue = getAutomationQueue();
-  await getRedis().connect();
+  await ensureRedisConnected();
   await queue.add("execute-automation", job, {
     delay: delayMs,
     jobId: sanitizeBullmqJobId(`automation-${job.runId}`),
@@ -150,8 +150,7 @@ export interface CallJobSpec {
 export async function addCallJobsBulk(specs: CallJobSpec[]): Promise<void> {
   if (specs.length === 0) return;
   const queue = getCallQueue();
-  const redis = getRedis();
-  await redis.connect();
+  await ensureRedisConnected();
 
   // Replace any stale jobs with the same id (e.g. operator re-queues).
   for (const spec of specs) {
