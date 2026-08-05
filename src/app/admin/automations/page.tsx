@@ -9,61 +9,68 @@
 // Webhook, or internal notify). A new automation is a new ROW here — never a
 // code deploy.
 //
-// Four panels, all keyed by workspace NAME (agent optional):
-//   1. Triggers   — list / create / enable-disable / delete rules.
-//   2. Links      — the per-workspace link map (link_type -> URL) the actions send.
-//   3. Runs       — the audit log (queued/sent/failed/dead/skipped).
+// Everything is scoped to the workspace picked at the top, which is loaded from
+// /api/console/workspaces so the exact name never has to be typed. Three tabs:
+//   1. Automations — list / create / edit / enable-disable / delete rules.
+//   2. Link map    — the per-workspace link_type -> URL map the actions send.
+//   3. Run log     — the audit log (queued/sent/failed/dead/skipped).
 //
 // Drives the session+admin-gated /api/console/automations* routes. Restricted
 // to app admins (enforced server-side on every route).
 // =====================================================================
-import { useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  AlertTriangle,
+  Bell,
+  CheckCircle2,
+  Link2,
+  Plus,
+  RefreshCw,
+  ScrollText,
+  Send,
+  Trash2,
+  Webhook,
+  Zap,
+} from "lucide-react";
 import { PageShell } from "@/components/TopNav";
-import { Badge, Button, Card, Input, Label, SectionHeader } from "@/components/ui";
+import {
+  Badge,
+  Banner,
+  Button,
+  Card,
+  EmptyState,
+  Input,
+  Label,
+  PageGreeting,
+  SectionHeader,
+  Select,
+  Skeleton,
+  StatTile,
+  SubTabs,
+  Switch,
+} from "@/components/ui";
 import { readJson } from "@/lib/api/fetch-json";
+import { TriggerEditor, type EditorAgent } from "./TriggerEditor";
+import {
+  draftFromTrigger,
+  summarizeConditions,
+  type TriggerPayload,
+  type TriggerRow,
+} from "@/lib/console/trigger-draft";
 
-// A ready-to-edit trigger. This is Paul Avratin's "send the link they asked
-// for" automation: when the call captured link_requested=true, POST to the
-// client's HighLevel Inbound Webhook with the resolved link so HighLevel texts
-// it. link_type_field reads which link from the call; the Links panel maps each
-// link_type to a URL, so HighLevel stays "dumb" and identical per client.
-const TRIGGER_TEMPLATE = `{
-  "name": "Send requested link",
-  "description": "Caller asked for a link — text it via HighLevel.",
-  "enabled": true,
-  "match_type": "all",
-  "conditions": [
-    { "field": "link_requested", "operator": "is_true" }
-  ],
-  "action_type": "highlevel_sms",
-  "action_config": {
-    "url": "https://services.leadconnectorhq.com/hooks/PASTE_HIGHLEVEL_INBOUND_WEBHOOK",
-    "link_type_field": "link_type",
-    "message_template": "Hi {{contact.first_name}}, here's the info you asked for: {{link.url}}"
-  },
-  "dedupe_window_hours": 24,
-  "max_attempts": 5,
-  "only_outcomes": null
-}`;
+const WORKSPACE_STORAGE_KEY = "upsurge-automations-workspace";
 
-const textareaClass =
-  "w-full rounded-xl border border-ink-200/80 bg-surface px-4 py-3 font-mono text-xs text-ink-900 shadow-soft placeholder:text-ink-400 transition-colors focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20";
-
-type Trigger = {
+type WorkspaceOption = {
   id: string;
-  agent_id: string | null;
   name: string;
-  description: string | null;
-  enabled: boolean;
-  match_type: string;
-  action_type: string;
-  conditions: unknown;
-  action_config: Record<string, unknown>;
-  dedupe_window_hours: number;
-  max_attempts: number;
-  only_outcomes: string[] | null;
+  timezone: string;
+  crm_provider: string;
+  is_active: boolean;
+  agents: { id: string; name: string; status: string; direction: string }[];
 };
+
 type LinkRow = { link_type: string; url: string; label: string | null };
+
 type RunRow = {
   id: string;
   status: string;
@@ -77,464 +84,843 @@ type RunRow = {
   meta: Record<string, unknown> | null;
 };
 
-function ResultBox({ data }: { data: unknown }) {
-  if (data === null || data === undefined) return null;
+type Feedback = { tone: "success" | "error"; text: string } | null;
+
+const ACTION_ICON: Record<string, typeof Webhook> = {
+  webhook: Webhook,
+  highlevel_sms: Send,
+  internal_notify: Bell,
+};
+
+const ACTION_LABEL: Record<string, string> = {
+  webhook: "Webhook",
+  highlevel_sms: "HighLevel SMS",
+  internal_notify: "Internal notify",
+};
+
+/** Turn an API error body (message + optional Zod issues) into readable text. */
+function apiError(data: unknown, fallback: string): string {
+  if (!data || typeof data !== "object") return fallback;
+  const body = data as { error?: unknown; issues?: unknown };
+  const message = typeof body.error === "string" ? body.error : fallback;
+  if (!Array.isArray(body.issues)) return message;
+  const issues = body.issues
+    .map((raw) => {
+      const issue = (raw ?? {}) as { path?: unknown[]; message?: string };
+      const path = Array.isArray(issue.path) ? issue.path.join(".") : "";
+      return `• ${path || "trigger"}: ${issue.message ?? "invalid"}`;
+    })
+    .join("\n");
+  return issues ? `${message}\n${issues}` : message;
+}
+
+function runTone(status: string): "slate" | "green" | "amber" | "red" | "blue" {
+  if (status === "sent") return "green";
+  if (status === "failed") return "amber";
+  if (status === "dead") return "red";
+  if (status === "skipped") return "slate";
+  return "blue";
+}
+
+/* -------------------------------- Link row ------------------------------- */
+function LinkRowCard({
+  link,
+  busy,
+  onSave,
+  onDelete,
+}: {
+  link: LinkRow;
+  busy: boolean;
+  onSave: (next: LinkRow) => void;
+  onDelete: () => void;
+}) {
+  const [url, setUrl] = useState(link.url);
+  const [label, setLabel] = useState(link.label ?? "");
+  const dirty = url !== link.url || label !== (link.label ?? "");
+
   return (
-    <pre className="mt-4 max-h-80 overflow-auto rounded-xl bg-ink-900/95 p-4 text-xs leading-relaxed text-ink-50">
-      {typeof data === "string" ? data : JSON.stringify(data, null, 2)}
-    </pre>
+    <div className="rounded-xl border border-ink-200/70 bg-surface p-4">
+      <div className="mb-3 flex items-center gap-2">
+        <code className="rounded-lg bg-ink-100 px-2 py-0.5 font-mono text-xs font-medium text-ink-700">
+          {link.link_type}
+        </code>
+        {dirty && <Badge tone="amber">unsaved</Badge>}
+      </div>
+      <div className="grid gap-3 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+        <div>
+          <Label htmlFor={`url-${link.link_type}`}>URL</Label>
+          <Input
+            id={`url-${link.link_type}`}
+            className="mt-1.5"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+          />
+        </div>
+        <div>
+          <Label htmlFor={`label-${link.link_type}`} hint="optional">
+            Label
+          </Label>
+          <Input
+            id={`label-${link.link_type}`}
+            className="mt-1.5"
+            value={label}
+            onChange={(e) => setLabel(e.target.value)}
+            placeholder="Buyer's Guide PDF"
+          />
+        </div>
+      </div>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <Button
+          size="sm"
+          disabled={!dirty || busy}
+          onClick={() => onSave({ link_type: link.link_type, url, label: label || null })}
+        >
+          {busy ? "Saving…" : "Save changes"}
+        </Button>
+        {dirty && (
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={busy}
+            onClick={() => {
+              setUrl(link.url);
+              setLabel(link.label ?? "");
+            }}
+          >
+            Reset
+          </Button>
+        )}
+        <Button size="sm" variant="ghost" disabled={busy} onClick={onDelete}>
+          <Trash2 className="h-4 w-4" strokeWidth={1.75} />
+          Delete
+        </Button>
+      </div>
+    </div>
   );
 }
 
+/* ---------------------------------- Page --------------------------------- */
 export default function AutomationsConsolePage() {
-  const [workspace, setWorkspace] = useState("");
-  const [agent, setAgent] = useState("");
+  const [workspaces, setWorkspaces] = useState<WorkspaceOption[] | null>(null);
+  const [workspaceName, setWorkspaceName] = useState("");
+  const [agentFilter, setAgentFilter] = useState("");
+  const [tab, setTab] = useState<"triggers" | "links" | "runs">("triggers");
+  const [feedback, setFeedback] = useState<Feedback>(null);
 
-  // Triggers
-  const [triggers, setTriggers] = useState<Trigger[] | null>(null);
-  const [triggerJson, setTriggerJson] = useState(TRIGGER_TEMPLATE);
-  const [trigBusy, setTrigBusy] = useState("");
-  const [trigResult, setTrigResult] = useState<unknown>(null);
-
-  // Links
+  const [triggers, setTriggers] = useState<TriggerRow[] | null>(null);
   const [links, setLinks] = useState<LinkRow[] | null>(null);
-  const [linkType, setLinkType] = useState("");
-  const [linkUrl, setLinkUrl] = useState("");
-  const [linkLabel, setLinkLabel] = useState("");
-  const [linkBusy, setLinkBusy] = useState("");
-  const [linkResult, setLinkResult] = useState<unknown>(null);
-
-  // Runs
   const [runs, setRuns] = useState<RunRow[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [busy, setBusy] = useState("");
+
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
+
   const [runStatus, setRunStatus] = useState("");
-  const [runBusy, setRunBusy] = useState("");
+  const [newLink, setNewLink] = useState({ link_type: "", url: "", label: "" });
 
-  const wsQuery = () => {
-    const p = new URLSearchParams({ workspace: workspace.trim() });
-    if (agent.trim()) p.set("agent", agent.trim());
-    return p.toString();
-  };
+  const workspace = useMemo(
+    () => workspaces?.find((w) => w.name === workspaceName) ?? null,
+    [workspaces, workspaceName]
+  );
+  const agents: EditorAgent[] = useMemo(
+    () => (workspace?.agents ?? []).map((a) => ({ id: a.id, name: a.name })),
+    [workspace]
+  );
 
-  async function loadTriggers() {
-    if (!workspace.trim()) return;
-    setTrigBusy("load");
-    setTrigResult(null);
-    try {
-      const res = await fetch(`/api/console/automations?${wsQuery()}`);
-      const data = await readJson<any>(res);
-      if (res.ok) setTriggers(data.triggers ?? []);
-      else setTrigResult(data);
-    } catch (e) {
-      setTrigResult(e instanceof Error ? e.message : String(e));
-    } finally {
-      setTrigBusy("");
-    }
-  }
+  // Load the workspace list once, then restore the last workspace the admin
+  // was working in (falling back to the only one when there's just one).
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/console/workspaces")
+      .then((res) => readJson<{ workspaces?: WorkspaceOption[]; error?: string }>(res))
+      .then((data) => {
+        if (cancelled) return;
+        if (data.error) {
+          setWorkspaces([]);
+          setFeedback({ tone: "error", text: data.error });
+          return;
+        }
+        const list = data.workspaces ?? [];
+        setWorkspaces(list);
+        let remembered = "";
+        try {
+          remembered = localStorage.getItem(WORKSPACE_STORAGE_KEY) ?? "";
+        } catch {
+          /* private mode — fall through to the default */
+        }
+        const initial =
+          list.find((w) => w.name === remembered)?.name ??
+          (list.length === 1 ? list[0].name : "");
+        if (initial) setWorkspaceName(initial);
+      })
+      .catch((e: unknown) => {
+        if (cancelled) return;
+        setWorkspaces([]);
+        setFeedback({
+          tone: "error",
+          text: e instanceof Error ? e.message : "Unable to load workspaces.",
+        });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
-  async function createTrigger() {
-    if (!workspace.trim()) return;
-    setTrigBusy("create");
-    setTrigResult(null);
-    let parsed: Record<string, unknown>;
-    try {
-      parsed = JSON.parse(triggerJson);
-    } catch (e) {
-      setTrigResult(`Trigger is not valid JSON: ${e instanceof Error ? e.message : String(e)}`);
-      setTrigBusy("");
+  const refresh = useCallback(
+    async (name: string, status: string) => {
+      if (!name) return;
+      setLoading(true);
+      const ws = encodeURIComponent(name);
+      const runParams = new URLSearchParams({ workspace: name, limit: "100" });
+      if (status) runParams.set("status", status);
+      try {
+        const [triggerRes, linkRes, runRes] = await Promise.all([
+          fetch(`/api/console/automations?workspace=${ws}`),
+          fetch(`/api/console/automations/links?workspace=${ws}`),
+          fetch(`/api/console/automations/runs?${runParams.toString()}`),
+        ]);
+        const [triggerData, linkData, runData] = await Promise.all([
+          readJson<{ triggers?: TriggerRow[]; error?: string }>(triggerRes),
+          readJson<{ links?: LinkRow[]; error?: string }>(linkRes),
+          readJson<{ runs?: RunRow[]; error?: string }>(runRes),
+        ]);
+        setTriggers(triggerRes.ok ? (triggerData.triggers ?? []) : []);
+        setLinks(linkRes.ok ? (linkData.links ?? []) : []);
+        setRuns(runRes.ok ? (runData.runs ?? []) : []);
+        if (!triggerRes.ok) {
+          setFeedback({ tone: "error", text: apiError(triggerData, "Failed to load automations.") });
+        }
+      } catch (e) {
+        setFeedback({
+          tone: "error",
+          text: e instanceof Error ? e.message : "Failed to load this workspace.",
+        });
+      } finally {
+        setLoading(false);
+      }
+    },
+    []
+  );
+
+  // Everything reloads as soon as a workspace is chosen — no "Load" button to
+  // hunt for, and no panel that silently stays empty.
+  useEffect(() => {
+    if (!workspaceName) {
+      setTriggers(null);
+      setLinks(null);
+      setRuns(null);
       return;
     }
     try {
-      const body: Record<string, unknown> = { ...parsed, workspace: workspace.trim() };
-      if (agent.trim()) body.agent = agent.trim();
+      localStorage.setItem(WORKSPACE_STORAGE_KEY, workspaceName);
+    } catch {
+      /* persistence is a convenience, not a requirement */
+    }
+    setEditingId(null);
+    setCreating(false);
+    setAgentFilter("");
+    void refresh(workspaceName, runStatus);
+    // runStatus has its own reload path below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspaceName, refresh]);
+
+  const visibleTriggers = useMemo(() => {
+    if (!triggers) return null;
+    if (!agentFilter) return triggers;
+    return triggers.filter((t) => t.agent_id === null || t.agent_id === agentFilter);
+  }, [triggers, agentFilter]);
+
+  const runCounts = useMemo(() => {
+    const counts = { sent: 0, queued: 0, failed: 0, dead: 0, skipped: 0 };
+    for (const r of runs ?? []) {
+      if (r.status in counts) counts[r.status as keyof typeof counts] += 1;
+    }
+    return counts;
+  }, [runs]);
+
+  const enabledCount = (triggers ?? []).filter((t) => t.enabled).length;
+
+  /* ------------------------------- mutations ------------------------------ */
+  async function createTrigger(payload: TriggerPayload, agentId: string) {
+    setBusy("create");
+    setFeedback(null);
+    try {
+      const body: Record<string, unknown> = { ...payload, workspace: workspaceName };
+      const agentName = agents.find((a) => a.id === agentId)?.name;
+      if (agentName) body.agent = agentName;
       const res = await fetch("/api/console/automations", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
       });
-      const data = await readJson<any>(res);
-      setTrigResult(data);
-      if (res.ok) loadTriggers();
+      const data = await readJson<unknown>(res);
+      if (!res.ok) {
+        setFeedback({ tone: "error", text: apiError(data, "Could not create the automation.") });
+        return;
+      }
+      setCreating(false);
+      setFeedback({ tone: "success", text: `Created “${payload.name}”.` });
+      await refresh(workspaceName, runStatus);
     } catch (e) {
-      setTrigResult(e instanceof Error ? e.message : String(e));
+      setFeedback({ tone: "error", text: e instanceof Error ? e.message : String(e) });
     } finally {
-      setTrigBusy("");
+      setBusy("");
     }
   }
 
-  async function toggleTrigger(t: Trigger) {
-    setTrigBusy(`toggle-${t.id}`);
+  async function saveTrigger(id: string, payload: TriggerPayload, agentId: string) {
+    setBusy(`save-${id}`);
+    setFeedback(null);
     try {
-      const res = await fetch(`/api/console/automations/${t.id}`, {
+      const res = await fetch(`/api/console/automations/${id}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ enabled: !t.enabled }),
+        body: JSON.stringify({ ...payload, agent_id: agentId || null }),
       });
-      const data = await readJson<any>(res);
-      if (res.ok) loadTriggers();
-      else setTrigResult(data);
+      const data = await readJson<unknown>(res);
+      if (!res.ok) {
+        setFeedback({ tone: "error", text: apiError(data, "Could not save the automation.") });
+        return;
+      }
+      setEditingId(null);
+      setFeedback({ tone: "success", text: `Saved “${payload.name}”.` });
+      await refresh(workspaceName, runStatus);
     } catch (e) {
-      setTrigResult(e instanceof Error ? e.message : String(e));
+      setFeedback({ tone: "error", text: e instanceof Error ? e.message : String(e) });
     } finally {
-      setTrigBusy("");
+      setBusy("");
     }
   }
 
-  async function deleteTrigger(t: Trigger) {
-    if (!confirm(`Delete trigger "${t.name}"? Its run history is kept.`)) return;
-    setTrigBusy(`del-${t.id}`);
+  async function toggleTrigger(trigger: TriggerRow) {
+    setBusy(`toggle-${trigger.id}`);
+    setFeedback(null);
     try {
-      const res = await fetch(`/api/console/automations/${t.id}`, { method: "DELETE" });
-      const data = await readJson<any>(res);
-      if (res.ok) loadTriggers();
-      else setTrigResult(data);
-    } catch (e) {
-      setTrigResult(e instanceof Error ? e.message : String(e));
-    } finally {
-      setTrigBusy("");
-    }
-  }
-
-  async function loadLinks() {
-    if (!workspace.trim()) return;
-    setLinkBusy("load");
-    setLinkResult(null);
-    try {
-      const res = await fetch(
-        `/api/console/automations/links?workspace=${encodeURIComponent(workspace.trim())}`
+      const res = await fetch(`/api/console/automations/${trigger.id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ enabled: !trigger.enabled }),
+      });
+      const data = await readJson<unknown>(res);
+      if (!res.ok) {
+        setFeedback({ tone: "error", text: apiError(data, "Could not change the automation.") });
+        return;
+      }
+      setTriggers(
+        (prev) =>
+          prev?.map((t) => (t.id === trigger.id ? { ...t, enabled: !trigger.enabled } : t)) ?? prev
       );
-      const data = await readJson<any>(res);
-      if (res.ok) setLinks(data.links ?? []);
-      else setLinkResult(data);
     } catch (e) {
-      setLinkResult(e instanceof Error ? e.message : String(e));
+      setFeedback({ tone: "error", text: e instanceof Error ? e.message : String(e) });
     } finally {
-      setLinkBusy("");
+      setBusy("");
     }
   }
 
-  async function upsertLink() {
-    if (!workspace.trim() || !linkType.trim() || !linkUrl.trim()) return;
-    setLinkBusy("save");
-    setLinkResult(null);
+  async function deleteTrigger(trigger: TriggerRow) {
+    if (!confirm(`Delete “${trigger.name}”? Its run history is kept.`)) return;
+    setBusy(`del-${trigger.id}`);
+    setFeedback(null);
+    try {
+      const res = await fetch(`/api/console/automations/${trigger.id}`, { method: "DELETE" });
+      const data = await readJson<unknown>(res);
+      if (!res.ok) {
+        setFeedback({ tone: "error", text: apiError(data, "Could not delete the automation.") });
+        return;
+      }
+      setFeedback({ tone: "success", text: `Deleted “${trigger.name}”.` });
+      await refresh(workspaceName, runStatus);
+    } catch (e) {
+      setFeedback({ tone: "error", text: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function upsertLink(link: LinkRow) {
+    if (!link.link_type.trim() || !link.url.trim()) {
+      setFeedback({ tone: "error", text: "A link needs both a type and a URL." });
+      return;
+    }
+    setBusy(`link-${link.link_type}`);
+    setFeedback(null);
     try {
       const res = await fetch("/api/console/automations/links", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          workspace: workspace.trim(),
-          link_type: linkType.trim(),
-          url: linkUrl.trim(),
-          label: linkLabel.trim() || null,
+          workspace: workspaceName,
+          link_type: link.link_type.trim(),
+          url: link.url.trim(),
+          label: link.label?.trim() || null,
         }),
       });
-      const data = await readJson<any>(res);
-      setLinkResult(data);
-      if (res.ok) {
-        setLinkType("");
-        setLinkUrl("");
-        setLinkLabel("");
-        loadLinks();
+      const data = await readJson<unknown>(res);
+      if (!res.ok) {
+        setFeedback({ tone: "error", text: apiError(data, "Could not save the link.") });
+        return;
       }
+      setFeedback({ tone: "success", text: `Saved link “${link.link_type}”.` });
+      await refresh(workspaceName, runStatus);
     } catch (e) {
-      setLinkResult(e instanceof Error ? e.message : String(e));
+      setFeedback({ tone: "error", text: e instanceof Error ? e.message : String(e) });
     } finally {
-      setLinkBusy("");
+      setBusy("");
     }
   }
 
-  async function deleteLink(lt: string) {
-    if (!confirm(`Delete link "${lt}"?`)) return;
-    setLinkBusy(`del-${lt}`);
+  async function deleteLink(linkType: string) {
+    if (!confirm(`Delete the link “${linkType}”?`)) return;
+    setBusy(`link-${linkType}`);
+    setFeedback(null);
     try {
       const res = await fetch(
         `/api/console/automations/links?workspace=${encodeURIComponent(
-          workspace.trim()
-        )}&link_type=${encodeURIComponent(lt)}`,
+          workspaceName
+        )}&link_type=${encodeURIComponent(linkType)}`,
         { method: "DELETE" }
       );
-      const data = await readJson<any>(res);
-      if (res.ok) loadLinks();
-      else setLinkResult(data);
+      const data = await readJson<unknown>(res);
+      if (!res.ok) {
+        setFeedback({ tone: "error", text: apiError(data, "Could not delete the link.") });
+        return;
+      }
+      await refresh(workspaceName, runStatus);
     } catch (e) {
-      setLinkResult(e instanceof Error ? e.message : String(e));
+      setFeedback({ tone: "error", text: e instanceof Error ? e.message : String(e) });
     } finally {
-      setLinkBusy("");
+      setBusy("");
     }
   }
 
-  async function loadRuns() {
-    if (!workspace.trim()) return;
-    setRunBusy("load");
-    try {
-      const p = new URLSearchParams({ workspace: workspace.trim(), limit: "100" });
-      if (runStatus) p.set("status", runStatus);
-      const res = await fetch(`/api/console/automations/runs?${p.toString()}`);
-      const data = await readJson<any>(res);
-      if (res.ok) setRuns(data.runs ?? []);
-    } catch {
-      /* surfaced via empty state */
-    } finally {
-      setRunBusy("");
-    }
-  }
-
-  const runTone = (s: string): "slate" | "green" | "amber" | "red" | "blue" =>
-    s === "sent"
-      ? "green"
-      : s === "failed"
-        ? "amber"
-        : s === "dead"
-          ? "red"
-          : s === "skipped"
-            ? "slate"
-            : "blue";
+  /* --------------------------------- render -------------------------------- */
+  const noWorkspace = !workspaceName;
 
   return (
     <PageShell nav={{ active: "admin", crumb: "Post-call automations" }}>
-      <div className="mx-auto w-full max-w-5xl space-y-8 py-8">
-        <div>
-          <h1 className="text-2xl font-semibold text-ink-900">Post-Call Automations</h1>
-          <p className="mt-1 text-sm text-ink-500">
-            Config-driven triggers that fire after a call is analyzed. New automations are data,
-            not deploys.
-          </p>
-        </div>
+      <PageGreeting
+        title="Post-call automations"
+        subtitle="Rules that fire after a call is analyzed. Every automation is configuration — adding or changing one never needs a deploy."
+      />
 
-        {/* Scope */}
+      <div className="space-y-6">
+        {feedback && (
+          <Banner tone={feedback.tone} onDismiss={() => setFeedback(null)}>
+            {feedback.text}
+          </Banner>
+        )}
+
+        {/* Workspace scope */}
         <Card className="p-6">
-          <SectionHeader title="Workspace" description="All panels below are scoped to this workspace." />
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end">
             <div>
-              <Label htmlFor="ws">Workspace name</Label>
-              <Input
-                id="ws"
-                value={workspace}
-                onChange={(e) => setWorkspace(e.target.value)}
-                placeholder="United Real Estate Experts"
-              />
-            </div>
-            <div>
-              <Label htmlFor="ag">Agent name (optional)</Label>
-              <Input
-                id="ag"
-                value={agent}
-                onChange={(e) => setAgent(e.target.value)}
-                placeholder="Leave blank = all agents"
-              />
-            </div>
-          </div>
-        </Card>
-
-        {/* Triggers */}
-        <Card className="p-6">
-          <SectionHeader
-            title="Triggers"
-            description="Rules matched against the call's custom_analysis_data (+ outcome/summary/transcript)."
-          />
-          <div className="mb-4 flex flex-wrap gap-2">
-            <Button onClick={loadTriggers} disabled={!workspace.trim() || trigBusy === "load"}>
-              {trigBusy === "load" ? "Loading…" : "Load triggers"}
-            </Button>
-          </div>
-
-          {triggers && triggers.length === 0 && (
-            <p className="mb-4 text-sm text-ink-500">No triggers yet for this workspace.</p>
-          )}
-          {triggers && triggers.length > 0 && (
-            <div className="mb-6 space-y-2">
-              {triggers.map((t) => (
-                <div
-                  key={t.id}
-                  className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-ink-200/70 bg-surface px-4 py-3"
-                >
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="font-medium text-ink-900">{t.name}</span>
-                      <Badge tone={t.enabled ? "green" : "slate"}>
-                        {t.enabled ? "enabled" : "disabled"}
-                      </Badge>
-                      <span className="text-xs text-ink-400">
-                        {t.action_type} · {t.agent_id ? "agent-scoped" : "all agents"}
-                      </span>
-                    </div>
-                    {t.description && (
-                      <p className="mt-0.5 truncate text-xs text-ink-500">{t.description}</p>
-                    )}
-                  </div>
-                  <div className="flex gap-2">
-                    <Button
-                      variant="secondary"
-                      onClick={() => toggleTrigger(t)}
-                      disabled={trigBusy === `toggle-${t.id}`}
-                    >
-                      {t.enabled ? "Disable" : "Enable"}
-                    </Button>
-                    <Button
-                      variant="danger"
-                      onClick={() => deleteTrigger(t)}
-                      disabled={trigBusy === `del-${t.id}`}
-                    >
-                      Delete
-                    </Button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-
-          <Label htmlFor="trig">New trigger (JSON)</Label>
-          <textarea
-            id="trig"
-            className={textareaClass}
-            rows={18}
-            value={triggerJson}
-            onChange={(e) => setTriggerJson(e.target.value)}
-          />
-          <div className="mt-3">
-            <Button onClick={createTrigger} disabled={!workspace.trim() || trigBusy === "create"}>
-              {trigBusy === "create" ? "Creating…" : "Create trigger"}
-            </Button>
-          </div>
-          <ResultBox data={trigResult} />
-        </Card>
-
-        {/* Links */}
-        <Card className="p-6">
-          <SectionHeader
-            title="Link map"
-            description="link_type → URL. The action sends the URL; HighLevel stays identical per client."
-          />
-          <div className="mb-4 flex flex-wrap gap-2">
-            <Button onClick={loadLinks} disabled={!workspace.trim() || linkBusy === "load"}>
-              {linkBusy === "load" ? "Loading…" : "Load links"}
-            </Button>
-          </div>
-
-          {links && links.length > 0 && (
-            <div className="mb-6 space-y-2">
-              {links.map((l) => (
-                <div
-                  key={l.link_type}
-                  className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-ink-200/70 bg-surface px-4 py-3"
-                >
-                  <div className="min-w-0">
-                    <span className="font-medium text-ink-900">{l.link_type}</span>
-                    {l.label && <span className="ml-2 text-xs text-ink-400">{l.label}</span>}
-                    <p className="mt-0.5 truncate text-xs text-ink-500">{l.url}</p>
-                  </div>
-                  <Button
-                    variant="danger"
-                    onClick={() => deleteLink(l.link_type)}
-                    disabled={linkBusy === `del-${l.link_type}`}
-                  >
-                    Delete
-                  </Button>
-                </div>
-              ))}
-            </div>
-          )}
-          {links && links.length === 0 && (
-            <p className="mb-4 text-sm text-ink-500">No links yet for this workspace.</p>
-          )}
-
-          <div className="grid gap-4 sm:grid-cols-3">
-            <div>
-              <Label htmlFor="lt">link_type</Label>
-              <Input
-                id="lt"
-                value={linkType}
-                onChange={(e) => setLinkType(e.target.value)}
-                placeholder="buyer_guide"
-              />
-            </div>
-            <div className="sm:col-span-2">
-              <Label htmlFor="lu">URL</Label>
-              <Input
-                id="lu"
-                value={linkUrl}
-                onChange={(e) => setLinkUrl(e.target.value)}
-                placeholder="https://…"
-              />
-            </div>
-            <div className="sm:col-span-3">
-              <Label htmlFor="ll">Label (optional)</Label>
-              <Input
-                id="ll"
-                value={linkLabel}
-                onChange={(e) => setLinkLabel(e.target.value)}
-                placeholder="Buyer's Guide PDF"
-              />
-            </div>
-          </div>
-          <div className="mt-3">
-            <Button
-              onClick={upsertLink}
-              disabled={!workspace.trim() || !linkType.trim() || !linkUrl.trim() || linkBusy === "save"}
-            >
-              {linkBusy === "save" ? "Saving…" : "Save link"}
-            </Button>
-          </div>
-          <ResultBox data={linkResult} />
-        </Card>
-
-        {/* Runs */}
-        <Card className="p-6">
-          <SectionHeader title="Run log" description="Every match becomes a run — the audit trail." />
-          <div className="mb-4 flex flex-wrap items-end gap-2">
-            <div>
-              <Label htmlFor="rs">Status filter</Label>
-              <select
-                id="rs"
-                className="rounded-xl border border-ink-200/80 bg-surface px-3 py-2 text-sm text-ink-900 shadow-soft focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
-                value={runStatus}
-                onChange={(e) => setRunStatus(e.target.value)}
+              <Label htmlFor="workspace">Workspace</Label>
+              <Select
+                id="workspace"
+                className="mt-1.5"
+                value={workspaceName}
+                disabled={!workspaces}
+                onChange={(e) => setWorkspaceName(e.target.value)}
               >
-                <option value="">All</option>
-                <option value="queued">queued</option>
-                <option value="sent">sent</option>
-                <option value="failed">failed</option>
-                <option value="dead">dead</option>
-                <option value="skipped">skipped</option>
-              </select>
+                <option value="">
+                  {workspaces ? "Choose a workspace…" : "Loading workspaces…"}
+                </option>
+                {workspaces?.map((w) => (
+                  <option key={w.id} value={w.name}>
+                    {w.name}
+                  </option>
+                ))}
+              </Select>
             </div>
-            <Button onClick={loadRuns} disabled={!workspace.trim() || runBusy === "load"}>
-              {runBusy === "load" ? "Loading…" : "Load runs"}
+            <div>
+              <Label htmlFor="agent-filter" hint="optional">
+                Filter by agent
+              </Label>
+              <Select
+                id="agent-filter"
+                className="mt-1.5"
+                value={agentFilter}
+                disabled={!workspace}
+                onChange={(e) => setAgentFilter(e.target.value)}
+              >
+                <option value="">All agents</option>
+                {agents.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name}
+                  </option>
+                ))}
+              </Select>
+            </div>
+            <Button
+              variant="secondary"
+              disabled={noWorkspace || loading}
+              onClick={() => refresh(workspaceName, runStatus)}
+            >
+              <RefreshCw
+                className={"h-4 w-4" + (loading ? " animate-spin" : "")}
+                strokeWidth={1.75}
+              />
+              Refresh
             </Button>
           </div>
-
-          {runs && runs.length === 0 && (
-            <p className="text-sm text-ink-500">No runs match.</p>
-          )}
-          {runs && runs.length > 0 && (
-            <div className="space-y-2">
-              {runs.map((r) => (
-                <div
-                  key={r.id}
-                  className="rounded-xl border border-ink-200/70 bg-surface px-4 py-3 text-sm"
-                >
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Badge tone={runTone(r.status)}>{r.status}</Badge>
-                    <span className="text-ink-700">{r.action_type ?? "—"}</span>
-                    {r.contact_phone && <span className="text-ink-400">{r.contact_phone}</span>}
-                    <span className="text-xs text-ink-400">
-                      {new Date(r.created_at).toLocaleString()}
-                    </span>
-                    <span className="text-xs text-ink-400">
-                      attempt {r.attempts}
-                      {r.response_status ? ` · HTTP ${r.response_status}` : ""}
-                    </span>
-                  </div>
-                  {r.meta?.link_url ? (
-                    <p className="mt-1 truncate text-xs text-ink-500">→ {String(r.meta.link_url)}</p>
-                  ) : null}
-                  {r.last_error && (
-                    <p className="mt-1 text-xs text-accent-rose-fg">{r.last_error}</p>
-                  )}
-                </div>
-              ))}
-            </div>
+          {workspace && (
+            <p className="mt-3 text-xs text-ink-400">
+              {workspace.timezone} · {workspace.crm_provider} · {workspace.agents.length} agent
+              {workspace.agents.length === 1 ? "" : "s"}
+            </p>
           )}
         </Card>
+
+        {noWorkspace ? (
+          <EmptyState
+            icon={Zap}
+            title="Pick a workspace to get started"
+            description="Automations, the link map, and the run log are all scoped to one workspace."
+          />
+        ) : (
+          <>
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              <StatTile
+                label="Automations"
+                value={triggers ? `${enabledCount}/${triggers.length}` : "—"}
+                icon={Zap}
+                tone="violet"
+              />
+              <StatTile
+                label="Links mapped"
+                value={links ? links.length : "—"}
+                icon={Link2}
+                tone="sky"
+              />
+              <StatTile
+                label="Delivered"
+                value={runs ? runCounts.sent : "—"}
+                icon={CheckCircle2}
+                tone="mint"
+              />
+              <StatTile
+                label="Needs attention"
+                value={runs ? runCounts.failed + runCounts.dead : "—"}
+                icon={AlertTriangle}
+                tone="rose"
+              />
+            </div>
+
+            <div>
+              <SubTabs
+                items={[
+                  { id: "triggers", label: "Automations", badge: visibleTriggers?.length ?? null },
+                  { id: "links", label: "Link map", badge: links?.length ?? null },
+                  { id: "runs", label: "Run log", badge: runs?.length ?? null },
+                ]}
+                active={tab}
+                onSelect={(id) => setTab(id)}
+              />
+
+              {/* ------------------------- Automations ------------------------- */}
+              {tab === "triggers" && (
+                <div className="space-y-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <p className="text-sm text-ink-500">
+                      Matched against the call&apos;s <code>custom_analysis_data</code>, plus
+                      outcome, summary, and transcript.
+                    </p>
+                    <Button
+                      onClick={() => {
+                        setCreating((c) => !c);
+                        setEditingId(null);
+                      }}
+                    >
+                      <Plus className="h-4 w-4" strokeWidth={2} />
+                      New automation
+                    </Button>
+                  </div>
+
+                  {creating && (
+                    <Card className="p-6">
+                      <SectionHeader
+                        title="New automation"
+                        description="Saved straight to this workspace — no deploy needed."
+                      />
+                      <TriggerEditor
+                        idPrefix="new"
+                        agents={agents}
+                        submitLabel="Create automation"
+                        busy={busy === "create"}
+                        onSubmit={createTrigger}
+                        onCancel={() => setCreating(false)}
+                      />
+                    </Card>
+                  )}
+
+                  {loading && !triggers && (
+                    <div className="space-y-3">
+                      <Skeleton className="h-24" />
+                      <Skeleton className="h-24" />
+                    </div>
+                  )}
+
+                  {visibleTriggers?.length === 0 && !creating && (
+                    <EmptyState
+                      icon={Zap}
+                      title="No automations yet"
+                      description="Create one to text a link, notify your team, or POST to any endpoint after a call."
+                      action={
+                        <Button onClick={() => setCreating(true)}>
+                          <Plus className="h-4 w-4" strokeWidth={2} />
+                          New automation
+                        </Button>
+                      }
+                    />
+                  )}
+
+                  {visibleTriggers?.map((t) => {
+                    const Icon = ACTION_ICON[t.action_type] ?? Webhook;
+                    const isEditing = editingId === t.id;
+                    const agentName = t.agent_id
+                      ? (agents.find((a) => a.id === t.agent_id)?.name ?? "one agent")
+                      : "all agents";
+                    return (
+                      <Card key={t.id} className="overflow-hidden">
+                        <div className="flex flex-wrap items-start gap-4 p-5">
+                          <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-accent-violet-bg text-accent-violet-icon">
+                            <Icon className="h-[18px] w-[18px]" strokeWidth={1.75} />
+                          </span>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="font-semibold text-ink-900">{t.name}</span>
+                              <Badge tone={t.enabled ? "green" : "slate"}>
+                                {t.enabled ? "enabled" : "disabled"}
+                              </Badge>
+                              <Badge tone="blue">
+                                {ACTION_LABEL[t.action_type] ?? t.action_type}
+                              </Badge>
+                              <span className="text-xs text-ink-400">{agentName}</span>
+                            </div>
+                            {t.description && (
+                              <p className="mt-1 text-sm text-ink-500">{t.description}</p>
+                            )}
+                            <p className="mt-1.5 text-xs text-ink-400">
+                              <span className="font-medium text-ink-500">When</span>{" "}
+                              {summarizeConditions(t)}
+                              {t.only_outcomes && t.only_outcomes.length > 0 && (
+                                <> · outcome in {t.only_outcomes.join(", ")}</>
+                              )}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Switch
+                              checked={t.enabled}
+                              disabled={busy === `toggle-${t.id}`}
+                              onChange={() => toggleTrigger(t)}
+                              label={`${t.enabled ? "Disable" : "Enable"} ${t.name}`}
+                            />
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              onClick={() => {
+                                setEditingId(isEditing ? null : t.id);
+                                setCreating(false);
+                              }}
+                            >
+                              {isEditing ? "Close" : "Edit"}
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              disabled={busy === `del-${t.id}`}
+                              onClick={() => deleteTrigger(t)}
+                            >
+                              <Trash2 className="h-4 w-4" strokeWidth={1.75} />
+                            </Button>
+                          </div>
+                        </div>
+
+                        {isEditing && (
+                          <div className="border-t border-ink-100 bg-surface-2/60 p-6">
+                            <TriggerEditor
+                              key={t.id}
+                              idPrefix={t.id}
+                              initial={draftFromTrigger(t)}
+                              agents={agents}
+                              submitLabel="Save changes"
+                              busy={busy === `save-${t.id}`}
+                              onSubmit={(payload, agentId) => saveTrigger(t.id, payload, agentId)}
+                              onCancel={() => setEditingId(null)}
+                            />
+                          </div>
+                        )}
+                      </Card>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* --------------------------- Link map --------------------------- */}
+              {tab === "links" && (
+                <div className="space-y-4">
+                  <p className="text-sm text-ink-500">
+                    <code>link_type</code> → URL. The action sends the resolved URL, so the
+                    HighLevel workflow stays identical for every client and swapping a link is a
+                    data edit.
+                  </p>
+
+                  {links?.length === 0 && (
+                    <EmptyState
+                      icon={Link2}
+                      title="No links mapped yet"
+                      description="Add the links your agents offer on calls, then reference them by type from an automation."
+                    />
+                  )}
+
+                  {links?.map((l) => (
+                    <LinkRowCard
+                      key={`${l.link_type}-${l.url}`}
+                      link={l}
+                      busy={busy === `link-${l.link_type}`}
+                      onSave={upsertLink}
+                      onDelete={() => deleteLink(l.link_type)}
+                    />
+                  ))}
+
+                  <Card className="p-6">
+                    <SectionHeader
+                      title="Add a link"
+                      description="Saving an existing link_type overwrites it."
+                    />
+                    <div className="grid gap-4 sm:grid-cols-3">
+                      <div>
+                        <Label htmlFor="new-link-type">Link type</Label>
+                        <Input
+                          id="new-link-type"
+                          className="mt-1.5"
+                          value={newLink.link_type}
+                          onChange={(e) => setNewLink({ ...newLink, link_type: e.target.value })}
+                          placeholder="buyer_guide"
+                        />
+                      </div>
+                      <div className="sm:col-span-2">
+                        <Label htmlFor="new-link-url">URL</Label>
+                        <Input
+                          id="new-link-url"
+                          className="mt-1.5"
+                          value={newLink.url}
+                          onChange={(e) => setNewLink({ ...newLink, url: e.target.value })}
+                          placeholder="https://…"
+                        />
+                      </div>
+                      <div className="sm:col-span-3">
+                        <Label htmlFor="new-link-label" hint="optional">
+                          Label
+                        </Label>
+                        <Input
+                          id="new-link-label"
+                          className="mt-1.5"
+                          value={newLink.label}
+                          onChange={(e) => setNewLink({ ...newLink, label: e.target.value })}
+                          placeholder="Buyer's Guide PDF"
+                        />
+                      </div>
+                    </div>
+                    <div className="mt-4">
+                      <Button
+                        disabled={
+                          !newLink.link_type.trim() ||
+                          !newLink.url.trim() ||
+                          busy === `link-${newLink.link_type.trim()}`
+                        }
+                        onClick={async () => {
+                          await upsertLink({
+                            link_type: newLink.link_type,
+                            url: newLink.url,
+                            label: newLink.label || null,
+                          });
+                          setNewLink({ link_type: "", url: "", label: "" });
+                        }}
+                      >
+                        <Plus className="h-4 w-4" strokeWidth={2} />
+                        Add link
+                      </Button>
+                    </div>
+                  </Card>
+                </div>
+              )}
+
+              {/* --------------------------- Run log ---------------------------- */}
+              {tab === "runs" && (
+                <div className="space-y-4">
+                  <div className="flex flex-wrap items-end gap-3">
+                    <div className="w-48">
+                      <Label htmlFor="run-status">Status</Label>
+                      <Select
+                        id="run-status"
+                        className="mt-1.5"
+                        value={runStatus}
+                        onChange={(e) => {
+                          setRunStatus(e.target.value);
+                          void refresh(workspaceName, e.target.value);
+                        }}
+                      >
+                        <option value="">All statuses</option>
+                        <option value="queued">queued</option>
+                        <option value="sent">sent</option>
+                        <option value="failed">failed</option>
+                        <option value="dead">dead</option>
+                        <option value="skipped">skipped</option>
+                      </Select>
+                    </div>
+                    <p className="pb-2.5 text-xs text-ink-400">
+                      Newest 100 runs. Every match is recorded here before delivery is attempted.
+                    </p>
+                  </div>
+
+                  {runs?.length === 0 && (
+                    <EmptyState
+                      icon={ScrollText}
+                      title="No runs yet"
+                      description="Runs appear here as soon as an analyzed call matches an automation."
+                    />
+                  )}
+
+                  <div className="space-y-2">
+                    {runs?.map((r) => (
+                      <div
+                        key={r.id}
+                        className="rounded-xl border border-ink-200/70 bg-surface px-4 py-3 text-sm"
+                      >
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Badge tone={runTone(r.status)}>{r.status}</Badge>
+                          <span className="text-ink-700">
+                            {ACTION_LABEL[r.action_type ?? ""] ?? r.action_type ?? "—"}
+                          </span>
+                          {r.contact_phone && (
+                            <span className="text-ink-400">{r.contact_phone}</span>
+                          )}
+                          <span className="text-xs text-ink-400">
+                            {new Date(r.created_at).toLocaleString()}
+                          </span>
+                          <span className="text-xs text-ink-400">
+                            attempt {r.attempts}
+                            {r.response_status ? ` · HTTP ${r.response_status}` : ""}
+                          </span>
+                        </div>
+                        {r.meta?.link_url ? (
+                          <p className="mt-1 truncate text-xs text-ink-500">
+                            → {String(r.meta.link_url)}
+                          </p>
+                        ) : null}
+                        {r.last_error && (
+                          <p className="mt-1 text-xs text-accent-rose-fg">{r.last_error}</p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </>
+        )}
       </div>
     </PageShell>
   );

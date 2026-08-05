@@ -81,6 +81,9 @@ export const automationTriggerCreateSchema = z
 // against the merged row).
 export const automationTriggerUpdateSchema = z
   .object({
+    // Re-scope the trigger: null = every agent in the workspace, otherwise the
+    // id of an agent the route verifies belongs to the trigger's workspace.
+    agent_id: z.string().uuid().nullable().optional(),
     name: z.string().min(1).max(120).optional(),
     description: z.string().max(1000).optional().nullable(),
     enabled: z.boolean().optional(),

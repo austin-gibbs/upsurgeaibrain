@@ -120,16 +120,33 @@ Env toggles: `AUTOMATION_WORKER_ENABLED=false` disables the worker;
 ## Admin console
 
 `/admin/automations` (session + app-admin gated), linked from `/admin`.
-Scoped by workspace name (agent optional). Three panels: **Triggers**
-(list/create/enable-disable/delete), **Link map** (upsert/delete), **Run log**
-(the audit trail with a status filter).
+
+Pick a workspace from the dropdown (loaded from `/api/console/workspaces`; the
+last one used is remembered) and all three tabs load at once:
+
+- **Automations** — list, create, **edit**, enable/disable, delete. The editor
+  is a guided form (basics → when it fires → what it does → reliability) with a
+  **JSON** toggle for pasting a trigger straight out of this runbook. Editing an
+  existing automation `PATCH`es it, including re-scoping it between "all agents"
+  and a single agent.
+- **Link map** — each link is inline-editable; saving an existing `link_type`
+  overwrites it.
+- **Run log** — the audit trail, filterable by status.
+
+The form model (`src/lib/console/trigger-draft.ts`) is the single translation
+layer between the stored trigger shape and the form fields, so create, edit, and
+the JSON view can't drift. Its round trip is unit-tested — an edit that touches
+one field must not rewrite the rest. It also enforces the `.strict()`
+`action_config` contract client-side: only the keys the chosen action actually
+uses are sent.
 
 API routes (all `requireAdmin`-gated):
 
 | Route | Methods |
 | --- | --- |
+| `/api/console/workspaces` | `GET` — every workspace + its agents, for the pickers |
 | `/api/console/automations` | `GET ?workspace=&agent=` list · `POST {workspace, agent?, ...trigger}` create |
-| `/api/console/automations/[id]` | `PATCH` update (merge) · `DELETE` |
+| `/api/console/automations/[id]` | `PATCH` update (merge; `agent_id` re-scopes, verified against the trigger's workspace) · `DELETE` |
 | `/api/console/automations/runs` | `GET ?workspace=&status=&triggerId=&limit=` |
 | `/api/console/automations/links` | `GET ?workspace=` · `POST {workspace, link_type, url, label?}` · `DELETE ?workspace=&link_type=` |
 
@@ -211,4 +228,8 @@ webhook URL or a HighLevel workflow error).
 | `src/lib/queue/workers/automation.worker.ts` | The executor worker. |
 | `worker/index.ts` | Starts the worker + 60s drain sweep. |
 | `src/app/api/console/automations/**` | Admin API routes. |
+| `src/app/api/console/workspaces/route.ts` | Workspace + agent list for the console pickers. |
+| `src/lib/console/trigger-draft.ts` | Pure form model: stored trigger ⇄ editor fields ⇄ API payload. |
+| `src/lib/console/trigger-draft.test.ts` | Round-trip + validation tests for the editor. |
+| `src/app/admin/automations/TriggerEditor.tsx` | The create/edit form (guided + JSON modes). |
 | `src/app/admin/automations/page.tsx` | Admin console UI. |

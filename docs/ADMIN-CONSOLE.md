@@ -18,6 +18,7 @@ via Claude-in-Chrome; you (Cursor) just commit + deploy.
 | `src/lib/console/resolve-agent.ts` | Resolve a workspace + agent by NAME (newest workspace; agent by name, or the sole agent, else disambiguation error) for the edit-existing routes. |
 | `src/app/api/console/agent-config/route.ts` | `GET ?workspace=&agent=` reads callConfig/taskConfig/pipelineStageMap + effective CRM · `POST` merges callConfig/taskConfig and replaces pipelineStageMap. |
 | `src/app/api/console/highlevel/route.ts` | `GET ?workspace=&agent=` — fetch the connected HighLevel pipelines (+stages) and opportunity custom fields to source the IDs for routing. |
+| `src/app/api/console/workspaces/route.ts` | `GET` — every workspace + its agents, so console pickers never require typing a name exactly. |
 | `supabase/migrations/0021_app_admins.sql` | `profiles.is_admin`, `is_app_admin()`, widened `user_org_ids()` for cross-org access, admin profile-read policy. |
 | `src/types/database.ts` | `profiles` type updated with `is_admin`. |
 

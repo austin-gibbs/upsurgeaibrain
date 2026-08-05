@@ -4,6 +4,8 @@
 // PATCH  { ...partial trigger }  -> update a trigger (merge). The URL invariant
 //        (webhook/highlevel_sms need action_config.url) is re-checked against
 //        the merged row so you can't disable a URL out from under a live action.
+//        `agent_id` re-scopes the trigger (null = every agent) and is verified
+//        to belong to the trigger's own workspace.
 // DELETE                          -> delete a trigger. Its run history remains
 //        (automation_runs.trigger_id is ON DELETE SET NULL) for the audit log.
 //
@@ -56,9 +58,27 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     );
   }
 
+  // Re-scoping must stay inside the trigger's own workspace, otherwise a
+  // trigger could be pointed at another tenant's agent.
+  if (parsed.data.agent_id) {
+    const { data: agent, error: agentErr } = await db
+      .from("agents")
+      .select("id, workspace_id")
+      .eq("id", parsed.data.agent_id)
+      .maybeSingle();
+    if (agentErr) return NextResponse.json({ error: agentErr.message }, { status: 500 });
+    if (!agent || agent.workspace_id !== existing.workspace_id) {
+      return NextResponse.json(
+        { error: "agent_id must be an agent in this trigger's workspace" },
+        { status: 400 }
+      );
+    }
+  }
+
   const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
   for (const [k, v] of Object.entries(parsed.data)) {
-    patch[k] = k === "description" || k === "only_outcomes" ? v ?? null : v;
+    patch[k] =
+      k === "description" || k === "only_outcomes" || k === "agent_id" ? v ?? null : v;
   }
 
   const { data, error } = await db

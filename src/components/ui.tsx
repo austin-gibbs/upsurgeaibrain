@@ -59,6 +59,24 @@ export const Input = React.forwardRef<
   );
 });
 
+/* ---------------------------- Textarea ---------------------------- */
+export const Textarea = React.forwardRef<
+  HTMLTextAreaElement,
+  React.TextareaHTMLAttributes<HTMLTextAreaElement> & { mono?: boolean }
+>(function Textarea({ className, mono = false, ...props }, ref) {
+  return (
+    <textarea
+      ref={ref}
+      className={cn(
+        "w-full rounded-xl border border-ink-200/80 bg-surface px-4 py-3 text-sm text-ink-900 shadow-soft placeholder:text-ink-400 transition-colors focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20",
+        mono && "font-mono text-xs leading-relaxed",
+        className
+      )}
+      {...props}
+    />
+  );
+});
+
 /* ----------------------------- Select ----------------------------- */
 export const Select = React.forwardRef<
   HTMLSelectElement,
@@ -93,6 +111,82 @@ export function Label({
       {children}
       {hint && <span className="ml-1 font-normal text-ink-400">{hint}</span>}
     </label>
+  );
+}
+
+/* ------------------------------ Switch ---------------------------- */
+export function Switch({
+  checked,
+  onChange,
+  label,
+  disabled = false,
+}: {
+  checked: boolean;
+  onChange: (next: boolean) => void;
+  /** Accessible name — the visible text usually sits next to the control. */
+  label: string;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      disabled={disabled}
+      onClick={() => onChange(!checked)}
+      className={cn(
+        "relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50",
+        checked ? "bg-brand-600" : "bg-ink-200"
+      )}
+    >
+      <span
+        className={cn(
+          "inline-block h-[18px] w-[18px] rounded-full bg-white shadow-soft transition-transform duration-200",
+          checked ? "translate-x-[23px]" : "translate-x-[3px]"
+        )}
+      />
+    </button>
+  );
+}
+
+/* ------------------------------ Banner ---------------------------- */
+type BannerTone = "success" | "error" | "info";
+
+export function Banner({
+  tone,
+  children,
+  onDismiss,
+}: {
+  tone: BannerTone;
+  children: React.ReactNode;
+  onDismiss?: () => void;
+}) {
+  const tones: Record<BannerTone, string> = {
+    success: "bg-accent-mint-bg text-accent-mint-fg",
+    error: "bg-accent-rose-bg text-accent-rose-fg",
+    info: "bg-accent-sky-bg text-accent-sky-fg",
+  };
+  return (
+    <div
+      role="status"
+      className={cn(
+        "flex items-start gap-3 rounded-xl px-4 py-3 text-sm",
+        tones[tone]
+      )}
+    >
+      <div className="min-w-0 flex-1 whitespace-pre-wrap">{children}</div>
+      {onDismiss && (
+        <button
+          type="button"
+          onClick={onDismiss}
+          aria-label="Dismiss"
+          className="shrink-0 text-xs font-semibold uppercase tracking-wide opacity-70 transition-opacity hover:opacity-100"
+        >
+          Close
+        </button>
+      )}
+    </div>
   );
 }
 
