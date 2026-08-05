@@ -14,7 +14,12 @@
 // =====================================================================
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase/server";
-import { cancelPendingDials, placeCall, placeTestCall } from "@/lib/engine/caller";
+import {
+  cancelPendingDials,
+  nextForcedAttemptNumber,
+  placeCall,
+  placeTestCall,
+} from "@/lib/engine/caller";
 import { testCallSchema } from "@/lib/validation";
 import {
   contactHasEnrollTag,
@@ -107,7 +112,7 @@ export async function POST(
 
   const { data: contact } = await db
     .from("contacts")
-    .select("id, full_name, phones, tags, attempt_count, is_terminal")
+    .select("id, full_name, phones, tags, is_terminal")
     .eq("id", contactId)
     .eq("workspace_id", params.id)
     .single<{
@@ -115,7 +120,6 @@ export async function POST(
       full_name: string | null;
       phones: string[];
       tags: string[];
-      attempt_count: number;
       is_terminal: boolean;
     }>();
   if (!contact) {
@@ -156,14 +160,19 @@ export async function POST(
 
   // Dial directly via placeCall (same path the worker uses), bypassing the
   // BullMQ call queue entirely — forces the call now without enqueuing a job
-  // or competing with scheduled dials. placeCall does no call-window checks,
+  // or competing with scheduled dials. testMode skips the call-window guard,
   // so time parameters are ignored. The webhook handles full FUB write-back.
+  //
+  // The attempt number must come from the per-agent cadence state, not from the
+  // shared contacts row: placeCall treats a repeated (contact, attempt) pair as
+  // a retry of a dial it already made and returns the earlier call instead of
+  // ringing the phone again.
   try {
     const { callId, retellCallId } = await placeCall({
       agentId,
       contactId,
       toNumber: dialNumber,
-      attemptNumber: contact.attempt_count + 1,
+      attemptNumber: await nextForcedAttemptNumber(agentId, contactId),
       testMode: true,
     });
     return NextResponse.json({

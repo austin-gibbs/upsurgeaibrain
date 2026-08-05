@@ -93,6 +93,38 @@ export async function cancelPendingDials(
   }
 }
 
+/**
+ * Attempt number to use for an operator-forced dial ("Call now", on-demand
+ * trigger endpoint).
+ *
+ * Cadence state is per (agent, contact) in `agent_contact_states`. The shared
+ * `contacts.attempt_count` column is only a CRM cache that the engine never
+ * stamps, so in a multi-agent workspace it sits at 0 forever. Deriving the
+ * attempt number from it pinned every forced dial to attempt 1, where
+ * placeCall's idempotency guard matched the first completed call and returned
+ * it — reporting success without ringing anyone.
+ *
+ * The `calls` table is consulted alongside the state row so a cadence stamp
+ * that failed after a dial cannot hand back an attempt number that collides
+ * with `calls_one_active_attempt_per_phone`.
+ */
+export async function nextForcedAttemptNumber(
+  agentId: string,
+  contactId: string
+): Promise<number> {
+  const supabase = createServiceClient();
+  const state = await getAgentContactState(supabase, agentId, contactId);
+  const { data: lastCall } = await supabase
+    .from("calls")
+    .select("attempt_number")
+    .eq("agent_id", agentId)
+    .eq("contact_id", contactId)
+    .order("attempt_number", { ascending: false })
+    .limit(1)
+    .maybeSingle<{ attempt_number: number }>();
+  return Math.max(state.attempt_count, lastCall?.attempt_number ?? 0) + 1;
+}
+
 export async function placeCall(job: CallJob): Promise<{ callId: string; retellCallId: string }> {
   const supabase = createServiceClient();
   const phoneIndex = job.phoneIndex ?? 0;

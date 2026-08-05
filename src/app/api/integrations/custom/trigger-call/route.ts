@@ -16,7 +16,7 @@
 // =====================================================================
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/server";
-import { placeCall } from "@/lib/engine/caller";
+import { nextForcedAttemptNumber, placeCall } from "@/lib/engine/caller";
 import { customTriggerCallSchema } from "@/lib/validation";
 import { bearerFromHeader, resolveApiKey } from "@/lib/integrations/custom/api-key";
 import type { Agent, Contact } from "@/types";
@@ -170,12 +170,16 @@ export async function POST(req: NextRequest) {
 
   // Place ONE call now, inline (no queue). testMode bypasses enroll-tag + call
   // window — this is an explicit on-demand trigger, not a cadence dial.
+  //
+  // The attempt number comes from the per-agent cadence state rather than the
+  // shared contacts row, which the engine never stamps: reusing an attempt that
+  // already dialed makes placeCall return that earlier call without dialing.
   try {
     const { callId, retellCallId } = await placeCall({
       agentId: agent.id,
       contactId: contact.id,
       toNumber: input.lead.phone,
-      attemptNumber: (contact.attempt_count ?? 0) + 1,
+      attemptNumber: await nextForcedAttemptNumber(agent.id, contact.id),
       testMode: true,
     });
     return NextResponse.json({
