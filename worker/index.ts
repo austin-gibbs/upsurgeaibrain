@@ -22,6 +22,7 @@ import {
   shouldRunInternalScheduler,
 } from "@/lib/engine/worker-scheduler";
 import { reconcileStuckCalls } from "@/lib/engine/reconcile";
+import { reconcileInboundCalls } from "@/lib/engine/reconcile-inbound";
 import { backfillCallPayloads } from "@/lib/engine/backfill-payloads";
 import { resyncCallQueue } from "@/lib/queue/sweeper";
 import { probeRedisQueueHealth, waitForRedisQueueHealth } from "@/lib/queue/redis-health";
@@ -195,6 +196,24 @@ async function main() {
     }
   }, 2 * 60_000);
 
+  // Inbound reconciler: every 5 minutes, replay missed Retell inbound
+  // call_analyzed webhooks for agents with productized inbound automation.
+  // Inbound calls have no pre-created dialing row, so the stuck-dialing
+  // sweep above never sees them.
+  let inboundReconcileTimer: NodeJS.Timeout | null = setInterval(async () => {
+    try {
+      const summary = await reconcileInboundCalls({
+        lookbackHours: 24,
+        limitPerAgent: 200,
+      });
+      if (summary.reconciled || summary.failed || summary.missing) {
+        console.log("[reconcile-inbound] sweep:", summary);
+      }
+    } catch (e) {
+      console.error("[reconcile-inbound] sweep error:", e);
+    }
+  }, 5 * 60_000);
+
   // Queue self-heal sweep: every 3 minutes, rebuild BullMQ dial jobs for durable
   // `call_queue_entries` rows that are due but have no live job (e.g. after a
   // worker redeploy or a Redis restart wiped the delayed-job set). Skipped
@@ -256,6 +275,8 @@ async function main() {
     schedulerTimer = null;
     if (reconcileTimer) clearInterval(reconcileTimer);
     reconcileTimer = null;
+    if (inboundReconcileTimer) clearInterval(inboundReconcileTimer);
+    inboundReconcileTimer = null;
     if (sweepTimer) clearInterval(sweepTimer);
     sweepTimer = null;
     if (payloadBackfillTimer) clearInterval(payloadBackfillTimer);

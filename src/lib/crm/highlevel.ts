@@ -12,6 +12,7 @@ import type {
   CrmOpportunityCustomField,
   CrmPipeline,
   CrmUser,
+  CreateContactInput,
   CreateTaskInput,
   HighLevelCredentials,
   HighLevelReauthFlagger,
@@ -27,6 +28,7 @@ import {
   type HighLevelTokens,
 } from "./highlevel-oauth";
 import { fetchWithTimeout, parseJsonResponse, retryAfterMs, sleep } from "@/lib/http";
+import { toE164 } from "@/lib/engine/inbound-routing";
 
 const BASE = "https://services.leadconnectorhq.com";
 const API_VERSION = "2021-07-28";
@@ -555,6 +557,146 @@ export class HighLevelAdapter implements CrmAdapter {
     });
   }
 
+  /** Additive tag write — does not clobber tags set by other workflows. */
+  async addTags(contactId: string, tags: string[]): Promise<void> {
+    const unique = Array.from(new Set(tags.map((t) => t.trim()).filter(Boolean)));
+    if (!unique.length) return;
+    await this.request(`/contacts/${contactId}/tags`, {
+      method: "POST",
+      body: JSON.stringify({ tags: unique }),
+    });
+  }
+
+  /** Remove specific tags without touching the rest of the tag set. */
+  async removeTags(contactId: string, tags: string[]): Promise<void> {
+    const unique = Array.from(new Set(tags.map((t) => t.trim()).filter(Boolean)));
+    if (!unique.length) return;
+    await this.request(`/contacts/${contactId}/tags`, {
+      method: "DELETE",
+      body: JSON.stringify({ tags: unique }),
+    });
+  }
+
+  /**
+   * Find a contact by phone (E.164). Searches primary phone and additionalPhones
+   * via an OR group, then falls back to the free-text `query` param.
+   * When multiple contacts match, picks the most recently updated.
+   */
+  async findContactByPhone(phone: string): Promise<CrmContact | null> {
+    const e164 = toE164(phone) ?? phone.trim();
+    if (!e164) return null;
+
+    const pickBest = (contacts: any[]): CrmContact | null => {
+      if (!contacts.length) return null;
+      if (contacts.length > 1) {
+        console.warn(
+          `[highlevel] findContactByPhone(${e164}) matched ${contacts.length} contacts — using most recently updated`
+        );
+        contacts.sort((a, b) => {
+          const aTs = Date.parse(String(a.dateUpdated ?? a.updatedAt ?? a.dateAdded ?? 0));
+          const bTs = Date.parse(String(b.dateUpdated ?? b.updatedAt ?? b.dateAdded ?? 0));
+          return bTs - aTs;
+        });
+      }
+      return this.mapContact(contacts[0]);
+    };
+
+    try {
+      const data = await this.request<any>("/contacts/search", {
+        method: "POST",
+        body: JSON.stringify({
+          locationId: this.locationId,
+          page: 1,
+          pageLimit: 20,
+          filters: [
+            {
+              group: "OR",
+              filters: [
+                { field: "phone", operator: "eq", value: e164 },
+                {
+                  field: "additionalPhones",
+                  operator: "nested",
+                  value: [{ field: "phone", operator: "eq", value: e164 }],
+                },
+              ],
+            },
+          ],
+        }),
+      });
+      const found = pickBest(data.contacts ?? []);
+      if (found) return found;
+    } catch (e) {
+      console.warn(
+        `[highlevel] phone filter search failed for ${e164}:`,
+        e instanceof Error ? e.message : e
+      );
+    }
+
+    // Fallback: free-text query (digits only) — less precise but catches
+    // locations that store phones without the leading +.
+    const digits = e164.replace(/\D/g, "");
+    if (!digits) return null;
+    try {
+      const data = await this.request<any>("/contacts/search", {
+        method: "POST",
+        body: JSON.stringify({
+          locationId: this.locationId,
+          page: 1,
+          pageLimit: 20,
+          query: digits,
+        }),
+      });
+      const contacts: any[] = data.contacts ?? [];
+      // Prefer an exact phone match from the query results.
+      const exact = contacts.filter((c) => {
+        const phones = [
+          c.phone,
+          ...(Array.isArray(c.additionalPhones)
+            ? c.additionalPhones.map((p: any) => p.phone ?? p)
+            : []),
+        ]
+          .filter(Boolean)
+          .map((p) => toE164(String(p)) ?? String(p));
+        return phones.includes(e164);
+      });
+      return pickBest(exact.length ? exact : contacts);
+    } catch {
+      return null;
+    }
+  }
+
+  async createContact(input: CreateContactInput): Promise<CrmContact> {
+    const parts = (input.fullName ?? "").trim().split(/\s+/).filter(Boolean);
+    const firstName = parts[0] ?? "Inbound";
+    const lastName = parts.slice(1).join(" ") || "Caller";
+    const e164 = input.phone ? toE164(input.phone) ?? input.phone : null;
+
+    const body: Record<string, unknown> = {
+      locationId: this.locationId,
+      firstName,
+      lastName,
+      name: [firstName, lastName].filter(Boolean).join(" "),
+      source: input.source ?? "AI Inbound Call",
+    };
+    if (e164) body.phone = e164;
+    if (input.email) body.email = input.email;
+    if (input.tags?.length) body.tags = input.tags;
+    if (input.assignedUserId) body.assignedTo = input.assignedUserId;
+
+    const data = await this.request<any>("/contacts/", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+    return this.mapContact(data.contact ?? data);
+  }
+
+  async assignContact(contactId: string, userId: string): Promise<void> {
+    await this.request(`/contacts/${contactId}`, {
+      method: "PUT",
+      body: JSON.stringify({ assignedTo: userId }),
+    });
+  }
+
   async addNote(contactId: string, note: string): Promise<void> {
     await this.request(`/contacts/${contactId}/notes`, {
       method: "POST",
@@ -768,7 +910,7 @@ export class HighLevelAdapter implements CrmAdapter {
     return null;
   }
 
-  async moveContactToStage(input: MoveStageInput): Promise<void> {
+  async moveContactToStage(input: MoveStageInput): Promise<string | null> {
     const { contactId, pipelineId, stageId, contactName, status, customFields } = input;
     const customFieldsPayload = buildOpportunityCustomFieldsPayload(customFields);
 
@@ -802,11 +944,11 @@ export class HighLevelAdapter implements CrmAdapter {
           ...(customFieldsPayload ? { customFields: customFieldsPayload } : {}),
         }),
       });
-      return;
+      return opportunityId;
     }
 
     // 2. No opportunity yet → create one directly in the target stage.
-    await this.request(`/opportunities/`, {
+    const created = await this.request<any>(`/opportunities/`, {
       method: "POST",
       body: JSON.stringify({
         pipelineId,
@@ -818,6 +960,9 @@ export class HighLevelAdapter implements CrmAdapter {
         ...(customFieldsPayload ? { customFields: customFieldsPayload } : {}),
       }),
     });
+    const createdId =
+      created?.opportunity?.id ?? created?.id ?? created?.opportunityId ?? null;
+    return createdId != null ? String(createdId) : null;
   }
 
   async listUsers(): Promise<CrmUser[]> {

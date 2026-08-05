@@ -76,12 +76,14 @@ empty `conditions` array matches — so a trigger can fire purely on the
 - `link_type_field` — which `custom_analysis_data` field names the link (e.g. `link_type`).
 - `static_link_type` — OR pin one link_type regardless of the call.
 - `payload_template` — a full custom body (deep-rendered); overrides the default shape.
+  `recording_url` is still force-injected into the delivered body unless the
+  template already defines that key, so every automation carries the recording.
 
 **Template placeholders** (`{{ path }}`, unknown → empty string, never leaks a raw token):
 `{{contact.first_name}}`, `{{contact.full_name}}`, `{{contact.email}}`,
 `{{contact.phone}}`, `{{link.url}}`, `{{link.type}}`, `{{link.label}}`,
-`{{outcome}}`, `{{summary}}`, `{{transcript}}`, `{{fields.<name>}}` (or a bare
-`{{<name>}}`) for any `custom_analysis_data` field.
+`{{outcome}}`, `{{summary}}`, `{{transcript}}`, `{{recording_url}}`,
+`{{fields.<name>}}` (or a bare `{{<name>}}`) for any `custom_analysis_data` field.
 
 **Default webhook payload** (when no `payload_template` is set) matches the shape
 a HighLevel Inbound Webhook can map:
@@ -96,6 +98,7 @@ a HighLevel Inbound Webhook can map:
   "link_url": "https://…",
   "message": "Hi Paul, here's the info you asked for: https://…",
   "summary": "…",
+  "recording_url": "https://…",
   "custom_analysis_data": { "...": "..." }
 }
 ```
@@ -177,7 +180,8 @@ What makes the sample trustworthy (`src/lib/engine/automations/sample-context.ts
   number, safe if the CRM auto-texts it).
 - The default payload carries `"test": true`, and the request carries an
   `X-UpSurge-Test: true` header, so a shared endpoint can drop test traffic. A
-  custom `payload_template` is sent byte-for-byte as configured — the whole point
+  custom `payload_template` is sent as configured (plus a force-injected
+  `recording_url` unless the template already defines that key) — the whole point
   is that the CRM sees the exact production shape.
 - If the sample can't satisfy the trigger's own conditions (e.g. an `outcome`
   condition that contradicts `only_outcomes`), the push still goes out and the

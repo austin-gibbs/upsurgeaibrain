@@ -620,7 +620,8 @@ export function TriggerEditor({
             </Field>
             <p className="mt-2 text-xs text-ink-400">
               Placeholders: {"{{contact.first_name}}"}, {"{{contact.phone}}"}, {"{{link.url}}"},{" "}
-              {"{{outcome}}"}, {"{{summary}}"}, {"{{fields.<name>}}"}. Unknown tokens render empty.
+              {"{{outcome}}"}, {"{{summary}}"}, {"{{recording_url}}"}, {"{{fields.<name>}}"}. Unknown
+              tokens render empty.
             </p>
 
             <details className="group mt-4 rounded-xl border border-ink-200/70 bg-surface-2 p-4">

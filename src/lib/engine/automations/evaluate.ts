@@ -61,6 +61,7 @@ export interface EvaluateAutomationsInput {
   outcome: CallOutcome;
   summary: string | null;
   transcript: string | null;
+  recordingUrl: string | null;
   customFields: Record<string, unknown>;
 }
 
@@ -93,6 +94,7 @@ export async function evaluateAutomations(input: EvaluateAutomationsInput): Prom
     outcome: input.outcome,
     summary: input.summary,
     transcript: input.transcript,
+    recordingUrl: input.recordingUrl,
     customFields: input.customFields ?? {},
     contact: {
       first_name: firstNameOf(input.contact.full_name),

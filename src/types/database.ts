@@ -258,6 +258,142 @@ export type Database = {
           },
         ]
       }
+      agent_inbound_configs: {
+        Row: {
+          agent_id: string
+          always_tag: string | null
+          assignee_crm_id: string | null
+          assignee_mode: string
+          create_contact_if_missing: boolean
+          default_pipeline_id: string | null
+          default_pipeline_name: string | null
+          default_pipeline_stage_id: string | null
+          default_stage_name: string | null
+          enabled: boolean
+          min_duration_seconds: number
+          new_contact_source: string
+          opportunity_custom_field_enabled: boolean
+          opportunity_custom_field_id: string | null
+          opportunity_custom_field_key: string | null
+          opportunity_custom_field_value: string | null
+          opportunity_name_template: string
+          pipeline_automation_enabled: boolean
+          task_due_offset_minutes: number
+          task_enabled: boolean
+          task_name_template: string
+          task_type: string
+          updated_at: string
+        }
+        Insert: {
+          agent_id: string
+          always_tag?: string | null
+          assignee_crm_id?: string | null
+          assignee_mode?: string
+          create_contact_if_missing?: boolean
+          default_pipeline_id?: string | null
+          default_pipeline_name?: string | null
+          default_pipeline_stage_id?: string | null
+          default_stage_name?: string | null
+          enabled?: boolean
+          min_duration_seconds?: number
+          new_contact_source?: string
+          opportunity_custom_field_enabled?: boolean
+          opportunity_custom_field_id?: string | null
+          opportunity_custom_field_key?: string | null
+          opportunity_custom_field_value?: string | null
+          opportunity_name_template?: string
+          pipeline_automation_enabled?: boolean
+          task_due_offset_minutes?: number
+          task_enabled?: boolean
+          task_name_template?: string
+          task_type?: string
+          updated_at?: string
+        }
+        Update: {
+          agent_id?: string
+          always_tag?: string | null
+          assignee_crm_id?: string | null
+          assignee_mode?: string
+          create_contact_if_missing?: boolean
+          default_pipeline_id?: string | null
+          default_pipeline_name?: string | null
+          default_pipeline_stage_id?: string | null
+          default_stage_name?: string | null
+          enabled?: boolean
+          min_duration_seconds?: number
+          new_contact_source?: string
+          opportunity_custom_field_enabled?: boolean
+          opportunity_custom_field_id?: string | null
+          opportunity_custom_field_key?: string | null
+          opportunity_custom_field_value?: string | null
+          opportunity_name_template?: string
+          pipeline_automation_enabled?: boolean
+          task_due_offset_minutes?: number
+          task_enabled?: boolean
+          task_name_template?: string
+          task_type?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agent_inbound_configs_agent_id_fkey"
+            columns: ["agent_id"]
+            isOneToOne: true
+            referencedRelation: "agents"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      agent_inbound_routes: {
+        Row: {
+          agent_id: string
+          id: string
+          opportunity_status: string | null
+          outcome: string
+          pipeline_id: string | null
+          pipeline_name: string | null
+          pipeline_stage_id: string | null
+          remove_tags: string[]
+          stage_name: string | null
+          tag: string | null
+          updated_at: string
+        }
+        Insert: {
+          agent_id: string
+          id?: string
+          opportunity_status?: string | null
+          outcome: string
+          pipeline_id?: string | null
+          pipeline_name?: string | null
+          pipeline_stage_id?: string | null
+          remove_tags?: string[]
+          stage_name?: string | null
+          tag?: string | null
+          updated_at?: string
+        }
+        Update: {
+          agent_id?: string
+          id?: string
+          opportunity_status?: string | null
+          outcome?: string
+          pipeline_id?: string | null
+          pipeline_name?: string | null
+          pipeline_stage_id?: string | null
+          remove_tags?: string[]
+          stage_name?: string | null
+          tag?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agent_inbound_routes_agent_id_fkey"
+            columns: ["agent_id"]
+            isOneToOne: false
+            referencedRelation: "agents"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       agent_task_configs: {
         Row: {
           agent_id: string
@@ -671,7 +807,10 @@ export type Database = {
           finalized_by: Database["public"]["Enums"]["call_finalized_by"] | null
           id: string
           in_voicemail: boolean | null
+          inbound_outcome: string | null
+          inbound_route_id: string | null
           note_logged: boolean | null
+          opportunity_id: string | null
           outcome: Database["public"]["Enums"]["call_outcome"] | null
           outcome_claimed_at: string | null
           phone_count: number
@@ -704,7 +843,10 @@ export type Database = {
           finalized_by?: Database["public"]["Enums"]["call_finalized_by"] | null
           id?: string
           in_voicemail?: boolean | null
+          inbound_outcome?: string | null
+          inbound_route_id?: string | null
           note_logged?: boolean | null
+          opportunity_id?: string | null
           outcome?: Database["public"]["Enums"]["call_outcome"] | null
           outcome_claimed_at?: string | null
           phone_count?: number
@@ -737,7 +879,10 @@ export type Database = {
           finalized_by?: Database["public"]["Enums"]["call_finalized_by"] | null
           id?: string
           in_voicemail?: boolean | null
+          inbound_outcome?: string | null
+          inbound_route_id?: string | null
           note_logged?: boolean | null
+          opportunity_id?: string | null
           outcome?: Database["public"]["Enums"]["call_outcome"] | null
           outcome_claimed_at?: string | null
           phone_count?: number

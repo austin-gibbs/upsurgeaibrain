@@ -10,6 +10,8 @@ import { encryptJson } from "@/lib/crypto";
 import {
   callConfigSchema,
   crmCredentialsSchema,
+  inboundConfigSchema,
+  inboundRoutesSchema,
   pipelineStageMapSchema,
   retellCredentialsSchema,
   taskConfigSchema,
@@ -147,6 +149,19 @@ export async function GET(
     )
     .eq("agent_id", params.id);
 
+  const { data: inboundConfig } = await db
+    .from("agent_inbound_configs")
+    .select("*")
+    .eq("agent_id", params.id)
+    .maybeSingle();
+
+  const { data: inboundRoutes } = await db
+    .from("agent_inbound_routes")
+    .select(
+      "id, outcome, pipeline_id, pipeline_stage_id, pipeline_name, stage_name, opportunity_status, tag, remove_tags"
+    )
+    .eq("agent_id", params.id);
+
   const queueRows = await listActiveQueueEntries(createServiceClient(), agentRow.workspace_id);
   const scheduledCalls = queueRows
     .filter((row) => row.agent_id === params.id)
@@ -198,6 +213,8 @@ export async function GET(
     workspaceHasCrmCredentials: usesWorkspaceCrm,
     calls: calls ?? [],
     pipelineStageMap: pipelineStageMap ?? [],
+    inboundConfig: inboundConfig ?? null,
+    inboundRoutes: inboundRoutes ?? [],
     scheduledCalls,
   });
 }
@@ -216,6 +233,8 @@ const patchSchema = z.object({
   call_config: callConfigSchema.optional(),
   task_config: taskConfigSchema.optional(),
   pipeline_stage_map: pipelineStageMapSchema.optional(),
+  inbound_config: inboundConfigSchema.optional(),
+  inbound_routes: inboundRoutesSchema.optional(),
 });
 
 export async function PATCH(
@@ -531,6 +550,77 @@ export async function PATCH(
     savedPipelineStageMap = pipelineStageMap ?? [];
   }
 
+  let savedInboundConfig: Record<string, unknown> | undefined;
+  if (input.inbound_config) {
+    const { error: inboundConfigError } = await db
+      .from("agent_inbound_configs")
+      .upsert(
+        {
+          agent_id: params.id,
+          ...input.inbound_config,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "agent_id" }
+      );
+    if (inboundConfigError) {
+      return NextResponse.json({ error: inboundConfigError.message }, { status: 500 });
+    }
+    savedInboundConfig = {
+      agent_id: params.id,
+      ...input.inbound_config,
+    };
+  }
+
+  let savedInboundRoutes:
+    | {
+        id?: string;
+        outcome: string;
+        pipeline_id: string | null;
+        pipeline_stage_id: string | null;
+        pipeline_name: string | null;
+        stage_name: string | null;
+        opportunity_status: string | null;
+        tag: string | null;
+        remove_tags: string[];
+      }[]
+    | undefined;
+  if (input.inbound_routes) {
+    const { error: deleteRoutesError } = await db
+      .from("agent_inbound_routes")
+      .delete()
+      .eq("agent_id", params.id);
+    if (deleteRoutesError) {
+      return NextResponse.json({ error: deleteRoutesError.message }, { status: 500 });
+    }
+    if (input.inbound_routes.length > 0) {
+      const rows = input.inbound_routes.map((entry) => ({
+        agent_id: params.id,
+        outcome: entry.outcome,
+        pipeline_id: entry.pipeline_id,
+        pipeline_stage_id: entry.pipeline_stage_id,
+        pipeline_name: entry.pipeline_name,
+        stage_name: entry.stage_name,
+        opportunity_status: entry.opportunity_status,
+        tag: entry.tag,
+        remove_tags: entry.remove_tags ?? [],
+        updated_at: new Date().toISOString(),
+      }));
+      const { error: insertRoutesError } = await db
+        .from("agent_inbound_routes")
+        .insert(rows);
+      if (insertRoutesError) {
+        return NextResponse.json({ error: insertRoutesError.message }, { status: 500 });
+      }
+    }
+    const { data: routes } = await db
+      .from("agent_inbound_routes")
+      .select(
+        "id, outcome, pipeline_id, pipeline_stage_id, pipeline_name, stage_name, opportunity_status, tag, remove_tags"
+      )
+      .eq("agent_id", params.id);
+    savedInboundRoutes = routes ?? [];
+  }
+
   let savedTaskConfig: Record<string, unknown> | undefined;
   if (input.task_config) {
     // Echo the validated payload we just wrote — avoids a re-read race or
@@ -564,5 +654,7 @@ export async function PATCH(
     queueRescheduled,
     ...(savedTaskConfig ? { taskConfig: savedTaskConfig } : {}),
     ...(savedPipelineStageMap ? { pipelineStageMap: savedPipelineStageMap } : {}),
+    ...(savedInboundConfig ? { inboundConfig: savedInboundConfig } : {}),
+    ...(savedInboundRoutes ? { inboundRoutes: savedInboundRoutes } : {}),
   });
 }

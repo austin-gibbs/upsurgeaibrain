@@ -18,10 +18,14 @@ import { TaskSettings } from "@/components/agent-form/TaskSettings";
 import { PostCallWebhookSettings } from "@/components/agent-form/PostCallWebhookSettings";
 import { HighLevelOpportunityFieldSettings } from "@/components/agent-form/HighLevelOpportunityFieldSettings";
 import { PipelineStageSettings } from "@/components/agent-form/PipelineStageSettings";
+import { InboundAutomationSettings } from "@/components/agent-form/InboundAutomationSettings";
 import {
   defaultCallConfig,
+  defaultInboundConfig,
   defaultTaskConfig,
   type CallConfig,
+  type InboundConfig,
+  type InboundRouteEntry,
   type OpportunityCustomField,
   type Pipeline,
   type StageMapEntry,
@@ -107,7 +111,14 @@ type ScheduledCallRow = {
   crmUrl: string | null;
 };
 
-type AgentTab = "overview" | "schedule" | "call" | "crm" | "tasks" | "history";
+type AgentTab =
+  | "overview"
+  | "schedule"
+  | "call"
+  | "crm"
+  | "tasks"
+  | "inbound"
+  | "history";
 
 const AGENT_TABS: AgentTab[] = [
   "overview",
@@ -243,6 +254,8 @@ function AgentDetail({
     useState(false);
   const [crmStatus, setCrmStatus] = useState<string | null>(null);
   const [stageMap, setStageMap] = useState<StageMapEntry[]>([]);
+  const [inboundCfg, setInboundCfg] = useState<InboundConfig>(defaultInboundConfig());
+  const [inboundRoutes, setInboundRoutes] = useState<InboundRouteEntry[]>([]);
   const [pipelines, setPipelines] = useState<Pipeline[]>([]);
   const [pipelinesLoading, setPipelinesLoading] = useState(false);
   const [pipelinesError, setPipelinesError] = useState<string | null>(null);
@@ -300,6 +313,33 @@ function AgentDetail({
           setTaskCfg(defaultTaskConfig());
         }
         setStageMap(stageMapFromRows(d.pipelineStageMap ?? []));
+        if (d.inboundConfig) {
+          setInboundCfg({
+            ...defaultInboundConfig(),
+            ...d.inboundConfig,
+            assignee_mode: d.inboundConfig.assignee_mode ?? "fixed",
+          });
+        } else {
+          setInboundCfg(defaultInboundConfig());
+        }
+        setInboundRoutes(
+          (d.inboundRoutes ?? []).map(
+            (r: Record<string, unknown>): InboundRouteEntry => ({
+              outcome: String(r.outcome ?? "unknown"),
+              pipeline_id: (r.pipeline_id as string) ?? null,
+              pipeline_stage_id: (r.pipeline_stage_id as string) ?? null,
+              pipeline_name: (r.pipeline_name as string) ?? null,
+              stage_name: (r.stage_name as string) ?? null,
+              opportunity_status:
+                (r.opportunity_status as InboundRouteEntry["opportunity_status"]) ??
+                null,
+              tag: (r.tag as string) ?? null,
+              remove_tags: Array.isArray(r.remove_tags)
+                ? (r.remove_tags as string[])
+                : [],
+            })
+          )
+        );
         setWorkspaceTimezone(d.workspaceTimezone ?? "America/New_York");
         setEffectiveCrmProvider(d.effectiveCrmProvider ?? null);
         setHasEffectiveCrmCredentials(Boolean(d.hasEffectiveCrmCredentials));
@@ -590,6 +630,27 @@ function AgentDetail({
     });
   }
 
+  function saveInboundSettings() {
+    if (
+      inboundCfg.enabled &&
+      inboundCfg.pipeline_automation_enabled &&
+      (!inboundCfg.default_pipeline_id?.trim() ||
+        !inboundCfg.default_pipeline_stage_id?.trim())
+    ) {
+      setTaskActionMsg(
+        "Default pipeline and stage are required when inbound pipeline automation is enabled."
+      );
+      return;
+    }
+    patch(
+      {
+        inbound_config: inboundCfg,
+        inbound_routes: inboundRoutes,
+      },
+      { refresh: true, feedback: "task" }
+    );
+  }
+
   if (error)
     return (
       <PageShell nav={{ active: "agent", crumb: "Agent" }}>
@@ -691,7 +752,9 @@ function AgentDetail({
           },
           { id: "call", label: "Call & Cadence" },
           { id: "crm", label: "CRM & Integrations" },
-          { id: "tasks", label: "Tasks & Automations" },
+          ...(isInbound
+            ? [{ id: "inbound", label: "Inbound Automation" }]
+            : [{ id: "tasks", label: "Tasks & Automations" }]),
           { id: "history", label: "Call History" },
         ]}
         active={agentTab}
@@ -1267,11 +1330,66 @@ function AgentDetail({
             </p>
           )}
         </Card>
-        ) : (
-          <Card className="p-6 text-sm text-ink-500">
-            Tasks &amp; automations apply to outbound agents.
-          </Card>
-        ))}
+        ) : null)}
+
+      {agentTab === "inbound" && isInbound && (
+        <Card className="space-y-5 p-6">
+          <SectionHeader
+            title="Inbound automation"
+            description="Tag every inbound lead after the call ends, and create or update HighLevel opportunities into mapped pipeline stages by outcome."
+          />
+          {!hasEffectiveCrmCredentials && (
+            <p className="rounded-xl bg-accent-amber-bg px-3 py-2 text-xs text-accent-amber-fg">
+              Connect HighLevel on the{" "}
+              <button
+                type="button"
+                className="font-medium underline"
+                onClick={() => setAgentTab("crm")}
+              >
+                CRM &amp; Integrations
+              </button>{" "}
+              tab before enabling inbound automation.
+            </p>
+          )}
+          {!isHighLevel && hasEffectiveCrmCredentials && (
+            <p className="rounded-xl bg-accent-amber-bg px-3 py-2 text-xs text-accent-amber-fg">
+              Inbound automation is built for HighLevel. This workspace uses a
+              different CRM — the legacy inbound handler will still run when
+              automation is off.
+            </p>
+          )}
+          <InboundAutomationSettings
+            cfg={inboundCfg}
+            routes={inboundRoutes}
+            pipelines={pipelines}
+            users={crmUsers}
+            loading={pipelinesLoading}
+            error={pipelinesError}
+            onChange={(p) => setInboundCfg((c) => ({ ...c, ...p }))}
+            onChangeRoutes={setInboundRoutes}
+            onRefresh={loadPipelines}
+          />
+          {taskActionMsg && (
+            <p
+              className={cn(
+                "rounded-xl px-4 py-2.5 text-sm",
+                taskActionMsg.toLowerCase().includes("saved")
+                  ? "bg-accent-mint-bg text-accent-mint-fg"
+                  : "bg-accent-rose-bg text-accent-rose-fg"
+              )}
+            >
+              {taskActionMsg}
+            </p>
+          )}
+          <Button
+            variant="secondary"
+            disabled={saving}
+            onClick={saveInboundSettings}
+          >
+            Save inbound automation
+          </Button>
+        </Card>
+      )}
 
       {agentTab === "history" && (
       <>

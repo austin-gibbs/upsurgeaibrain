@@ -7,7 +7,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { bearerMatches } from "@/lib/secure";
 import { sendOpsAlert } from "@/lib/alerts";
 import { checkDialStalls, formatDialStallAlert } from "@/lib/engine/dial-watchdog";
-import { checkPollGaps, formatPollGapAlert } from "@/lib/engine/poll-watchdog";
+import {
+  checkOrphanEnrollTags,
+  checkPollGaps,
+  formatOrphanEnrollTagAlert,
+  formatPollGapAlert,
+} from "@/lib/engine/poll-watchdog";
 import { reconcileZombieDialingRows } from "@/lib/engine/call-queue";
 import { createServiceClient } from "@/lib/supabase/server";
 import { probeRedisQueueHealth } from "@/lib/queue/redis-health";
@@ -26,6 +31,10 @@ async function handle(req: NextRequest) {
 
   const result = await checkDialStalls();
   const pollGaps = await checkPollGaps();
+  const orphanEnrollTags = await checkOrphanEnrollTags().catch((e) => {
+    console.error("[dial-watchdog] orphan enroll tag scan failed:", e);
+    return [];
+  });
   const redisHealth = await probeRedisQueueHealth({ closeAfter: true });
   const zombiesCleared = await reconcileZombieDialingRows(createServiceClient()).catch(
     () => 0
@@ -44,9 +53,18 @@ async function handle(req: NextRequest) {
       `:warning: *Redis queue unavailable* (${redisHealth.reason ?? "unknown"}). ` +
         "BullMQ dials are blocked; Vercel failover drain should place calls during open windows."
     );
+  } else if (orphanEnrollTags.length > 0) {
+    alerted = await sendOpsAlert(formatOrphanEnrollTagAlert(orphanEnrollTags));
   }
 
-  return NextResponse.json({ ...result, pollGaps, redis: redisHealth, alerted, zombiesCleared });
+  return NextResponse.json({
+    ...result,
+    pollGaps,
+    orphanEnrollTags,
+    redis: redisHealth,
+    alerted,
+    zombiesCleared,
+  });
 }
 
 export const GET = handle;

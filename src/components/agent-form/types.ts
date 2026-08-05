@@ -82,6 +82,69 @@ export const OUTCOMES = [
   "follow_up",
 ] as const;
 
+/** Inbound automation config edited in the agent form. */
+export type InboundConfig = {
+  enabled: boolean;
+  create_contact_if_missing: boolean;
+  always_tag: string | null;
+  pipeline_automation_enabled: boolean;
+  default_pipeline_id: string | null;
+  default_pipeline_stage_id: string | null;
+  default_pipeline_name: string | null;
+  default_stage_name: string | null;
+  opportunity_name_template: string;
+  opportunity_custom_field_enabled: boolean;
+  opportunity_custom_field_id: string | null;
+  opportunity_custom_field_key: string | null;
+  opportunity_custom_field_value: string | null;
+  assignee_mode: "fixed" | "dialed_line" | "none";
+  assignee_crm_id: string | null;
+  task_enabled: boolean;
+  task_name_template: string;
+  task_type: string;
+  task_due_offset_minutes: number;
+  min_duration_seconds: number;
+  new_contact_source: string;
+};
+
+/** One inbound outcome → stage/tag rule as edited in the form. */
+export type InboundRouteEntry = {
+  outcome: string;
+  pipeline_id: string | null;
+  pipeline_stage_id: string | null;
+  pipeline_name: string | null;
+  stage_name: string | null;
+  opportunity_status: "open" | "won" | "lost" | "abandoned" | null;
+  tag: string | null;
+  remove_tags: string[];
+};
+
+export function defaultInboundConfig(): InboundConfig {
+  return {
+    enabled: false,
+    create_contact_if_missing: true,
+    always_tag: "AI Inbound Call",
+    pipeline_automation_enabled: false,
+    default_pipeline_id: null,
+    default_pipeline_stage_id: null,
+    default_pipeline_name: null,
+    default_stage_name: null,
+    opportunity_name_template: "{contact_name}",
+    opportunity_custom_field_enabled: false,
+    opportunity_custom_field_id: null,
+    opportunity_custom_field_key: null,
+    opportunity_custom_field_value: null,
+    assignee_mode: "fixed",
+    assignee_crm_id: null,
+    task_enabled: false,
+    task_name_template: "Follow up with {contact_name}",
+    task_type: "Follow Up",
+    task_due_offset_minutes: 30,
+    min_duration_seconds: 0,
+    new_contact_source: "AI Inbound Call",
+  };
+}
+
 export function defaultCallConfig(): CallConfig {
   return {
     max_total_calls: null,

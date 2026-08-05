@@ -42,6 +42,7 @@ import {
   pickDefaultOpsAgentId,
   savePersistedOpsAgent,
 } from "@/lib/workspaces/ops-agent-scope";
+import { findOrphanEnrollTags } from "@/lib/engine/orphan-enroll-tags";
 import { readJson } from "@/lib/api/fetch-json";
 
 type ContactRow = {
@@ -918,6 +919,15 @@ function WorkspaceOpsTabInner({
   const agentContacts = selectedOpsAgent
     ? contacts.filter((c) => contactHasEnrollTag(c.tags ?? [], selectedEnrollTag))
     : contacts;
+  // Contacts carrying an enrollment-shaped tag no agent polls are invisible to
+  // the engine: they never get scanned, so they never reach the queue.
+  const orphanEnrollTags = findOrphanEnrollTags({
+    contactTagSets: contacts.map((c) => c.tags ?? []),
+    agentEnrollTags: outboundAgents.map((a) =>
+      effectiveEnrollTag(a.enroll_tag, workspace.enroll_tag)
+    ),
+    outcomeTags: outcomeTags.map((t) => t.tag),
+  });
   const schedules = buildSchedules(
     agentContacts,
     today,
@@ -1036,6 +1046,40 @@ function WorkspaceOpsTabInner({
 
       {opsTab === "overview" && (
         <div className="space-y-6">
+      {orphanEnrollTags.length > 0 && (
+        <Card className="p-5">
+          <SectionHeader
+            title="Unpolled enrollment tags"
+            description="Contacts carry these tags in the CRM, but no active outbound agent polls them — so they are never scanned and never reach the call queue."
+          />
+          <div className="mt-4 space-y-2">
+            {orphanEnrollTags.map((orphan) => (
+              <div
+                key={orphan.tag}
+                className={`rounded-xl px-4 py-3 text-sm ${
+                  orphan.isNearMiss
+                    ? "bg-accent-amber-bg text-accent-amber-fg"
+                    : "bg-ink-50 text-ink-600"
+                }`}
+              >
+                <div className="flex flex-wrap items-center gap-2">
+                  <code className="font-semibold">{orphan.tag}</code>
+                  <Badge>
+                    {orphan.contactCount} contact{orphan.contactCount === 1 ? "" : "s"}
+                  </Badge>
+                </div>
+                {orphan.isNearMiss && orphan.nearestEnrollTag && (
+                  <p className="mt-1">
+                    Looks like a typo of <code>{orphan.nearestEnrollTag}</code>. Retag these
+                    contacts in the CRM, or point that agent at this tag.
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
       {pollRuns.length > 0 && (
         <Card className="p-5">
           <SectionHeader

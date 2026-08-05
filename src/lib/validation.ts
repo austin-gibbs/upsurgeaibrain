@@ -157,6 +157,95 @@ export const pipelineStageMapEntrySchema = z.object({
 
 export const pipelineStageMapSchema = z.array(pipelineStageMapEntrySchema);
 
+/** Inbound outcome slug or '*' catch-all. */
+const inboundOutcomeSlugSchema = z
+  .string()
+  .min(1)
+  .refine(
+    (v) =>
+      v === "*" ||
+      [
+        "appointment_booked",
+        "hot_lead",
+        "interested",
+        "general_inquiry",
+        "existing_client",
+        "support_request",
+        "transferred",
+        "message_taken",
+        "not_interested",
+        "wrong_number",
+        "spam",
+        "unknown",
+      ].includes(v),
+    { message: "Invalid inbound outcome." }
+  );
+
+export const inboundConfigSchema = z
+  .object({
+    enabled: z.boolean().default(false),
+    create_contact_if_missing: z.boolean().default(true),
+    always_tag: z.string().nullable().default(null),
+    pipeline_automation_enabled: z.boolean().default(false),
+    default_pipeline_id: z.string().nullable().default(null),
+    default_pipeline_stage_id: z.string().nullable().default(null),
+    default_pipeline_name: z.string().nullable().default(null),
+    default_stage_name: z.string().nullable().default(null),
+    opportunity_name_template: z.string().default("{contact_name}"),
+    opportunity_custom_field_enabled: z.boolean().default(false),
+    opportunity_custom_field_id: z.string().nullable().default(null),
+    opportunity_custom_field_key: z.string().nullable().default(null),
+    opportunity_custom_field_value: z.string().nullable().default(null),
+    assignee_mode: z.enum(["fixed", "dialed_line", "none"]).default("fixed"),
+    assignee_crm_id: z.string().nullable().default(null),
+    task_enabled: z.boolean().default(false),
+    task_name_template: z.string().default("Follow up with {contact_name}"),
+    task_type: z.string().default("Follow Up"),
+    task_due_offset_minutes: z.number().int().min(0).default(30),
+    min_duration_seconds: z.number().int().min(0).default(0),
+    new_contact_source: z.string().default("AI Inbound Call"),
+  })
+  .superRefine((val, ctx) => {
+    if (
+      val.pipeline_automation_enabled &&
+      (!val.default_pipeline_id?.trim() || !val.default_pipeline_stage_id?.trim())
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["default_pipeline_stage_id"],
+        message:
+          "Default pipeline and stage are required when inbound pipeline automation is enabled.",
+      });
+    }
+    if (
+      val.opportunity_custom_field_enabled &&
+      (!val.opportunity_custom_field_id?.trim() ||
+        !val.opportunity_custom_field_value?.trim())
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["opportunity_custom_field_value"],
+        message: "Opportunity custom field requires a field and value when enabled.",
+      });
+    }
+  });
+
+export const inboundRouteEntrySchema = z.object({
+  outcome: inboundOutcomeSlugSchema,
+  pipeline_id: z.string().nullable().default(null),
+  pipeline_stage_id: z.string().nullable().default(null),
+  pipeline_name: z.string().nullable().default(null),
+  stage_name: z.string().nullable().default(null),
+  opportunity_status: z
+    .enum(["open", "won", "lost", "abandoned"])
+    .nullable()
+    .default(null),
+  tag: z.string().nullable().default(null),
+  remove_tags: z.array(z.string()).default([]),
+});
+
+export const inboundRoutesSchema = z.array(inboundRouteEntrySchema);
+
 export const agentSchema = z.object({
   name: z.string().min(1),
   direction: z.enum(["inbound", "outbound"]).default("outbound"),

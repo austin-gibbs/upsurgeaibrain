@@ -38,6 +38,8 @@ const SAMPLE_SUMMARY =
 const SAMPLE_TRANSCRIPT =
   "Agent: Hi Test, this is a test push from UpSurge.\n" +
   "User: Great — send me the info and let's talk Thursday.";
+/** Obviously-fake recording so a CRM can map recording_url before any real call. */
+export const SAMPLE_RECORDING_URL = "https://example.com/test-recording.wav";
 const SAMPLE_APPOINTMENT_TIME = "Thursday at 3:00 PM (test)";
 /** Fallback link_type when the workspace link map is still empty. */
 const SAMPLE_LINK_TYPE = "buyer_guide";
@@ -54,9 +56,9 @@ const KNOWN_OUTCOMES: readonly string[] = [
 ];
 
 /** Condition/template names that resolve from call context, not analysis data. */
-const PSEUDO_FIELDS = new Set(["outcome", "summary", "transcript"]);
+const PSEUDO_FIELDS = new Set(["outcome", "summary", "transcript", "recording_url"]);
 /** Template roots that aren't analysis fields (see render.ts). */
-const TEMPLATE_ROOTS = new Set(["contact", "link", "outcome", "summary", "transcript"]);
+const TEMPLATE_ROOTS = new Set(["contact", "link", "outcome", "summary", "transcript", "recording_url"]);
 
 export type SampleTrigger = Pick<
   AutomationTrigger,
@@ -244,6 +246,7 @@ export function buildSampleContext(
     outcome,
     summary,
     transcript,
+    recordingUrl: SAMPLE_RECORDING_URL,
     customFields,
     contact: { ...SAMPLE_CONTACT },
   };

@@ -12,17 +12,23 @@ organization (your agency)
 └── workspace (one client, one CRM connection)
     ├── workspace_outcome_tags   (the 7-tag taxonomy, seeded on create)
     ├── contacts                 (mirror of CRM contacts carrying the enroll tag)
-    └── agent (a Retell voice agent)
-        ├── agent_call_configs   (caps, window, cadence)
-        ├── agent_task_configs   (post-call task rules)
-        ├── calls                (one row per dial attempt)
-        └── agent_memory         (V2 — rolling per-contact memory)
+    └── agent (a Retell voice agent; direction = outbound | inbound)
+        ├── agent_call_configs   (caps, window, cadence — outbound)
+        ├── agent_task_configs   (post-call task / pipeline rules — outbound)
+        ├── agent_inbound_configs + agent_inbound_routes  (HighLevel inbound automation)
+        ├── calls                (one row per dial attempt or inbound answer)
+        └── agent_memory         (V2 — rolling per-contact memory, outbound)
 ```
 
 A **workspace** binds exactly one CRM provider and one set of (encrypted) credentials.
 Row-Level Security scopes every user-facing read to the caller's organization
 memberships; the engine uses the service-role key to bypass RLS for cross-tenant
 background work.
+
+**Inbound agents** answer the business line (no poll/cadence). After Retell
+`call_analyzed` with `direction=inbound`, `processInboundCall` tags the lead and
+creates/updates a HighLevel opportunity when `agent_inbound_configs.enabled` is
+true. See [INBOUND-AUTOMATION.md](./INBOUND-AUTOMATION.md).
 
 ## The two engine loops
 

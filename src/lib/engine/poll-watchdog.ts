@@ -1,8 +1,11 @@
-// Detect outbound agents in an open call window with no poll activity.
+// Detect outbound agents in an open call window with no poll activity, and
+// contacts enrolled under a tag no agent polls.
 import { createServiceClient } from "@/lib/supabase/server";
+import { effectiveEnrollTag } from "@/lib/agents/enroll-tag";
 import { evaluateDialWindow, nowHHMMInTz } from "./cadence";
 import { isAgentEligibleForPollTick } from "./poll-schedule";
 import { agentLacksRecentPollCoverage, POLL_COVERAGE_MAX_AGE_MS } from "./poll-coverage";
+import { findOrphanEnrollTags, type OrphanEnrollTag } from "./orphan-enroll-tags";
 import type { Agent, AgentCallConfig, Workspace } from "@/types";
 
 type DbClient = ReturnType<typeof createServiceClient>;
@@ -148,6 +151,117 @@ export async function checkPollGaps(opts?: {
   }
 
   return { checkedAgents: agents?.length ?? 0, gaps };
+}
+
+export interface OrphanEnrollTagSignal {
+  workspaceId: string;
+  workspaceName: string;
+  orphans: OrphanEnrollTag[];
+}
+
+const CONTACT_TAG_PAGE = 1000;
+
+/** Every contact's tags for one workspace, paginated past PostgREST's default. */
+async function loadContactTagSets(
+  supabase: DbClient,
+  workspaceId: string
+): Promise<string[][]> {
+  const out: string[][] = [];
+  for (let offset = 0; ; offset += CONTACT_TAG_PAGE) {
+    const { data, error } = await supabase
+      .from("contacts")
+      .select("tags")
+      .eq("workspace_id", workspaceId)
+      .range(offset, offset + CONTACT_TAG_PAGE - 1)
+      .returns<{ tags: string[] | null }[]>();
+    if (error) throw new Error(error.message);
+    if (!data?.length) break;
+    for (const row of data) out.push(row.tags ?? []);
+    if (data.length < CONTACT_TAG_PAGE) break;
+  }
+  return out;
+}
+
+/**
+ * Find contacts tagged for enrollment under a tag no active outbound agent
+ * polls. The poller cannot detect this itself — it only ever sees what its own
+ * tag returns — so these contacts silently never reach the call queue.
+ */
+export async function checkOrphanEnrollTags(opts?: {
+  db?: DbClient;
+}): Promise<OrphanEnrollTagSignal[]> {
+  const supabase = opts?.db ?? createServiceClient();
+
+  const { data: workspaces } = await supabase
+    .from("workspaces")
+    .select("id, name, enroll_tag")
+    .eq("is_active", true)
+    .returns<Pick<Workspace, "id" | "name" | "enroll_tag">[]>();
+  if (!workspaces?.length) return [];
+
+  const { data: agents } = await supabase
+    .from("agents")
+    .select("workspace_id, enroll_tag")
+    .eq("status", "active")
+    .eq("direction", "outbound")
+    .returns<Pick<Agent, "workspace_id" | "enroll_tag">[]>();
+
+  const { data: outcomeTags } = await supabase
+    .from("workspace_outcome_tags")
+    .select("workspace_id, tag")
+    .returns<{ workspace_id: string; tag: string }[]>();
+
+  const signals: OrphanEnrollTagSignal[] = [];
+
+  for (const workspace of workspaces) {
+    const agentEnrollTags = (agents ?? [])
+      .filter((a) => a.workspace_id === workspace.id)
+      .map((a) => effectiveEnrollTag(a.enroll_tag, workspace.enroll_tag));
+    if (agentEnrollTags.length === 0) continue;
+
+    const contactTagSets = await loadContactTagSets(supabase, workspace.id);
+    const orphans = findOrphanEnrollTags({
+      contactTagSets,
+      agentEnrollTags,
+      outcomeTags: (outcomeTags ?? [])
+        .filter((t) => t.workspace_id === workspace.id)
+        .map((t) => t.tag),
+    });
+
+    // Only a near-miss is actionable enough to page on. Legacy or
+    // client-owned tags still show in the Ops tab.
+    if (orphans.some((o) => o.isNearMiss)) {
+      signals.push({
+        workspaceId: workspace.id,
+        workspaceName: workspace.name,
+        orphans: orphans.filter((o) => o.isNearMiss),
+      });
+    }
+  }
+
+  return signals;
+}
+
+export function formatOrphanEnrollTagAlert(signals: OrphanEnrollTagSignal[]): string {
+  const lines = [
+    ":warning: *Contacts enrolled under a tag no agent polls*",
+    "These contacts are never scanned, so they never reach the call queue.",
+    "",
+  ];
+
+  for (const signal of signals) {
+    lines.push(`• *${signal.workspaceName}*`);
+    for (const orphan of signal.orphans) {
+      lines.push(
+        `  \`${orphan.tag}\` — ${orphan.contactCount} contact${
+          orphan.contactCount === 1 ? "" : "s"
+        }, likely meant \`${orphan.nearestEnrollTag}\``
+      );
+    }
+  }
+
+  lines.push("", "Retag the contacts in the CRM, or point the agent at the tag in use.");
+  return lines.join("\n");
 }
 
 export function formatPollGapAlert(result: PollWatchdogResult): string {

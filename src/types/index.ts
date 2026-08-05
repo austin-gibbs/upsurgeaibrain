@@ -173,6 +173,69 @@ export interface AgentPipelineStageMap {
   stage_name: string | null;
 }
 
+/**
+ * Inbound call outcome taxonomy. Kept as text (not the outbound call_outcome
+ * enum) so inbound-only values never leak into cadence/terminality logic.
+ */
+export type InboundOutcome =
+  | "appointment_booked"
+  | "hot_lead"
+  | "interested"
+  | "general_inquiry"
+  | "existing_client"
+  | "support_request"
+  | "transferred"
+  | "message_taken"
+  | "not_interested"
+  | "wrong_number"
+  | "spam"
+  | "unknown";
+
+export type InboundAssigneeMode = "fixed" | "dialed_line" | "none";
+
+/** Per-agent inbound automation settings (HighLevel). */
+export interface AgentInboundConfig {
+  agent_id: string;
+  enabled: boolean;
+  create_contact_if_missing: boolean;
+  /** Tag applied on every inbound call after it ends, regardless of outcome. */
+  always_tag: string | null;
+  pipeline_automation_enabled: boolean;
+  default_pipeline_id: string | null;
+  default_pipeline_stage_id: string | null;
+  default_pipeline_name: string | null;
+  default_stage_name: string | null;
+  opportunity_name_template: string;
+  opportunity_custom_field_enabled: boolean;
+  opportunity_custom_field_id: string | null;
+  opportunity_custom_field_key: string | null;
+  opportunity_custom_field_value: string | null;
+  assignee_mode: InboundAssigneeMode;
+  assignee_crm_id: string | null;
+  task_enabled: boolean;
+  task_name_template: string;
+  task_type: string;
+  task_due_offset_minutes: number;
+  min_duration_seconds: number;
+  new_contact_source: string;
+  updated_at?: string;
+}
+
+/** One inbound outcome → pipeline stage + tag rule. outcome='*' is catch-all. */
+export interface AgentInboundRoute {
+  id?: string;
+  agent_id: string;
+  outcome: string;
+  pipeline_id: string | null;
+  pipeline_stage_id: string | null;
+  pipeline_name: string | null;
+  stage_name: string | null;
+  opportunity_status: "open" | "won" | "lost" | "abandoned" | null;
+  tag: string | null;
+  remove_tags: string[];
+  updated_at?: string;
+}
+
 export interface Contact {
   id: string;
   workspace_id: string;
@@ -236,6 +299,12 @@ export interface Call {
   recording_logged: boolean | null;
   tags_synced: boolean | null;
   crm_error: string | null;
+  /** Classified inbound outcome slug; leaves outbound `outcome` null for inbound. */
+  inbound_outcome: string | null;
+  /** agent_inbound_routes.id that fired, when a rule matched. */
+  inbound_route_id: string | null;
+  /** HighLevel opportunity id created or updated by pipeline routing. */
+  opportunity_id: string | null;
   queued_at: string;
   dialed_at: string | null;
   completed_at: string | null;

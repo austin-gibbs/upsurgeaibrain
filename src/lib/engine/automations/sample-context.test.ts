@@ -11,7 +11,12 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
 import { buildRequest } from "./build-request";
-import { buildSampleContext, SAMPLE_CONTACT, type SampleTrigger } from "./sample-context";
+import {
+  buildSampleContext,
+  SAMPLE_CONTACT,
+  SAMPLE_RECORDING_URL,
+  type SampleTrigger,
+} from "./sample-context";
 import type { AutomationCondition } from "./types";
 
 function trigger(over: Partial<SampleTrigger> = {}): SampleTrigger {
@@ -178,6 +183,7 @@ describe("buildSampleContext + buildRequest — the delivered body", () => {
       email: SAMPLE_CONTACT.email,
       phone: SAMPLE_CONTACT.phone,
     });
+    assert.equal(payload.recording_url, SAMPLE_RECORDING_URL);
   });
 
   it("leaves no unrendered placeholder in a custom payload template", () => {
@@ -197,5 +203,6 @@ describe("buildSampleContext + buildRequest — the delivered body", () => {
     assert.equal(payload.phone, SAMPLE_CONTACT.phone);
     assert.ok(!JSON.stringify(payload).includes("{{"));
     assert.ok(String(payload.text).includes("test_property_address"));
+    assert.equal(payload.recording_url, SAMPLE_RECORDING_URL);
   });
 });

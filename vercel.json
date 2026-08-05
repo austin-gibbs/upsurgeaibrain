@@ -9,6 +9,10 @@
       "schedule": "*/2 * * * *"
     },
     {
+      "path": "/api/admin/reconcile-inbound-calls?lookbackHours=24&limitPerAgent=200",
+      "schedule": "*/5 * * * *"
+    },
+    {
       "path": "/api/cron/drain-queue",
       "schedule": "*/1 * * * *"
     },

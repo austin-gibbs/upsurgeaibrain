@@ -54,6 +54,7 @@ export function buildRequest(
         message: cfg.message_template ? renderTemplate(cfg.message_template, scope) : null,
         outcome: ctx.outcome,
         contact: ctx.contact,
+        recording_url: ctx.recordingUrl ?? null,
       },
     };
   }
@@ -75,12 +76,17 @@ export function buildRequest(
     link_url: link.url,
     message: cfg.message_template ? renderTemplate(cfg.message_template, scope) : null,
     summary: ctx.summary,
+    recording_url: ctx.recordingUrl ?? null,
     custom_analysis_data: ctx.customFields,
   };
 
   const payload = cfg.payload_template
     ? renderPayload(cfg.payload_template, scope)
     : defaultPayload;
+
+  // Guaranteed on every automation, even a byte-for-byte custom template —
+  // unless the template already maps the key itself.
+  if (!("recording_url" in payload)) payload.recording_url = ctx.recordingUrl ?? null;
 
   return { url: cfg.url ?? null, payload };
 }

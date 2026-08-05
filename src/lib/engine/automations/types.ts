@@ -106,6 +106,8 @@ export interface AutomationEvalContext {
   outcome: CallOutcome;
   summary: string | null;
   transcript: string | null;
+  /** Retell call.recording_url for this call, when available. */
+  recordingUrl: string | null;
   /** Full Retell custom_analysis_data (agent-defined post-call fields). */
   customFields: Record<string, unknown>;
   contact: {

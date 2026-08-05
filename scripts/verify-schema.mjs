@@ -99,6 +99,14 @@ const CHECKS = [
   { table: "engine_heartbeat", column: "scheduler_last_tick_at", migration: "0023" },
   { table: "engine_heartbeat", column: "poll_worker_last_seen_at", migration: "0023" },
   { table: "engine_heartbeat", column: "redis_last_ok", migration: "0023" },
+  { table: "agent_inbound_configs", column: "enabled", migration: "0034" },
+  { table: "agent_inbound_configs", column: "always_tag", migration: "0034" },
+  { table: "agent_inbound_configs", column: "pipeline_automation_enabled", migration: "0034" },
+  { table: "agent_inbound_routes", column: "outcome", migration: "0034" },
+  { table: "agent_inbound_routes", column: "tag", migration: "0034" },
+  { table: "calls", column: "inbound_outcome", migration: "0034" },
+  { table: "calls", column: "inbound_route_id", migration: "0034" },
+  { table: "calls", column: "opportunity_id", migration: "0034" },
 ];
 
 async function verifyViaManagementApi() {

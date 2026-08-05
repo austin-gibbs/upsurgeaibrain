@@ -17,6 +17,7 @@ function ctx(over: Partial<AutomationEvalContext> = {}): AutomationEvalContext {
     outcome: "follow_up" as AutomationEvalContext["outcome"],
     summary: "Caller wants the buyer guide.",
     transcript: "…please text me the buyer guide…",
+    recordingUrl: null,
     customFields: {},
     contact: {
       first_name: "Paul",

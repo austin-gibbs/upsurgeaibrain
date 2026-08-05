@@ -131,6 +131,9 @@ export interface CrmAdapter {
   /** Add tags without removing existing CRM tags. FUB implements this via mergeTags. */
   addTags?(contactId: string, tags: string[]): Promise<void>;
 
+  /** Remove specific tags without touching the rest of the tag set. */
+  removeTags?(contactId: string, tags: string[]): Promise<void>;
+
   /** Append a timeline note / activity. */
   addNote(contactId: string, note: string): Promise<void>;
 
@@ -157,8 +160,9 @@ export interface CrmAdapter {
    * Move the contact's opportunity to a pipeline stage. Finds the contact's
    * existing opportunity (preferring one already in the target pipeline) and
    * updates its stage; creates a new opportunity in that stage if none exists.
+   * Returns the opportunity id that was updated or created, when known.
    */
-  moveContactToStage?(input: MoveStageInput): Promise<void>;
+  moveContactToStage?(input: MoveStageInput): Promise<string | null | void>;
 
   // ----- Inbound concierge support (optional; FUB implements these) -----
 

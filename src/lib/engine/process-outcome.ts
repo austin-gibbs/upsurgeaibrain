@@ -64,7 +64,7 @@ export async function processRetellWebhook(
   // Inbound concierge calls (answered on the business line) have no
   // pre-created call row — hand them to the dedicated inbound processor.
   if ((body?.call ?? body)?.direction === "inbound") {
-    return processInboundCall(body);
+    return processInboundCall(body, { finalizedBy });
   }
 
   const supabase = createServiceClient();
@@ -323,6 +323,7 @@ export async function processRetellWebhook(
       outcome,
       summary: parsed.summary,
       transcript: parsed.transcript,
+      recordingUrl: parsed.recordingUrl,
       customFields: parsed.customFields,
     });
   } catch { /* non-fatal: never block cadence on automation eval */ }

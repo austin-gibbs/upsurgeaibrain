@@ -32,6 +32,8 @@ function lookup(path: string, scope: RenderScope): unknown {
       return scope.ctx.summary;
     case "transcript":
       return scope.ctx.transcript;
+    case "recording_url":
+      return scope.ctx.recordingUrl;
     default:
       // Bare field name → custom_analysis_data
       return scope.ctx.customFields?.[head];

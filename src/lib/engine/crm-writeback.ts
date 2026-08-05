@@ -60,6 +60,31 @@ export async function addTagsToCrm(
   return addedTags;
 }
 
+/**
+ * Remove specific tags from a CRM contact without touching the rest of the
+ * tag set. Prefers the provider's additive removeTags; falls back to a
+ * read-modify-write via setTags when the provider only supports full replace.
+ */
+export async function removeTagsFromCrm(
+  crm: CrmAdapter,
+  contactId: string,
+  tags: string[],
+  existingTags: string[] = []
+): Promise<string[]> {
+  const toRemove = dedupeTags(tags);
+  if (!toRemove.length) return [];
+
+  if (crm.removeTags) {
+    await crm.removeTags(contactId, toRemove);
+    return toRemove;
+  }
+
+  const removeSet = new Set(toRemove);
+  const next = dedupeTags(existingTags).filter((t) => !removeSet.has(t));
+  await crm.setTags(contactId, next);
+  return toRemove;
+}
+
 export interface LogCallToCrmInput {
   crm: CrmAdapter;
   contactId: string;
@@ -73,6 +98,8 @@ export interface LogCallToCrmInput {
   outcome?: string;
   /** Whether the call reached voicemail. */
   inVoicemail?: boolean;
+  /** True for inbound (answered) calls. Defaults to false (outbound dial). */
+  isIncoming?: boolean;
 }
 
 /** Primary logCall with addNote(+recording) fallback. Never throws. */
@@ -90,7 +117,7 @@ export async function logCallToCrm(input: LogCallToCrmInput): Promise<CrmWriteFl
     const result = await input.crm.logCall({
       contactId: input.contactId,
       phone: input.phone,
-      isIncoming: false,
+      isIncoming: input.isIncoming ?? false,
       note: input.note,
       outcome: input.outcome,
       inVoicemail: input.inVoicemail,
