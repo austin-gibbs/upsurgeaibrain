@@ -426,6 +426,12 @@ export default function AdminConsolePage() {
             Author a Retell agent, wire it into UpSurge, and activate it — no
             terminal. Connect the CRM in the app; then activate here.
           </p>
+          <a
+            href="/admin/automations"
+            className="mt-2 inline-block text-sm font-medium text-brand-600 hover:underline"
+          >
+            → Post-call automations console
+          </a>
         </div>
 
         {/* ----------------------- Provision ----------------------- */}

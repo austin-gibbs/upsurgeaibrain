@@ -12,10 +12,40 @@ import { sanitizeBullmqJobId } from "./job-id";
 
 export const POLL_QUEUE = "agent-poll";
 export const CALL_QUEUE = "outbound-call";
+// SMS is a separate, additive channel — its own queue so it never contends
+// with or affects the voice (call) pipeline.
+export const SMS_QUEUE = "outbound-sms";
+// Post-call automation executor — fires config-driven trigger actions
+// (webhooks to HighLevel, internal notifies). Its own queue so automation
+// throughput never contends with voice dials.
+export const AUTOMATION_QUEUE = "post-call-automation";
 
 export interface PollJob {
   agentId: string;
   testMode?: boolean;
+}
+
+export interface SmsJob {
+  workspaceId: string;
+  agentId: string;
+  /** Internal contacts.id when known; inbound-triggered replies always have it. */
+  contactId?: string;
+  /** CRM-native contact id, for timeline logging. */
+  crmContactId?: string;
+  from: string; // E.164 agent number
+  to: string; // E.164 lead number
+  body: string;
+  /** True when this send is a reply to an inbound text (quiet-hours exempt). */
+  isReplyToInbound?: boolean;
+  /** Pre-inserted sms_messages row to advance instead of inserting a new one. */
+  messageRowId?: string;
+  /** Who authored this outbound: the AI reply brain or a human operator. */
+  sentBy?: "ai" | "human";
+}
+
+export interface AutomationJob {
+  /** automation_runs.id to execute. The row holds the resolved request. */
+  runId: string;
 }
 
 export interface CallJob {
@@ -36,12 +66,63 @@ export interface CallJob {
 
 let pollQueue: Queue<PollJob> | null = null;
 let callQueue: Queue<CallJob> | null = null;
+let smsQueue: Queue<SmsJob> | null = null;
+let automationQueue: Queue<AutomationJob> | null = null;
 
 export function getPollQueue(): Queue<PollJob> {
   if (!pollQueue) {
     pollQueue = new Queue<PollJob>(POLL_QUEUE, { connection: getRedis() });
   }
   return pollQueue;
+}
+
+export function getSmsQueue(): Queue<SmsJob> {
+  if (!smsQueue) {
+    smsQueue = new Queue<SmsJob>(SMS_QUEUE, {
+      connection: getRedis(),
+      defaultJobOptions: {
+        attempts: 3,
+        backoff: { type: "exponential", delay: 15_000 },
+        removeOnComplete: 1000,
+        removeOnFail: 5000,
+      },
+    });
+  }
+  return smsQueue;
+}
+
+/** Enqueue one outbound SMS send. Optional delay for drip spacing. */
+export async function enqueueSms(job: SmsJob, delayMs = 0): Promise<void> {
+  const queue = getSmsQueue();
+  await getRedis().connect();
+  await queue.add("send-sms", job, { delay: delayMs });
+}
+
+export function getAutomationQueue(): Queue<AutomationJob> {
+  if (!automationQueue) {
+    automationQueue = new Queue<AutomationJob>(AUTOMATION_QUEUE, {
+      connection: getRedis(),
+      defaultJobOptions: {
+        // The run row enforces max_attempts; give BullMQ generous retries so a
+        // transient webhook 5xx/network blip backs off rather than dead-letters.
+        attempts: 8,
+        backoff: { type: "exponential", delay: 20_000 },
+        removeOnComplete: 1000,
+        removeOnFail: 5000,
+      },
+    });
+  }
+  return automationQueue;
+}
+
+/** Enqueue one automation run for the executor worker. */
+export async function enqueueAutomation(job: AutomationJob, delayMs = 0): Promise<void> {
+  const queue = getAutomationQueue();
+  await getRedis().connect();
+  await queue.add("execute-automation", job, {
+    delay: delayMs,
+    jobId: sanitizeBullmqJobId(`automation-${job.runId}`),
+  });
 }
 
 export function getCallQueue(): Queue<CallJob> {

@@ -20,6 +20,7 @@ import { updateMemoryAfterCall } from "./memory";
 import { applyPipelineRouting } from "./pipeline-routing";
 import { processInboundCall } from "./process-inbound";
 import { dispatchPostCallWebhook } from "@/lib/webhooks/post-call";
+import { evaluateAutomations } from "@/lib/engine/automations/evaluate";
 import { dispatchCustomReport } from "@/lib/integrations/custom/report";
 import {
   createTasksToCrm,
@@ -304,6 +305,27 @@ export async function processRetellWebhook(
       });
     } catch { /* non-fatal: never block cadence on report delivery */ }
   }
+
+  // 4b-automations. Config-driven post-call automation triggers (productized).
+  // Superset of the single 4b webhook: many triggers per workspace/agent,
+  // custom_analysis_data condition matching, link map, dedupe, durable run log,
+  // and a retrying executor. New automations are DB rows, never code deploys.
+  // Best-effort — never block cadence on automation evaluation.
+  try {
+    await evaluateAutomations({
+      supabase,
+      workspace,
+      agent,
+      contact,
+      callId: call.id,
+      retellCallId: parsed.callId ?? call.retell_call_id,
+      contactPhone: call.to_number,
+      outcome,
+      summary: parsed.summary,
+      transcript: parsed.transcript,
+      customFields: parsed.customFields,
+    });
+  } catch { /* non-fatal: never block cadence on automation eval */ }
 
   // 4c. HighLevel pipeline routing (best-effort, app-driven). Move the
   // contact's opportunity to the stage mapped for this outcome — no

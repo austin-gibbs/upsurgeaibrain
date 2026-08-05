@@ -14,6 +14,8 @@ loadEnv({ path: ".env.local" });
 import { createServer, type Server } from "node:http";
 import { startPollWorker } from "@/lib/queue/workers/poll.worker";
 import { startCallWorker } from "@/lib/queue/workers/call.worker";
+import { startAutomationWorker } from "@/lib/queue/workers/automation.worker";
+import { drainAutomationRuns } from "@/lib/engine/automations/drain";
 import { tickScheduler } from "@/lib/engine/scheduler";
 import {
   describeSchedulerMode,
@@ -97,6 +99,10 @@ async function main() {
   const healthServer = startHealthServer();
   const pollWorker = startPollWorker();
   const callWorker = startCallWorker();
+  // Post-call automation executor. Additive: consumes only `post-call-automation`
+  // jobs (its own queue), idle until a workspace has automation triggers.
+  const automationWorker =
+    process.env.AUTOMATION_WORKER_ENABLED === "false" ? null : startAutomationWorker();
 
   // Heartbeat for Vercel failover crons — written only when BullMQ can run.
   // Upstash quota exhaustion still allows PING; probe queue ops to avoid a
@@ -226,8 +232,24 @@ async function main() {
     }
   }, 15 * 60_000);
 
+  // Automation drain sweep: every 1 minute, re-enqueue automation runs that are
+  // still 'queued' (Redis was down at enqueue time) or 'failed' but retryable.
+  // Idempotent via deterministic jobId, so re-enqueueing a live job is a no-op.
+  let automationDrainTimer: NodeJS.Timeout | null = setInterval(async () => {
+    try {
+      const summary = await drainAutomationRuns({ limit: 500 });
+      if (summary.reEnqueued) {
+        console.log("[automation-drain] re-enqueued:", summary.reEnqueued);
+      }
+    } catch (e) {
+      console.error("[automation-drain] sweep error:", e);
+    }
+  }, 60_000);
+
   const shutdown = async () => {
     console.log("[worker] shutting down…");
+    if (automationDrainTimer) clearInterval(automationDrainTimer);
+    automationDrainTimer = null;
     if (heartbeatTimer) clearTimeout(heartbeatTimer);
     heartbeatTimer = null;
     if (schedulerTimer) clearTimeout(schedulerTimer);
@@ -239,13 +261,20 @@ async function main() {
     if (payloadBackfillTimer) clearInterval(payloadBackfillTimer);
     payloadBackfillTimer = null;
     healthServer.close();
-    await Promise.all([pollWorker.close(), callWorker.close()]);
+    await Promise.all([
+      pollWorker.close(),
+      callWorker.close(),
+      ...(automationWorker ? [automationWorker.close()] : []),
+    ]);
     process.exit(0);
   };
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
 
-  console.log("[worker] ready. Poll + call workers online.");
+  console.log(
+    `[worker] ready. Poll + call workers online` +
+      `${automationWorker ? " + automation worker" : ""}.`
+  );
 }
 
 main().catch((e) => {

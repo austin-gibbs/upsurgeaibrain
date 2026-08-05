@@ -377,6 +377,8 @@ export type Database = {
           retell_agent_id: string | null
           retell_credentials_encrypted: string | null
           retell_from_number: string | null
+          sms_enabled: boolean
+          sms_from_number: string | null
           status: Database["public"]["Enums"]["agent_status"]
           updated_at: string
           workspace_id: string
@@ -395,6 +397,8 @@ export type Database = {
           retell_agent_id?: string | null
           retell_credentials_encrypted?: string | null
           retell_from_number?: string | null
+          sms_enabled?: boolean
+          sms_from_number?: string | null
           status?: Database["public"]["Enums"]["agent_status"]
           updated_at?: string
           workspace_id: string
@@ -413,6 +417,8 @@ export type Database = {
           retell_agent_id?: string | null
           retell_credentials_encrypted?: string | null
           retell_from_number?: string | null
+          sms_enabled?: boolean
+          sms_from_number?: string | null
           status?: Database["public"]["Enums"]["agent_status"]
           updated_at?: string
           workspace_id?: string
@@ -420,6 +426,227 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "agents_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      automation_triggers: {
+        Row: {
+          action_config: Json
+          action_type: string
+          agent_id: string | null
+          conditions: Json
+          created_at: string
+          created_by: string | null
+          dedupe_window_hours: number
+          description: string | null
+          enabled: boolean
+          id: string
+          match_type: string
+          max_attempts: number
+          name: string
+          only_outcomes: string[] | null
+          updated_at: string
+          workspace_id: string
+        }
+        Insert: {
+          action_config?: Json
+          action_type?: string
+          agent_id?: string | null
+          conditions?: Json
+          created_at?: string
+          created_by?: string | null
+          dedupe_window_hours?: number
+          description?: string | null
+          enabled?: boolean
+          id?: string
+          match_type?: string
+          max_attempts?: number
+          name: string
+          only_outcomes?: string[] | null
+          updated_at?: string
+          workspace_id: string
+        }
+        Update: {
+          action_config?: Json
+          action_type?: string
+          agent_id?: string | null
+          conditions?: Json
+          created_at?: string
+          created_by?: string | null
+          dedupe_window_hours?: number
+          description?: string | null
+          enabled?: boolean
+          id?: string
+          match_type?: string
+          max_attempts?: number
+          name?: string
+          only_outcomes?: string[] | null
+          updated_at?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "automation_triggers_agent_id_fkey"
+            columns: ["agent_id"]
+            isOneToOne: false
+            referencedRelation: "agents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "automation_triggers_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      automation_links: {
+        Row: {
+          created_at: string
+          id: string
+          label: string | null
+          link_type: string
+          updated_at: string
+          url: string
+          workspace_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          label?: string | null
+          link_type: string
+          updated_at?: string
+          url: string
+          workspace_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          label?: string | null
+          link_type?: string
+          updated_at?: string
+          url?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "automation_links_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      automation_runs: {
+        Row: {
+          action_type: string | null
+          agent_id: string | null
+          attempts: number
+          call_id: string | null
+          contact_id: string | null
+          contact_phone: string | null
+          created_at: string
+          id: string
+          last_error: string | null
+          max_attempts: number
+          meta: Json
+          request_payload: Json | null
+          request_url: string | null
+          response_body: string | null
+          response_status: number | null
+          retell_call_id: string | null
+          scheduled_at: string
+          sent_at: string | null
+          status: string
+          trigger_id: string | null
+          updated_at: string
+          workspace_id: string
+        }
+        Insert: {
+          action_type?: string | null
+          agent_id?: string | null
+          attempts?: number
+          call_id?: string | null
+          contact_id?: string | null
+          contact_phone?: string | null
+          created_at?: string
+          id?: string
+          last_error?: string | null
+          max_attempts?: number
+          meta?: Json
+          request_payload?: Json | null
+          request_url?: string | null
+          response_body?: string | null
+          response_status?: number | null
+          retell_call_id?: string | null
+          scheduled_at?: string
+          sent_at?: string | null
+          status?: string
+          trigger_id?: string | null
+          updated_at?: string
+          workspace_id: string
+        }
+        Update: {
+          action_type?: string | null
+          agent_id?: string | null
+          attempts?: number
+          call_id?: string | null
+          contact_id?: string | null
+          contact_phone?: string | null
+          created_at?: string
+          id?: string
+          last_error?: string | null
+          max_attempts?: number
+          meta?: Json
+          request_payload?: Json | null
+          request_url?: string | null
+          response_body?: string | null
+          response_status?: number | null
+          retell_call_id?: string | null
+          scheduled_at?: string
+          sent_at?: string | null
+          status?: string
+          trigger_id?: string | null
+          updated_at?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "automation_runs_agent_id_fkey"
+            columns: ["agent_id"]
+            isOneToOne: false
+            referencedRelation: "agents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "automation_runs_call_id_fkey"
+            columns: ["call_id"]
+            isOneToOne: false
+            referencedRelation: "calls"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "automation_runs_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "automation_runs_trigger_id_fkey"
+            columns: ["trigger_id"]
+            isOneToOne: false
+            referencedRelation: "automation_triggers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "automation_runs_workspace_id_fkey"
             columns: ["workspace_id"]
             isOneToOne: false
             referencedRelation: "workspaces"
@@ -964,6 +1191,120 @@ export type Database = {
           },
         ]
       }
+      sms_messages: {
+        Row: {
+          agent_id: string | null
+          body: string
+          contact_id: string | null
+          created_at: string
+          crm_contact_id: string | null
+          direction: string
+          error_code: string | null
+          from_number: string
+          id: string
+          meta: Json
+          provider: string
+          provider_sid: string | null
+          segments: number | null
+          sent_at: string | null
+          status: string
+          to_number: string
+          workspace_id: string
+        }
+        Insert: {
+          agent_id?: string | null
+          body?: string
+          contact_id?: string | null
+          created_at?: string
+          crm_contact_id?: string | null
+          direction: string
+          error_code?: string | null
+          from_number: string
+          id?: string
+          meta?: Json
+          provider?: string
+          provider_sid?: string | null
+          segments?: number | null
+          sent_at?: string | null
+          status?: string
+          to_number: string
+          workspace_id: string
+        }
+        Update: {
+          agent_id?: string | null
+          body?: string
+          contact_id?: string | null
+          created_at?: string
+          crm_contact_id?: string | null
+          direction?: string
+          error_code?: string | null
+          from_number?: string
+          id?: string
+          meta?: Json
+          provider?: string
+          provider_sid?: string | null
+          segments?: number | null
+          sent_at?: string | null
+          status?: string
+          to_number?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sms_messages_agent_id_fkey"
+            columns: ["agent_id"]
+            isOneToOne: false
+            referencedRelation: "agents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sms_messages_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sms_messages_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      sms_opt_outs: {
+        Row: {
+          created_at: string
+          id: string
+          phone: string
+          reason: string | null
+          workspace_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          phone: string
+          reason?: string | null
+          workspace_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          phone?: string
+          reason?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sms_opt_outs_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       workspaces: {
         Row: {
           created_at: string
@@ -976,6 +1317,8 @@ export type Database = {
           enroll_tag: string
           id: string
           is_active: boolean
+          messaging_credentials_encrypted: string | null
+          messaging_provider: string | null
           name: string
           organization_id: string
           timezone: string
@@ -992,6 +1335,8 @@ export type Database = {
           enroll_tag?: string
           id?: string
           is_active?: boolean
+          messaging_credentials_encrypted?: string | null
+          messaging_provider?: string | null
           name: string
           organization_id: string
           timezone?: string
@@ -1008,6 +1353,8 @@ export type Database = {
           enroll_tag?: string
           id?: string
           is_active?: boolean
+          messaging_credentials_encrypted?: string | null
+          messaging_provider?: string | null
           name?: string
           organization_id?: string
           timezone?: string
